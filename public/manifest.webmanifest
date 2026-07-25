@@ -1,17 +1,45 @@
 {
-  "name": "freebuff.com application",
-  "short_name": "freebuff.com",
-  "description": "freebuff.com application",
+  "name": "VidFetch - Free Video Downloader",
+  "short_name": "VidFetch",
+  "description": "Free video downloader. Paste any video link and download instantly. No sign-ups, no limits.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#000000",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "orientation": "portrait",
+  "background_color": "#f8f7f5",
+  "theme_color": "#4a7aff",
+  "lang": "en-US",
+  "dir": "ltr",
+  "scope": "/",
+  "categories": ["utilities", "productivity", "video"],
+  "prefer_related_applications": false,
   "icons": [
     {
-      "src": "/logo.png",
-      "sizes": "any",
+      "src": "/icon-192.png",
+      "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "monochrome"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshot-wide.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "VidFetch hero screen"
     }
   ]
 }
