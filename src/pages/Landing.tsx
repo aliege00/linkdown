@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   getVideoInfo,
   downloadVideo,
@@ -258,14 +259,17 @@ export default function Landing() {
               </Button>
             )}
           </nav>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="sm:hidden"
-            onClick={() => navigate(isAuthenticated ? "/dashboard" : "/auth")}
-          >
-            {isAuthenticated ? "Dashboard" : "Sign in"}
-          </Button>
+          <div className="flex items-center gap-1">
+            <ThemeToggle />
+            <Button
+              size="sm"
+              variant="ghost"
+              className="sm:hidden"
+              onClick={() => navigate(isAuthenticated ? "/dashboard" : "/auth")}
+            >
+              {isAuthenticated ? "Dashboard" : "Sign in"}
+            </Button>
+          </div>
         </div>
       </header>
 

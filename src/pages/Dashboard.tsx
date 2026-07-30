@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/hooks/use-auth";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   Download,
   LogOut,
@@ -56,7 +57,8 @@ export default function Dashboard() {
               Welcome{user?.name ? `, ${user.name}` : ""}
             </h1>
           </div>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
             <Button
               type="button"
               variant="outline"
