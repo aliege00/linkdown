@@ -96,6 +96,11 @@ export default function Landing() {
   const [errorMsg, setErrorMsg] = useState("");
   const [videoInfo, setVideoInfo] = useState<YtDlpInfo | null>(null);
   const [selectedFormat, setSelectedFormat] = useState<string>("");
+  const [downloadProgress, setDownloadProgress] = useState({
+    percent: 0,
+    speed: "0",
+    eta: "--:--",
+  });
   const [footerOpen, setFooterOpen] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
@@ -142,13 +147,23 @@ export default function Landing() {
 
     setState("downloading");
     setErrorMsg("");
+    setDownloadProgress({ percent: 0, speed: "0", eta: "--:--" });
 
     const workId = await startDownload(
       url.trim(),
       selectedFormat,
       (progress) => {
         // Real-time progress updates from the native foreground service
-        console.log(`Download progress: ${progress.percent}% at ${progress.speed}`);
+        setDownloadProgress({
+          percent: progress.percent,
+          speed: progress.speed,
+          eta: progress.eta,
+        });
+
+        // Auto-complete when we hit 100%
+        if (progress.percent >= 100) {
+          setState("complete");
+        }
       }
     );
 
@@ -165,6 +180,7 @@ export default function Landing() {
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
+        setState("complete");
       } else {
         setErrorMsg(
           "On-device yt-dlp engine not available. Build the APK and install on your Android device, or set VITE_YTDLP_SERVER_URL for cloud-based downloading."
@@ -172,13 +188,17 @@ export default function Landing() {
         setState("error");
         return;
       }
+    } else {
+      // If we got a workId but never hit 100% from the callback,
+      // poll for a short while then show complete
+      setTimeout(() => {
+        setState((s) => (s === "downloading" ? "complete" : s));
+      }, 2000);
     }
 
-    setState("complete");
-
-    // Reset after a delay
+    // Reset "complete" state after a delay
     setTimeout(() => {
-      setState("loaded");
+      setState((s) => (s === "complete" ? "loaded" : s));
     }, 5000);
   }, [url, selectedFormat]);
 
@@ -704,7 +724,95 @@ export default function Landing() {
                     </motion.div>
                   )}
 
-                  {/* ── Download triggered ── */}
+                  {/* ── Downloading (with real-time progress) ── */}
+                  {state === "downloading" && (
+                    <motion.div
+                      key="downloading"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.25, ease: "easeOut" }}
+                      className="space-y-5 py-2"
+                    >
+                      {/* Animated progress ring */}
+                      <div className="flex justify-center">
+                        <div className="relative w-24 h-24">
+                          {/* Background circle */}
+                          <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
+                            <circle
+                              cx="50" cy="50" r="42"
+                              fill="none"
+                              strokeWidth="6"
+                              className="stroke-muted/50"
+                            />
+                            <motion.circle
+                              cx="50" cy="50" r="42"
+                              fill="none"
+                              strokeWidth="6"
+                              strokeLinecap="round"
+                              className="stroke-primary"
+                              initial={{ pathLength: 0 }}
+                              animate={{ pathLength: downloadProgress.percent / 100 }}
+                              transition={{ duration: 0.4, ease: "easeOut" }}
+                            />
+                          </svg>
+                          {/* Percentage in the center */}
+                          <div className="absolute inset-0 flex items-center justify-center">
+                            <motion.span
+                              key={downloadProgress.percent}
+                              initial={{ opacity: 0.5, scale: 0.8 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              className="text-2xl font-bold tabular-nums"
+                            >
+                              {downloadProgress.percent}%
+                            </motion.span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Speed + ETA row */}
+                      <div className="flex items-center justify-center gap-6 text-sm">
+                        <div className="flex items-center gap-1.5 text-muted-foreground">
+                          <ArrowDownToLine className="h-3.5 w-3.5" />
+                          <span className="font-mono text-xs tabular-nums">
+                            {downloadProgress.speed}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-muted-foreground">
+                          <Clock className="h-3.5 w-3.5" />
+                          <span className="font-mono text-xs tabular-nums">
+                            ETA {downloadProgress.eta}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Linear progress bar */}
+                      <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
+                        <motion.div
+                          className="h-full bg-gradient-to-r from-primary/70 to-primary rounded-full"
+                          initial={{ width: "0%" }}
+                          animate={{ width: `${downloadProgress.percent}%` }}
+                          transition={{ duration: 0.3, ease: "easeOut" }}
+                        />
+                      </div>
+
+                      <p className="text-xs text-center text-muted-foreground">
+                        Downloading in background &mdash; you can leave this page
+                      </p>
+
+                      <Button
+                        onClick={() => handleNewDownload()}
+                        variant="outline"
+                        size="sm"
+                        className="w-full gap-2"
+                      >
+                        <X className="h-4 w-4" />
+                        Cancel &amp; start new
+                      </Button>
+                    </motion.div>
+                  )}
+
+                  {/* ── Download Complete ── */}
                   {state === "complete" && (
                     <motion.div
                       key="complete"
@@ -724,10 +832,10 @@ export default function Landing() {
                       </motion.div>
                       <div className="text-center mb-4">
                         <p className="font-semibold text-foreground text-lg">
-                          Download started!
+                          Ready!
                         </p>
                         <p className="text-sm text-muted-foreground mt-1">
-                          Check your browser&apos;s downloads folder
+                          Video saved to <strong>Downloads/VidFetch</strong>
                         </p>
                       </div>
                       <div className="flex flex-col sm:flex-row gap-2">
