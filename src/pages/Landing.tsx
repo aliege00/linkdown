@@ -2,346 +2,218 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import {
+  getVideoInfo,
+  downloadVideo,
+  formatDuration,
+  formatSize,
+  type YtDlpFormat,
+  type YtDlpInfo,
+} from "@/lib/ytdlp";
 import { motion, useScroll, useTransform, AnimatePresence } from "framer-motion";
 import {
   ArrowDownToLine,
+  ArrowRight,
   CheckCircle2,
   ChevronDown,
   ClipboardPaste,
+  Clock,
+  Crown,
   Download,
   ExternalLink,
   Film,
   Globe,
+  Image,
   Link,
   Loader2,
   Monitor,
+  Music,
+  Play,
+  RefreshCw,
+  Search,
   Shield,
   Sparkles,
+  User,
   Video,
-  Youtube,
   X,
-  FileVideo,
-  Music,
-  Image,
-  Globe2,
   Zap,
-  Crown,
-  ArrowRight,
-  Check,
-  Copy,
+  AlertCircle,
+  Server,
+  Youtube,
+  FileVideo,
 } from "lucide-react";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/hooks/use-auth";
 
-// ─── types ────────────────────────────────────────────────────────────
-interface DownloadState {
-  status: "idle" | "checking" | "ready" | "downloading" | "complete" | "error";
-  message: string;
-  progress: number;
-  videoUrl: string | null;
-  fileName: string | null;
-  fileSize: string | null;
-  contentType: string | null;
+// ─── Types ────────────────────────────────────────────────────────────
+
+type PageState = "idle" | "loading" | "loaded" | "downloading" | "complete" | "error";
+
+// ─── Helpers ──────────────────────────────────────────────────────────
+
+function getServerConfigured(): boolean {
+  return !!((import.meta as any).env.VITE_YTDLP_SERVER_URL);
 }
 
-// ─── helpers ──────────────────────────────────────────────────────────
-const SUPPORTED_VIDEO_EXTS = ["mp4", "webm", "mov", "avi", "mkv", "flv", "wmv", "m4v", "3gp"];
-const SUPPORTED_AUDIO_EXTS = ["mp3", "wav", "aac", "ogg", "flac", "m4a"];
-const SUPPORTED_IMAGE_EXTS = ["jpg", "jpeg", "png", "gif", "webp", "svg"];
+function groupFormats(formats: YtDlpFormat[]) {
+  const video: YtDlpFormat[] = [];
+  const videoOnly: YtDlpFormat[] = [];
+  const audioOnly: YtDlpFormat[] = [];
 
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
-
-function isDirectMediaUrl(urlStr: string): { isMedia: boolean; type: "video" | "audio" | "image" | "unknown"; ext: string | null } {
-  try {
-    const url = new URL(urlStr);
-    const pathname = url.pathname.toLowerCase();
-    const ext = pathname.split(".").pop() || null;
-    if (ext && SUPPORTED_VIDEO_EXTS.includes(ext)) return { isMedia: true, type: "video", ext };
-    if (ext && SUPPORTED_AUDIO_EXTS.includes(ext)) return { isMedia: true, type: "audio", ext };
-    if (ext && SUPPORTED_IMAGE_EXTS.includes(ext)) return { isMedia: true, type: "image", ext };
-    return { isMedia: false, type: "unknown", ext };
-  } catch {
-    return { isMedia: false, type: "unknown", ext: null };
+  for (const f of formats) {
+    if (f.vcodec && f.acodec) video.push(f);
+    else if (f.vcodec) videoOnly.push(f);
+    else audioOnly.push(f);
   }
+
+  return { video, videoOnly, audioOnly };
 }
 
-function getConvexUrl(): string {
-  return (import.meta as any).env.VITE_CONVUX_URL || "";
+function getQualityLabel(resolution: string): string {
+  if (resolution.includes("2160") || resolution.includes("4k")) return "4K";
+  if (resolution.includes("1440") || resolution.includes("2k")) return "1440p";
+  if (resolution.includes("1080")) return "1080p";
+  if (resolution.includes("720")) return "720p";
+  if (resolution.includes("480")) return "480p";
+  if (resolution.includes("360")) return "360p";
+  if (resolution.includes("240")) return "240p";
+  if (resolution.includes("144")) return "144p";
+  return resolution;
 }
 
-// ─── Component ───────────────────────────────────────────────────────
+// ─── Component ────────────────────────────────────────────────────────
+
 export default function Landing() {
   const navigate = useNavigate();
   const { isAuthenticated, signIn } = useAuth();
   const [url, setUrl] = useState("");
-  const [downloadState, setDownloadState] = useState<DownloadState>({
-    status: "idle",
-    message: "",
-    progress: 0,
-    videoUrl: null,
-    fileName: null,
-    fileSize: null,
-    contentType: null,
-  });
-  const [faqOpen, setFaqOpen] = useState<number | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [state, setState] = useState<PageState>("idle");
+  const [errorMsg, setErrorMsg] = useState("");
+  const [videoInfo, setVideoInfo] = useState<YtDlpInfo | null>(null);
+  const [selectedFormat, setSelectedFormat] = useState<string>("");
+  const [footerOpen, setFooterOpen] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
   const featuresRef = useRef<HTMLDivElement>(null);
-  const downloaderRef = useRef<HTMLDivElement>(null);
 
   const { scrollYProgress } = useScroll();
   const heroOpacity = useTransform(scrollYProgress, [0, 0.15], [1, 0.85]);
 
-  // Scroll to downloader
-  const scrollToDownloader = () => {
-    downloaderRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-    setTimeout(() => inputRef.current?.focus(), 600);
+  const serverConfigured = getServerConfigured();
+
+  // Scroll to results
+  const scrollToResults = () => {
+    setTimeout(() => {
+      resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 200);
   };
 
-  // ─── Download logic ────────────────────────────────────────────────
-  const handleDownload = useCallback(async () => {
+  // ─── Fetch video info ──────────────────────────────────────────────
+  const handleAnalyze = useCallback(async () => {
     if (!url.trim()) return;
 
-    const trimmedUrl = url.trim();
-    const mediaInfo = isDirectMediaUrl(trimmedUrl);
+    setState("loading");
+    setErrorMsg("");
+    setVideoInfo(null);
+    setSelectedFormat("");
 
-    setDownloadState({
-      status: "checking",
-      message: "Analyzing link...",
-      progress: 0,
-      videoUrl: null,
-      fileName: null,
-      fileSize: null,
-      contentType: null,
-    });
+    const result = await getVideoInfo(url.trim());
 
-    try {
-      if (mediaInfo.isMedia && mediaInfo.type === "video") {
-        // Direct video URL — try direct download first
-        setDownloadState(prev => ({
-          ...prev,
-          status: "downloading",
-          message: "Fetching video...",
-          progress: 25,
-        }));
-
-        const response = await fetch(trimmedUrl, {
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-          },
-        });
-
-        if (!response.ok) throw new Error(`Server responded with ${response.status}`);
-
-        const contentType = response.headers.get("content-type") || "video/mp4";
-        const contentLength = response.headers.get("content-length");
-        const size = contentLength ? parseInt(contentLength) : 0;
-
-        setDownloadState(prev => ({
-          ...prev,
-          status: "downloading",
-          message: "Downloading...",
-          progress: 50,
-          contentType,
-          fileSize: size ? formatFileSize(size) : "Unknown",
-          fileName: `video.${mediaInfo.ext || "mp4"}`,
-        }));
-
-        const reader = response.body?.getReader();
-        if (!reader) {
-          // Fallback: just get the blob
-          const blob = await response.blob();
-          triggerDownload(blob, `video.${mediaInfo.ext || "mp4"}`, contentType);
-          setDownloadState(prev => ({
-            ...prev,
-            status: "complete",
-            message: "Download complete!",
-            progress: 100,
-            videoUrl: URL.createObjectURL(blob),
-            fileName: `video.${mediaInfo.ext || "mp4"}`,
-            fileSize: formatFileSize(blob.size),
-            contentType,
-          }));
-          return;
-        }
-
-        const chunks: Uint8Array[] = [];
-        let downloadedBytes = 0;
-        const totalBytes = contentLength ? parseInt(contentLength) : 0;
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          chunks.push(value);
-          downloadedBytes += value.length;
-          if (totalBytes > 0) {
-            setDownloadState(prev => ({
-              ...prev,
-              progress: Math.round((downloadedBytes / totalBytes) * 100),
-            }));
-          }
-        }
-
-        const blob = new Blob(chunks as BlobPart[], { type: contentType });
-        triggerDownload(blob, `video.${mediaInfo.ext || "mp4"}`, contentType);
-
-        setDownloadState({
-          status: "complete",
-          message: "Download complete!",
-          progress: 100,
-          videoUrl: URL.createObjectURL(blob),
-          fileName: `video.${mediaInfo.ext || "mp4"}`,
-          fileSize: formatFileSize(blob.size),
-          contentType,
-        });
-      } else {
-        // Non-direct URL — try the Convex proxy download
-        setDownloadState(prev => ({
-          ...prev,
-          status: "downloading",
-          message: "Preparing proxy download...",
-          progress: 30,
-        }));
-
-        // Use the Convex HTTP proxy
-        const convexUrl = getConvexUrl();
-        const proxyUrl = `${convexUrl}/proxy-download?url=${encodeURIComponent(trimmedUrl)}`;
-
-        // Open in a new tab / trigger download via link
-        const a = document.createElement("a");
-        a.href = proxyUrl;
-        a.download = "video";
-        a.target = "_blank";
-        a.rel = "noopener noreferrer";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-
-        setDownloadState({
-          status: "complete",
-          message: "Download started via proxy!",
-          progress: 100,
-          videoUrl: null,
-          fileName: "video",
-          fileSize: null,
-          contentType: null,
-        });
-      }
-    } catch (error) {
-      // Fallback: try the Convex proxy
-      try {
-        const convexUrl = getConvexUrl();
-        const proxyUrl = `${convexUrl}/proxy-download?url=${encodeURIComponent(trimmedUrl)}`;
-        const a = document.createElement("a");
-        a.href = proxyUrl;
-        a.download = "video";
-        a.target = "_blank";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-
-        setDownloadState({
-          status: "complete",
-          message: "Download started via proxy!",
-          progress: 100,
-          videoUrl: null,
-          fileName: "video",
-          fileSize: null,
-          contentType: null,
-        });
-      } catch (proxyError) {
-        setDownloadState({
-          status: "error",
-          message: error instanceof Error ? error.message : "Download failed. Try a direct video URL.",
-          progress: 0,
-          videoUrl: null,
-          fileName: null,
-          fileSize: null,
-          contentType: null,
-        });
-      }
+    if (!result.success) {
+      setErrorMsg(result.error);
+      setState("error");
+      return;
     }
+
+    setVideoInfo(result);
+    setSelectedFormat(result.best_format_id);
+    setState("loaded");
+    scrollToResults();
   }, [url]);
 
-  function triggerDownload(blob: Blob, filename: string, contentType: string) {
-    const blobUrl = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = blobUrl;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
-  }
+  // ─── Download ──────────────────────────────────────────────────────
+  const handleDownload = useCallback(() => {
+    if (!url.trim() || !selectedFormat) return;
 
+    setState("downloading");
+
+    const downloadUrl = downloadVideo(url.trim(), selectedFormat);
+
+    if (!downloadUrl) {
+      setErrorMsg("Server not configured. Set VITE_YTDLP_SERVER_URL.");
+      setState("error");
+      return;
+    }
+
+    // Poll for download completion (the browser handles the save dialog)
+    setState("complete");
+
+    // Reset after a delay
+    setTimeout(() => {
+      setState("loaded");
+    }, 5000);
+  }, [url, selectedFormat]);
+
+  // ─── Paste ─────────────────────────────────────────────────────────
   const handlePaste = async () => {
     try {
       const text = await navigator.clipboard.readText();
       setUrl(text);
     } catch {
-      // Fallback: focus and let user paste manually
       inputRef.current?.focus();
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && url.trim()) {
-      handleDownload();
+    if (e.key === "Enter" && url.trim() && state !== "loading") {
+      handleAnalyze();
     }
   };
 
-  const resetState = () => {
-    setDownloadState({
-      status: "idle",
-      message: "",
-      progress: 0,
-      videoUrl: null,
-      fileName: null,
-      fileSize: null,
-      contentType: null,
-    });
-  };
-
-  const handleNewDownload = () => {
-    resetState();
+  const resetAll = () => {
+    setState("idle");
+    setErrorMsg("");
+    setVideoInfo(null);
+    setSelectedFormat("");
     setUrl("");
     inputRef.current?.focus();
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleNewDownload = () => {
+    resetAll();
   };
+
+  // ─── Video info ────────────────────────────────────────────────────
+  const grouped = videoInfo ? groupFormats(videoInfo.formats) : null;
 
   // ─── FAQ data ──────────────────────────────────────────────────────
   const faqs = [
     {
-      q: "How does this video downloader work?",
-      a: "Paste any direct video URL (ending in .mp4, .webm, .mov, etc.) and hit download. We fetch the video through our proxy server and stream it directly to you. No registration required.",
+      q: "How does VidFetch work?",
+      a: "Paste any video URL from YouTube, TikTok, Twitter/X, Instagram, Vimeo, and thousands of other sites. Our self-hosted yt-dlp server extracts the video and streams it to you as a download. No sign-ups required.",
     },
     {
-      q: "What types of URLs are supported?",
-      a: "We support direct video file URLs (.mp4, .webm, .mov, .avi, .mkv, .flv, .wmv), audio files (.mp3, .wav, .aac), and images (.jpg, .png, .gif). For platform URLs (YouTube, Vimeo, etc.), we route through our download proxy.",
+      q: "What sites are supported?",
+      a: "Over 1,000 sites including YouTube, TikTok, Twitter/X, Instagram, Vimeo, Facebook, Reddit, Twitch, Dailymotion, and many more. If you can watch it online, we can probably download it.",
+    },
+    {
+      q: "How do I set up the yt-dlp server?",
+      a: "You need to deploy the yt-dlp server (in the yt-dlp-server/ folder) to Railway, Fly.io, Render, or your own VPS. Then set the VITE_YTDLP_SERVER_URL environment variable. See the README for step-by-step instructions.",
     },
     {
       q: "Is this service free?",
-      a: "Yes! This is completely free to use. No hidden charges, no registration needed. Just paste and download.",
+      a: "The web app is free to use. You deploy the yt-dlp server on your own infrastructure — Railway and Render have free tiers that are more than sufficient.",
     },
     {
       q: "Are there any file size limits?",
-      a: "Direct downloads have no file size limit. Proxy downloads may have a limit based on available bandwidth. Large files (>500MB) may take longer to process.",
+      a: "The yt-dlp server has a 2 GB default limit, configurable via MAX_FILE_SIZE. Most videos are well under this limit.",
     },
     {
       q: "Is my privacy protected?",
-      a: "We do not log, store, or track any videos you download. All processing happens in-memory and nothing is persisted on our servers. Your downloads are private.",
+      a: "Yes. The yt-dlp server is self-hosted — you control the data. Downloaded files are temporarily stored and automatically deleted after 30 minutes. We don't log or track anything.",
     },
   ];
 
@@ -363,11 +235,17 @@ export default function Landing() {
             <span className="text-base font-semibold tracking-tight">VidFetch</span>
           </div>
           <nav className="hidden sm:flex items-center gap-6 text-sm text-muted-foreground">
-            <button onClick={scrollToDownloader} className="hover:text-foreground transition-colors cursor-pointer">
+            <button
+              onClick={() => inputRef.current?.focus()}
+              className="hover:text-foreground transition-colors cursor-pointer"
+            >
               Download
             </button>
-            <button onClick={() => featuresRef.current?.scrollIntoView({ behavior: "smooth" })} className="hover:text-foreground transition-colors cursor-pointer">
-              Features
+            <button
+              onClick={() => featuresRef.current?.scrollIntoView({ behavior: "smooth" })}
+              className="hover:text-foreground transition-colors cursor-pointer"
+            >
+              How it works
             </button>
             {isAuthenticated ? (
               <Button size="sm" onClick={() => navigate("/dashboard")}>
@@ -379,7 +257,12 @@ export default function Landing() {
               </Button>
             )}
           </nav>
-          <Button size="sm" variant="ghost" className="sm:hidden" onClick={() => navigate(isAuthenticated ? "/dashboard" : "/auth")}>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="sm:hidden"
+            onClick={() => navigate(isAuthenticated ? "/dashboard" : "/auth")}
+          >
             {isAuthenticated ? "Dashboard" : "Sign in"}
           </Button>
         </div>
@@ -404,9 +287,12 @@ export default function Landing() {
             transition={{ delay: 0.1 }}
             className="mb-6 flex justify-center"
           >
-            <Badge variant="outline" className="gap-1.5 px-4 py-1.5 text-xs font-normal border-primary/20 bg-primary/5 text-primary">
+            <Badge
+              variant="outline"
+              className="gap-1.5 px-4 py-1.5 text-xs font-normal border-primary/20 bg-primary/5 text-primary"
+            >
               <Sparkles className="h-3 w-3" />
-              Free &amp; open downloader
+              Powered by yt-dlp
             </Badge>
           </motion.div>
 
@@ -417,11 +303,10 @@ export default function Landing() {
             transition={{ delay: 0.2 }}
             className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight leading-[1.05]"
           >
-            Download any{" "}
+            Download from{" "}
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary to-blue-400">
-              video
+              1000+ sites
             </span>
-            {" "}instantly
           </motion.h1>
 
           <motion.p
@@ -430,8 +315,8 @@ export default function Landing() {
             transition={{ delay: 0.3 }}
             className="mt-5 text-base sm:text-lg text-muted-foreground max-w-2xl mx-auto leading-relaxed"
           >
-            Paste a link, tap download. No sign-ups, no limits, no fuss.
-            Just fast, free video downloading.
+            YouTube, TikTok, Twitter/X, Instagram &mdash; paste any video link,
+            pick your quality, and download. Powered by your own yt-dlp server.
           </motion.p>
 
           {/* Downloader Card */}
@@ -439,142 +324,352 @@ export default function Landing() {
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.4 }}
-            ref={downloaderRef}
             className="mt-10 mx-auto max-w-2xl"
           >
             <Card className="border-border/50 shadow-lg shadow-primary/5 bg-card/95 backdrop-blur-sm">
-              <CardContent className="p-4 sm:p-6">
+              <CardContent className="p-4 sm:p-6 space-y-4">
+                {/* Server status banner */}
+                {!serverConfigured && (
+                  <div className="flex items-start gap-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200/50 dark:border-amber-800/30">
+                    <AlertCircle className="h-5 w-5 text-amber-500 mt-0.5 shrink-0" />
+                    <div className="text-left text-sm">
+                      <p className="font-medium text-amber-800 dark:text-amber-300">
+                        yt-dlp server not configured
+                      </p>
+                      <p className="text-amber-600 dark:text-amber-400/80 mt-0.5">
+                        Set the{" "}
+                        <code className="text-xs bg-amber-100 dark:bg-amber-900/30 px-1 rounded">
+                          VITE_YTDLP_SERVER_URL
+                        </code>{" "}
+                        env var, or deploy the server from{" "}
+                        <code className="text-xs bg-amber-100 dark:bg-amber-900/30 px-1 rounded">
+                          yt-dlp-server/
+                        </code>
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* URL Input */}
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <Link className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      ref={inputRef}
+                      type="url"
+                      placeholder="Paste video URL from YouTube, TikTok, Twitter..."
+                      value={url}
+                      onChange={(e) => setUrl(e.target.value)}
+                      onKeyDown={handleKeyDown}
+                      className="pl-10 pr-10 h-12 text-base border-border/60 bg-background/50 focus-visible:ring-primary/20"
+                    />
+                    {url && (
+                      <button
+                        onClick={() => {
+                          setUrl("");
+                          setState("idle");
+                          setVideoInfo(null);
+                          setErrorMsg("");
+                        }}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                  <Button
+                    onClick={handlePaste}
+                    variant="outline"
+                    size="icon"
+                    className="h-12 w-12 shrink-0 border-border/60"
+                    title="Paste from clipboard"
+                  >
+                    <ClipboardPaste className="h-4.5 w-4.5" />
+                  </Button>
+                </div>
+
                 <AnimatePresence mode="wait">
-                  {downloadState.status === "complete" || downloadState.status === "error" ? (
+                  {/* ── Idle / URL entered ── */}
+                  {state === "idle" && (
                     <motion.div
-                      key="result"
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.95 }}
-                      className="space-y-4"
+                      key="idle"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
                     >
-                      {downloadState.status === "complete" ? (
-                        <>
-                          <div className="flex items-center gap-3">
-                            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 dark:bg-emerald-950/30">
-                              <CheckCircle2 className="h-6 w-6 text-emerald-500" />
-                            </div>
-                            <div className="text-left">
-                              <p className="font-semibold text-foreground">Download ready!</p>
-                              <p className="text-sm text-muted-foreground">
-                                {downloadState.fileName}
-                                {downloadState.fileSize ? ` \u00B7 ${downloadState.fileSize}` : ""}
-                              </p>
-                            </div>
-                          </div>
-                          {downloadState.videoUrl && (
-                            <video
-                              src={downloadState.videoUrl}
-                              controls
-                              className="w-full rounded-lg border border-border/40 bg-black/5 max-h-64"
-                            />
-                          )}
-                          <Button onClick={handleNewDownload} variant="outline" className="w-full gap-2">
-                            <Download className="h-4 w-4" />
-                            Download another
-                          </Button>
-                        </>
-                      ) : (
-                        <>
-                          <div className="flex items-center gap-3">
-                            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-50 dark:bg-red-950/30">
-                              <X className="h-6 w-6 text-red-500" />
-                            </div>
-                            <div className="text-left">
-                              <p className="font-semibold text-foreground">Download failed</p>
-                              <p className="text-sm text-muted-foreground">{downloadState.message}</p>
-                            </div>
-                          </div>
-                          <Button onClick={handleNewDownload} variant="outline" className="w-full gap-2">
-                            Try again
-                          </Button>
-                        </>
-                      )}
+                      <Button
+                        onClick={handleAnalyze}
+                        disabled={!url.trim()}
+                        size="lg"
+                        className={cn(
+                          "w-full h-12 gap-2 text-base font-medium",
+                          url.trim() && "shadow-md shadow-primary/20",
+                        )}
+                      >
+                        <Search className="h-5 w-5" />
+                        Analyze &amp; Download
+                      </Button>
+                      <p className="text-xs text-center text-muted-foreground/70 mt-3">
+                        Supports YouTube, TikTok, Twitter/X, Instagram, Vimeo, and 1000+ more
+                      </p>
                     </motion.div>
-                  ) : (
+                  )}
+
+                  {/* ── Loading ── */}
+                  {state === "loading" && (
                     <motion.div
-                      key="input"
+                      key="loading"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="flex flex-col items-center gap-3 py-6"
+                    >
+                      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                      <div className="text-center">
+                        <p className="font-medium text-foreground">
+                          Extracting video info...
+                        </p>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Connecting to yt-dlp server
+                        </p>
+                      </div>
+                      <div className="w-full max-w-xs bg-muted rounded-full h-1.5 overflow-hidden">
+                        <motion.div
+                          className="h-full bg-primary rounded-full"
+                          initial={{ width: "0%" }}
+                          animate={{ width: "100%" }}
+                          transition={{
+                            duration: 8,
+                            ease: "easeInOut",
+                            repeat: Infinity,
+                          }}
+                        />
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {/* ── Error ── */}
+                  {state === "error" && (
+                    <motion.div
+                      key="error"
                       initial={{ opacity: 0, scale: 0.95 }}
                       animate={{ opacity: 1, scale: 1 }}
                       exit={{ opacity: 0, scale: 0.95 }}
                       className="space-y-3"
                     >
-                      <div className="flex items-center gap-2">
-                        <div className="relative flex-1">
-                          <Link className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                          <Input
-                            ref={inputRef}
-                            type="url"
-                            placeholder="Paste video URL here..."
-                            value={url}
-                            onChange={(e) => setUrl(e.target.value)}
-                            onKeyDown={handleKeyDown}
-                            className="pl-10 h-12 text-base border-border/60 bg-background/50 focus-visible:ring-primary/20"
-                          />
-                          {url && (
-                            <button
-                              onClick={() => setUrl("")}
-                              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                            >
-                              <X className="h-4 w-4" />
-                            </button>
-                          )}
+                      <div className="flex items-start gap-3 p-3 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200/50 dark:border-red-800/30">
+                        <AlertCircle className="h-5 w-5 text-red-500 mt-0.5 shrink-0" />
+                        <div className="text-left text-sm">
+                          <p className="font-medium text-red-800 dark:text-red-300">
+                            Failed to analyze video
+                          </p>
+                          <p className="text-red-600 dark:text-red-400/80 mt-0.5 text-xs">
+                            {errorMsg}
+                          </p>
                         </div>
-                        <Button
-                          onClick={handlePaste}
-                          variant="outline"
-                          size="icon"
-                          className="h-12 w-12 shrink-0 border-border/60"
-                          title="Paste from clipboard"
-                        >
-                          <ClipboardPaste className="h-4.5 w-4.5" />
-                        </Button>
                       </div>
-
                       <div className="flex gap-2">
-                        <Button
-                          onClick={handleDownload}
-                          disabled={!url.trim() || downloadState.status === "checking" || downloadState.status === "downloading"}
-                          size="lg"
-                          className={cn(
-                            "flex-1 h-12 gap-2 text-base font-medium transition-all",
-                            url.trim() ? "shadow-md shadow-primary/20" : ""
-                          )}
-                        >
-                          {downloadState.status === "checking" || downloadState.status === "downloading" ? (
-                            <>
-                              <Loader2 className="h-5 w-5 animate-spin" />
-                              {downloadState.status === "checking" ? "Checking..." : `${downloadState.progress}%`}
-                            </>
-                          ) : (
-                            <>
-                              <Download className="h-5 w-5" />
-                              Download
-                            </>
-                          )}
+                        <Button onClick={handleAnalyze} variant="default" className="flex-1 gap-2">
+                          <RefreshCw className="h-4 w-4" />
+                          Retry
+                        </Button>
+                        <Button onClick={resetAll} variant="outline" className="gap-2">
+                          <X className="h-4 w-4" />
+                          Clear
                         </Button>
                       </div>
+                    </motion.div>
+                  )}
 
-                      {/* Progress bar */}
-                      {(downloadState.status === "downloading" || downloadState.status === "checking") && (
-                        <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
-                          <motion.div
-                            className="h-full bg-primary rounded-full"
-                            initial={{ width: 0 }}
-                            animate={{ width: `${downloadState.progress}%` }}
-                            transition={{ duration: 0.3, ease: "easeOut" }}
-                          />
+                  {/* ── Loaded (video info shown) ── */}
+                  {state === "loaded" && videoInfo && (
+                    <motion.div
+                      key="loaded"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      className="space-y-4"
+                    >
+                      {/* Video info header */}
+                      <div className="flex flex-col sm:flex-row gap-4">
+                        {videoInfo.thumbnail && (
+                          <div className="relative shrink-0 w-full sm:w-48 aspect-video sm:aspect-[16/9] rounded-lg overflow-hidden border border-border/40 bg-muted">
+                            <img
+                              src={videoInfo.thumbnail}
+                              alt={videoInfo.title}
+                              className="w-full h-full object-cover"
+                              loading="lazy"
+                            />
+                            <div className="absolute bottom-1.5 right-1.5">
+                              <Badge
+                                variant="secondary"
+                                className="text-[10px] px-1.5 py-0.5 bg-black/70 text-white border-none"
+                              >
+                                <Clock className="h-2.5 w-2.5 mr-0.5" />
+                                {formatDuration(videoInfo.duration)}
+                              </Badge>
+                            </div>
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0 text-left">
+                          <h3 className="font-semibold text-foreground line-clamp-2 leading-snug">
+                            {videoInfo.title}
+                          </h3>
+                          <div className="flex flex-wrap items-center gap-2 mt-2 text-sm text-muted-foreground">
+                            <span className="flex items-center gap-1">
+                              <User className="h-3.5 w-3.5" />
+                              {videoInfo.uploader}
+                            </span>
+                            {videoInfo.duration && (
+                              <span className="flex items-center gap-1">
+                                <Clock className="h-3.5 w-3.5" />
+                                {formatDuration(videoInfo.duration)}
+                              </span>
+                            )}
+                          </div>
+                          {videoInfo.webpage_url && (
+                            <a
+                              href={videoInfo.webpage_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 mt-2 text-xs text-primary hover:underline"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                              Open original
+                            </a>
+                          )}
                         </div>
-                      )}
+                      </div>
 
-                      <p className="text-xs text-center text-muted-foreground/70">
-                        Supports direct video URLs (.mp4, .webm, .mov, .avi, .mkv)
-                      </p>
+                      <Separator />
+
+                      {/* Format selector */}
+                      <div className="text-left">
+                        <p className="text-sm font-medium text-foreground mb-3">
+                          Choose quality
+                        </p>
+
+                        {grouped && (
+                          <div className="space-y-3">
+                            {/* Video + Audio formats */}
+                            {grouped.video.length > 0 && (
+                              <div>
+                                <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-2 font-medium">
+                                  Video + Audio
+                                </p>
+                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                  {grouped.video.slice(0, 9).map((f) => (
+                                    <FormatCard
+                                      key={f.format_id}
+                                      format={f}
+                                      selected={selectedFormat === f.format_id}
+                                      onSelect={() => setSelectedFormat(f.format_id)}
+                                    />
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Video only formats (high quality, needs separate audio) */}
+                            {grouped.videoOnly.length > 0 &&
+                              videoInfo.ffmpeg_available && (
+                                <div>
+                                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-2 font-medium">
+                                    Video Only (requires ffmpeg)
+                                  </p>
+                                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                    {grouped.videoOnly.slice(0, 6).map((f) => (
+                                      <FormatCard
+                                        key={f.format_id}
+                                        format={f}
+                                        selected={selectedFormat === f.format_id}
+                                        onSelect={() =>
+                                          setSelectedFormat(f.format_id)
+                                        }
+                                      />
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                            {/* Audio only */}
+                            {grouped.audioOnly.length > 0 && (
+                              <div>
+                                <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-2 font-medium">
+                                  Audio Only
+                                </p>
+                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                  {grouped.audioOnly.slice(0, 6).map((f) => (
+                                    <FormatCard
+                                      key={f.format_id}
+                                      format={f}
+                                      selected={selectedFormat === f.format_id}
+                                      onSelect={() => setSelectedFormat(f.format_id)}
+                                      audio
+                                    />
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {grouped.video.length === 0 &&
+                              grouped.audioOnly.length === 0 &&
+                              grouped.videoOnly.length === 0 && (
+                                <p className="text-sm text-muted-foreground">
+                                  No downloadable formats found for this video.
+                                </p>
+                              )}
+                          </div>
+                        )}
+                      </div>
+
+                      <Button
+                        onClick={handleDownload}
+                        disabled={!selectedFormat}
+                        size="lg"
+                        className="w-full h-12 gap-2 text-base font-medium shadow-md shadow-primary/20"
+                      >
+                        <Download className="h-5 w-5" />
+                        Download{" "}
+                        {videoInfo.best_format_id === selectedFormat
+                          ? "(Best Quality)"
+                          : ""}
+                      </Button>
+                    </motion.div>
+                  )}
+
+                  {/* ── Download triggered ── */}
+                  {state === "complete" && (
+                    <motion.div
+                      key="complete"
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.95 }}
+                      className="text-center py-4"
+                    >
+                      <div className="flex items-center justify-center gap-3 mb-3">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 dark:bg-emerald-950/30">
+                          <CheckCircle2 className="h-6 w-6 text-emerald-500" />
+                        </div>
+                        <div className="text-left">
+                          <p className="font-semibold text-foreground">
+                            Download started!
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            Check your browser&apos;s downloads folder
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button onClick={handleNewDownload} variant="default" className="flex-1 gap-2">
+                          <Download className="h-4 w-4" />
+                          Download another
+                        </Button>
+                        <Button onClick={handleDownload} variant="outline" className="gap-2">
+                          <RefreshCw className="h-4 w-4" />
+                          Try again
+                        </Button>
+                      </div>
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -584,19 +679,26 @@ export default function Landing() {
         </div>
 
         {/* Scroll indicator */}
-        <motion.button
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1, y: [0, 6, 0] }}
-          transition={{ delay: 1, y: { repeat: Infinity, duration: 2 } }}
-          onClick={() => featuresRef.current?.scrollIntoView({ behavior: "smooth" })}
-          className="absolute bottom-8 left-1/2 -translate-x-1/2 text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <ChevronDown className="h-6 w-6" />
-        </motion.button>
+        {state === "idle" && (
+          <motion.button
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1, y: [0, 6, 0] }}
+            transition={{ delay: 1, y: { repeat: Infinity, duration: 2 } }}
+            onClick={() =>
+              featuresRef.current?.scrollIntoView({ behavior: "smooth" })
+            }
+            className="absolute bottom-8 left-1/2 -translate-x-1/2 text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ChevronDown className="h-6 w-6" />
+          </motion.button>
+        )}
       </motion.section>
 
+      {/* ═══ Results / Video Info (scroll target) ═══ */}
+      <div ref={resultsRef} />
+
       {/* ═══ How it Works ═══ */}
-      <section className="relative px-6 py-24 border-t border-border/30">
+      <section ref={featuresRef} className="relative px-6 py-24 border-t border-border/30">
         <div className="mx-auto max-w-6xl">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -604,35 +706,41 @@ export default function Landing() {
             viewport={{ once: true, margin: "-100px" }}
             className="text-center mb-16"
           >
-            <Badge variant="outline" className="mb-4 px-4 py-1.5 text-xs font-normal border-primary/20 bg-primary/5 text-primary">
+            <Badge
+              variant="outline"
+              className="mb-4 px-4 py-1.5 text-xs font-normal border-primary/20 bg-primary/5 text-primary"
+            >
               How it works
             </Badge>
             <h2 className="text-3xl sm:text-4xl font-bold tracking-tight">
-              Three simple steps
+              Self-hosted, privacy-first
             </h2>
             <p className="mt-3 text-muted-foreground max-w-xl mx-auto">
-              No account needed. No complicated settings. Just paste and go.
+              You deploy the engine. We provide the beautiful UI.
             </p>
           </motion.div>
 
           <div className="grid md:grid-cols-3 gap-8">
             {[
               {
-                icon: ClipboardPaste,
-                title: "Paste the link",
-                description: "Copy any video URL from the web and paste it into the input field above.",
+                icon: Server,
+                title: "Deploy the server",
+                description:
+                  "Deploy the yt-dlp FastAPI server (in yt-dlp-server/) to Railway, Fly.io, or Render. Free tiers work great.",
                 step: "01",
               },
               {
-                icon: Download,
-                title: "Click download",
-                description: "Hit the download button and watch as we fetch and prepare your video.",
+                icon: Youtube,
+                title: "Paste & analyze",
+                description:
+                  "Paste any video URL. VidFetch calls your server to extract video metadata and available formats using yt-dlp.",
                 step: "02",
               },
               {
-                icon: CheckCircle2,
-                title: "Save & enjoy",
-                description: "The video saves directly to your device. Watch it offline, anywhere.",
+                icon: Download,
+                title: "Choose & download",
+                description:
+                  "Pick your preferred quality from 4K to audio-only. The video streams directly from your server to your device.",
                 step: "03",
               },
             ].map((item, i) => (
@@ -663,8 +771,8 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* ═══ Supported Formats ═══ */}
-      <section ref={featuresRef} className="relative px-6 py-24 border-t border-border/30 bg-muted/30">
+      {/* ═══ Supported Sites ═══ */}
+      <section className="relative px-6 py-24 border-t border-border/30 bg-muted/30">
         <div className="mx-auto max-w-6xl">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -672,50 +780,57 @@ export default function Landing() {
             viewport={{ once: true, margin: "-100px" }}
             className="text-center mb-16"
           >
-            <Badge variant="outline" className="mb-4 px-4 py-1.5 text-xs font-normal border-primary/20 bg-primary/5 text-primary">
-              Formats
+            <Badge
+              variant="outline"
+              className="mb-4 px-4 py-1.5 text-xs font-normal border-primary/20 bg-primary/5 text-primary"
+            >
+              Supported sites
             </Badge>
             <h2 className="text-3xl sm:text-4xl font-bold tracking-tight">
-              Everything you need
+              Over 1,000 platforms
             </h2>
             <p className="mt-3 text-muted-foreground max-w-xl mx-auto">
-              Wide format support means your videos always work.
+              Powered by yt-dlp &mdash; the most comprehensive video extraction engine.
             </p>
           </motion.div>
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {[
-              { icon: Video, label: "MP4", desc: "Most compatible", formats: [".mp4", ".m4v"] },
-              { icon: Film, label: "WebM", desc: "Modern & efficient", formats: [".webm"] },
-              { icon: Monitor, label: "MOV / AVI", desc: "Professional formats", formats: [".mov", ".avi"] },
-              { icon: FileVideo, label: "MKV / FLV", desc: "Advanced containers", formats: [".mkv", ".flv", ".wmv"] },
-              { icon: Music, label: "Audio", desc: "MP3, WAV, AAC", formats: [".mp3", ".wav", ".aac", ".ogg"] },
-              { icon: Image, label: "Images", desc: "JPG, PNG, GIF", formats: [".jpg", ".png", ".gif", ".webp"] },
-              { icon: Globe, label: "Web links", desc: "Proxy download", formats: ["YouTube", "Vimeo", "More"] },
-              { icon: Shield, label: "Secure", desc: "No tracking", formats: ["Private", "Safe", "Free"] },
+              { icon: Youtube, label: "YouTube", desc: "Videos, Shorts, playlists", color: "text-red-500" },
+              { icon: Video, label: "TikTok", desc: "Videos, livestreams", color: "text-pink-400" },
+              { icon: Monitor, label: "Twitter/X", desc: "Tweets with media", color: "text-sky-400" },
+              { icon: Film, label: "Instagram", desc: "Reels, posts, stories", color: "text-purple-400" },
+              { icon: Globe, label: "Vimeo", desc: "HD videos", color: "text-blue-400" },
+              { icon: Play, label: "Facebook", desc: "Public videos", color: "text-blue-600" },
+              { icon: FileVideo, label: "Twitch", desc: "Clips, VODs", color: "text-violet-500" },
+              { icon: Music, label: "SoundCloud", desc: "Tracks, playlists", color: "text-orange-400" },
+              { icon: Image, label: "Reddit", desc: "Videos in posts", color: "text-orange-500" },
+              { icon: Globe, label: "Dailymotion", desc: "User uploads", color: "text-blue-500" },
+              { icon: Video, label: "VK", desc: "Social videos", color: "text-blue-400" },
+              { icon: Zap, label: "1000+ more", desc: "Any site yt-dlp supports", color: "text-primary" },
             ].map((item, i) => (
               <motion.div
                 key={i}
                 initial={{ opacity: 0, y: 20 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true, margin: "-50px" }}
-                transition={{ delay: i * 0.05 }}
+                transition={{ delay: i * 0.03 }}
               >
                 <Card className="border-border/30 shadow-none hover:shadow-sm hover:border-border/60 transition-all duration-300 h-full group">
                   <CardContent className="p-5 flex items-start gap-4">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-background border border-border/40 text-primary group-hover:bg-primary/5 transition-colors">
+                    <div
+                      className={cn(
+                        "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-background border border-border/40 transition-colors group-hover:bg-primary/5",
+                        item.color,
+                      )}
+                    >
                       <item.icon className="h-4.5 w-4.5" />
                     </div>
                     <div className="min-w-0">
                       <p className="font-medium text-sm">{item.label}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{item.desc}</p>
-                      <div className="flex flex-wrap gap-1 mt-1.5">
-                        {item.formats.map((f) => (
-                          <span key={f} className="inline-block text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground/70 font-mono">
-                            {f}
-                          </span>
-                        ))}
-                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {item.desc}
+                      </p>
                     </div>
                   </CardContent>
                 </Card>
@@ -734,45 +849,48 @@ export default function Landing() {
             viewport={{ once: true, margin: "-100px" }}
             className="text-center mb-16"
           >
-            <Badge variant="outline" className="mb-4 px-4 py-1.5 text-xs font-normal border-primary/20 bg-primary/5 text-primary">
+            <Badge
+              variant="outline"
+              className="mb-4 px-4 py-1.5 text-xs font-normal border-primary/20 bg-primary/5 text-primary"
+            >
               Features
             </Badge>
             <h2 className="text-3xl sm:text-4xl font-bold tracking-tight">
-              Why choose VidFetch
+              Why go self-hosted
             </h2>
           </motion.div>
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {[
               {
+                icon: Shield,
+                title: "Your data, your server",
+                desc: "The yt-dlp server runs on your infrastructure. Zero third-party requests, zero logs, zero tracking.",
+              },
+              {
                 icon: Zap,
-                title: "Lightning fast",
-                desc: "Powered by edge-optimized proxies for the fastest possible download speeds.",
+                title: "Unlimited downloads",
+                desc: "No rate limits, no API keys, no monthly caps. Download as many videos as you want.",
               },
               {
                 icon: Crown,
-                title: "Completely free",
-                desc: "No premium tiers, no hidden limits. Every feature is free for everyone.",
+                title: "Best quality possible",
+                desc: "yt-dlp extracts the highest quality available — up to 4K, 60fps, with proper audio.",
               },
               {
-                icon: Shield,
-                title: "Privacy first",
-                desc: "We never store your downloads. No logs, no tracking, no data collection.",
-              },
-              {
-                icon: Globe2,
-                title: "Universal links",
-                desc: "Works with direct video URLs from any website or platform worldwide.",
-              },
-              {
-                icon: Monitor,
-                title: "Preview before download",
-                desc: "See what you're downloading with our built-in video preview player.",
+                icon: Globe,
+                title: "1000+ sites supported",
+                desc: "YouTube, TikTok, Twitter, Instagram, Vimeo, Facebook, Twitch, and thousands more.",
               },
               {
                 icon: Sparkles,
-                title: "Beautiful interface",
-                desc: "Clean, modern design that makes downloading videos effortless and enjoyable.",
+                title: "Format selection UI",
+                desc: "Pick exactly the resolution and format you want from a beautiful, intuitive interface.",
+              },
+              {
+                icon: Monitor,
+                title: "Self-contained deployment",
+                desc: "One Dockerfile, one command. Deploy to Railway, Fly.io, Render, or any VPS.",
               },
             ].map((feature, i) => (
               <motion.div
@@ -788,7 +906,9 @@ export default function Landing() {
                       <feature.icon className="h-5 w-5" />
                     </div>
                     <h3 className="font-semibold mb-1.5">{feature.title}</h3>
-                    <p className="text-sm text-muted-foreground leading-relaxed">{feature.desc}</p>
+                    <p className="text-sm text-muted-foreground leading-relaxed">
+                      {feature.desc}
+                    </p>
                   </CardContent>
                 </Card>
               </motion.div>
@@ -806,7 +926,10 @@ export default function Landing() {
             viewport={{ once: true, margin: "-100px" }}
             className="text-center mb-12"
           >
-            <Badge variant="outline" className="mb-4 px-4 py-1.5 text-xs font-normal border-primary/20 bg-primary/5 text-primary">
+            <Badge
+              variant="outline"
+              className="mb-4 px-4 py-1.5 text-xs font-normal border-primary/20 bg-primary/5 text-primary"
+            >
               FAQ
             </Badge>
             <h2 className="text-3xl sm:text-4xl font-bold tracking-tight">
@@ -826,22 +949,28 @@ export default function Landing() {
                 <Card
                   className={cn(
                     "border-border/30 shadow-none cursor-pointer transition-all duration-200",
-                    faqOpen === i ? "border-primary/30 shadow-sm" : "hover:border-border/60"
+                    footerOpen === i
+                      ? "border-primary/30 shadow-sm"
+                      : "hover:border-border/60",
                   )}
-                  onClick={() => setFaqOpen(faqOpen === i ? null : i)}
+                  onClick={() =>
+                    setFooterOpen(footerOpen === i ? null : i)
+                  }
                 >
                   <CardContent className="p-5">
                     <div className="flex items-center justify-between gap-4">
-                      <h3 className="font-medium text-sm sm:text-base">{faq.q}</h3>
+                      <h3 className="font-medium text-sm sm:text-base">
+                        {faq.q}
+                      </h3>
                       <ChevronDown
                         className={cn(
                           "h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200",
-                          faqOpen === i && "rotate-180"
+                          footerOpen === i && "rotate-180",
                         )}
                       />
                     </div>
                     <AnimatePresence>
-                      {faqOpen === i && (
+                      {footerOpen === i && (
                         <motion.p
                           initial={{ height: 0, opacity: 0 }}
                           animate={{ height: "auto", opacity: 1 }}
@@ -871,18 +1000,28 @@ export default function Landing() {
           className="mx-auto max-w-2xl text-center relative z-10"
         >
           <h2 className="text-3xl sm:text-4xl font-bold tracking-tight">
-            Ready to download?
+            Ready to self-host?
           </h2>
           <p className="mt-4 text-muted-foreground">
-            Paste your link above or create an account to save your download history.
+            Deploy the yt-dlp server, set your env var, and start downloading
+            from 1000+ sites.
           </p>
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
-            <Button size="lg" onClick={scrollToDownloader} className="gap-2">
+            <Button
+              size="lg"
+              onClick={() => inputRef.current?.focus()}
+              className="gap-2"
+            >
               <Download className="h-4 w-4" />
               Start downloading
             </Button>
             {!isAuthenticated && (
-              <Button size="lg" variant="outline" onClick={() => navigate("/auth")} className="gap-2">
+              <Button
+                size="lg"
+                variant="outline"
+                onClick={() => navigate("/auth")}
+                className="gap-2"
+              >
                 <ArrowRight className="h-4 w-4" />
                 Create account
               </Button>
@@ -902,7 +1041,7 @@ export default function Landing() {
               <span className="text-sm font-semibold">VidFetch</span>
             </div>
             <p className="text-xs text-muted-foreground">
-              Free video downloader. No limits, no tracking, no fuss.
+              Self-hosted video downloader. Powered by yt-dlp.
             </p>
           </div>
         </div>
@@ -910,3 +1049,57 @@ export default function Landing() {
     </motion.div>
   );
 }
+
+// ─── Format Card ──────────────────────────────────────────────────────
+
+function FormatCard({
+  format,
+  selected,
+  onSelect,
+  audio,
+}: {
+  format: YtDlpFormat;
+  selected: boolean;
+  onSelect: () => void;
+  audio?: boolean;
+}) {
+  const quality = audio
+    ? `${format.tbr ? `${format.tbr}kbps` : "Audio"}`
+    : getQualityLabel(format.resolution);
+
+  const ext = format.ext.toUpperCase();
+
+  return (
+    <button
+      onClick={onSelect}
+      className={cn(
+        "flex flex-col items-center gap-1 p-3 rounded-lg border text-center transition-all duration-150 cursor-pointer",
+        selected
+          ? "border-primary/50 bg-primary/5 shadow-sm shadow-primary/10 ring-1 ring-primary/20"
+          : "border-border/40 bg-background hover:border-border/70 hover:bg-muted/50",
+      )}
+    >
+      {audio ? (
+        <Music className="h-4 w-4 text-muted-foreground" />
+      ) : (
+        <Video className="h-4 w-4 text-muted-foreground" />
+      )}
+      <span className="font-semibold text-xs">{quality}</span>
+      <span className="text-[10px] text-muted-foreground/60 font-mono">
+        {ext}
+      </span>
+      {format.filesize && (
+        <span className="text-[9px] text-muted-foreground/50">
+          {formatSize(format.filesize)}
+        </span>
+      )}
+      {selected && (
+        <div className="mt-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary">
+          <CheckCircle2 className="h-3 w-3 text-primary-foreground" />
+        </div>
+      )}
+    </button>
+  );
+}
+
+
