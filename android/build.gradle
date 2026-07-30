@@ -18,6 +18,8 @@ buildscript {
 
 apply from: "variables.gradle"
 
+// Note: repository resolution is now handled via dependencyResolutionManagement in settings.gradle
+// (Gradle 8+ uses settings-level repos by default; allprojects is ignored for dependency resolution)
 allprojects {
     repositories {
         google()

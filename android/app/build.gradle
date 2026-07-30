@@ -44,10 +44,11 @@ dependencies {
 
     // ─── yt-dlp Engine ────────────────────────────────────────────
     // Bundles Python 3.10 runtime + yt-dlp lazy extractors for Android ARM64
-    implementation 'com.github.yausername.youtubedl-android:library:0.14.2'
+    // Published on Maven Central since v0.16.0: https://github.com/yausername/youtubedl-android
+    implementation 'io.github.junkfood02.youtubedl-android:library:0.18.1'
 
     // Pre-compiled FFmpeg for merging video+audio streams
-    implementation 'com.github.yausername.youtubedl-android:ffmpeg:0.14.2'
+    implementation 'io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1'
 
     // ─── WorkManager (Foreground Service) ─────────────────────────
     implementation 'androidx.work:work-runtime-ktx:2.9.1'
