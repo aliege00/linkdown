@@ -44,15 +44,15 @@ export default function Dashboard() {
   };
 
   return (
-    <main className="min-h-screen bg-background px-6 py-10 text-foreground">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
+    <main className="min-h-screen bg-background px-4 sm:px-6 py-6 sm:py-10 text-foreground">
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 sm:gap-8">
         {/* Header */}
         <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-sm font-medium text-muted-foreground">
+            <p className="text-xs sm:text-sm font-medium text-muted-foreground">
               Authenticated workspace
             </p>
-            <h1 className="mt-1 text-3xl font-bold tracking-tight">
+            <h1 className="mt-1 text-2xl sm:text-3xl font-bold tracking-tight">
               Welcome{user?.name ? `, ${user.name}` : ""}
             </h1>
           </div>
@@ -60,7 +60,7 @@ export default function Dashboard() {
             <Button
               type="button"
               variant="outline"
-              className="cursor-pointer gap-2 self-start"
+              className="cursor-pointer gap-2 self-start active:scale-[0.97] min-h-[40px]"
               onClick={() => navigate("/")}
             >
               <Download className="size-4" />
@@ -69,7 +69,7 @@ export default function Dashboard() {
             <Button
               type="button"
               variant="outline"
-              className="cursor-pointer gap-2 self-start"
+              className="cursor-pointer gap-2 self-start active:scale-[0.97] min-h-[40px]"
               onClick={handleSignOut}
             >
               <LogOut className="size-4" />
@@ -90,11 +90,11 @@ export default function Dashboard() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex items-center gap-3 p-3 rounded-lg border border-border/30">
+            <div className="flex items-center gap-3 p-3 sm:p-4 rounded-lg border border-border/30">
               {isConfigured ? (
                 <>
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-50 dark:bg-emerald-950/30">
-                    <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                  <div className="flex h-8 w-8 sm:h-10 sm:w-10 items-center justify-center rounded-full bg-emerald-50 dark:bg-emerald-950/30 shrink-0">
+                    <CheckCircle2 className="h-4 w-4 sm:h-5 sm:w-5 text-emerald-500" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-sm">Server configured</p>
@@ -105,8 +105,8 @@ export default function Dashboard() {
                 </>
               ) : (
                 <>
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-amber-50 dark:bg-amber-950/30">
-                    <XCircle className="h-4 w-4 text-amber-500" />
+                  <div className="flex h-8 w-8 sm:h-10 sm:w-10 items-center justify-center rounded-full bg-amber-50 dark:bg-amber-950/30 shrink-0">
+                    <XCircle className="h-4 w-4 sm:h-5 sm:w-5 text-amber-500" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-sm text-amber-600 dark:text-amber-400">
@@ -121,21 +121,21 @@ export default function Dashboard() {
             </div>
 
             {!isConfigured && (
-              <div className="p-4 rounded-lg bg-muted/50 border border-border/30">
+              <div className="p-4 sm:p-5 rounded-lg bg-muted/50 border border-border/30">
                 <p className="text-sm font-medium mb-3 flex items-center gap-2">
                   <Rocket className="h-4 w-4 text-primary" />
                   Quick deploy guide
                 </p>
                 <ol className="space-y-3 text-sm text-muted-foreground">
-                  <li className="flex items-start gap-2">
+                  <li className="flex items-start gap-3">
                     <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-primary text-[10px] font-bold shrink-0 mt-0.5">1</span>
                     <span>Deploy the yt-dlp FastAPI server to <strong className="text-foreground">Railway</strong>, <strong className="text-foreground">Fly.io</strong>, or <strong className="text-foreground">Render</strong> using the Dockerfile in <code className="text-xs bg-muted px-1 rounded">yt-dlp-server/</code></span>
                   </li>
-                  <li className="flex items-start gap-2">
+                  <li className="flex items-start gap-3">
                     <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-primary text-[10px] font-bold shrink-0 mt-0.5">2</span>
                     <span>Get your server URL (e.g. <code className="text-xs bg-muted px-1 rounded">https://vidfetch-ytdlp.up.railway.app</code>)</span>
                   </li>
-                  <li className="flex items-start gap-2">
+                  <li className="flex items-start gap-3">
                     <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-primary text-[10px] font-bold shrink-0 mt-0.5">3</span>
                     <span>Go to your project's <strong className="text-foreground">Keys/API Keys</strong> tab and add:</span>
                   </li>
@@ -146,15 +146,16 @@ export default function Dashboard() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-7 w-7 shrink-0"
+                    className="h-8 w-8 shrink-0"
                     onClick={() => copyToClipboard("VITE_YTDLP_SERVER_URL")}
+                    aria-label="Copy key"
                   >
                     {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                   </Button>
                 </div>
                 <div className="mt-2 flex items-center gap-2 p-2.5 rounded-md bg-background border border-border/40">
                   <span className="text-xs font-mono text-muted-foreground shrink-0">Value:</span>
-                  <code className="text-xs font-mono text-muted-foreground flex-1">https://your-server-url.railway.app</code>
+                  <code className="text-xs font-mono text-muted-foreground flex-1 break-all">https://your-server-url.railway.app</code>
                 </div>
               </div>
             )}

@@ -26,6 +26,7 @@ import {
   Film,
   Globe,
   Image,
+  Keyboard,
   Link,
   Loader2,
   Monitor,
@@ -381,10 +382,14 @@ export default function Landing() {
                     onClick={handlePaste}
                     variant="outline"
                     size="icon"
-                    className="h-12 w-12 shrink-0 border-border/60"
+                    className="h-12 w-12 shrink-0 border-border/60 relative group/paste"
                     title="Paste from clipboard"
+                    aria-label="Paste from clipboard"
                   >
                     <ClipboardPaste className="h-4.5 w-4.5" />
+                    <kbd className="absolute -top-1.5 -right-1.5 hidden sm:inline-flex items-center justify-center h-4 min-w-[1.25rem] px-1 rounded-[3px] text-[9px] font-mono font-semibold bg-muted text-muted-foreground/60 border border-border/40 shadow-sm">
+                      ⌘V
+                    </kbd>
                   </Button>
                 </div>
 
@@ -393,25 +398,54 @@ export default function Landing() {
                   {state === "idle" && (
                     <motion.div
                       key="idle"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -8 }}
+                      transition={{ duration: 0.2 }}
                     >
                       <Button
                         onClick={handleAnalyze}
                         disabled={!url.trim()}
                         size="lg"
                         className={cn(
-                          "w-full h-12 gap-2 text-base font-medium",
+                          "w-full h-12 gap-2 text-base font-medium transition-all active:scale-[0.98]",
                           url.trim() && "shadow-md shadow-primary/20",
                         )}
                       >
                         <Search className="h-5 w-5" />
-                        Analyze &amp; Download
+                        Analyze & Download
                       </Button>
                       <p className="text-xs text-center text-muted-foreground/70 mt-3">
                         Supports YouTube, TikTok, Twitter/X, Instagram, Vimeo, and 1000+ more
                       </p>
+
+                      {/* Example URLs — shown when input is empty */}
+                      {!url.trim() && (
+                        <div className="mt-4 pt-3 border-t border-border/20">
+                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-medium text-center mb-2.5">
+                            Try an example
+                          </p>
+                          <div className="flex flex-wrap justify-center gap-1.5">
+                            {[
+                              { label: "YouTube", url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" },
+                              { label: "TikTok", url: "https://www.tiktok.com/@nba/video/7441322573611494702" },
+                              { label: "Twitter/X", url: "https://x.com/NASA/status/1868180428428595520" },
+                            ].map((ex) => (
+                              <button
+                                key={ex.label}
+                                onClick={() => {
+                                  setUrl(ex.url);
+                                  setTimeout(() => inputRef.current?.focus(), 50);
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] font-medium text-muted-foreground/70 hover:text-foreground hover:bg-muted/80 border border-border/20 hover:border-border/50 transition-all duration-150"
+                              >
+                                {ex.label === "YouTube" && <Youtube className="h-3 w-3 text-red-400" />}
+                                <span>{ex.label}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </motion.div>
                   )}
 
@@ -419,27 +453,31 @@ export default function Landing() {
                   {state === "loading" && (
                     <motion.div
                       key="loading"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="flex flex-col items-center gap-3 py-6"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.25, ease: "easeOut" }}
+                      className="flex flex-col items-center gap-4 py-8"
                     >
-                      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                      <div className="relative">
+                        <Loader2 className="h-10 w-10 animate-spin text-primary" />
+                        <div className="absolute inset-0 animate-ping opacity-20 rounded-full bg-primary" />
+                      </div>
                       <div className="text-center">
                         <p className="font-medium text-foreground">
-                          Extracting video info...
+                          Extracting video info
                         </p>
                         <p className="text-sm text-muted-foreground mt-1">
-                          Connecting to yt-dlp server
+                          Connecting to yt-dlp server&hellip;
                         </p>
                       </div>
                       <div className="w-full max-w-xs bg-muted rounded-full h-1.5 overflow-hidden">
                         <motion.div
-                          className="h-full bg-primary rounded-full"
+                          className="h-full bg-gradient-to-r from-primary/60 to-primary rounded-full"
                           initial={{ width: "0%" }}
                           animate={{ width: "100%" }}
                           transition={{
-                            duration: 8,
+                            duration: 6,
                             ease: "easeInOut",
                             repeat: Infinity,
                           }}
@@ -452,28 +490,29 @@ export default function Landing() {
                   {state === "error" && (
                     <motion.div
                       key="error"
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.95 }}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ type: "spring", stiffness: 300, damping: 25 }}
                       className="space-y-3"
                     >
-                      <div className="flex items-start gap-3 p-3 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200/50 dark:border-red-800/30">
+                      <div className="flex items-start gap-3 p-4 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200/50 dark:border-red-800/30">
                         <AlertCircle className="h-5 w-5 text-red-500 mt-0.5 shrink-0" />
                         <div className="text-left text-sm">
                           <p className="font-medium text-red-800 dark:text-red-300">
                             Failed to analyze video
                           </p>
-                          <p className="text-red-600 dark:text-red-400/80 mt-0.5 text-xs">
+                          <p className="text-red-600 dark:text-red-400/80 mt-1 text-xs leading-relaxed">
                             {errorMsg}
                           </p>
                         </div>
                       </div>
                       <div className="flex gap-2">
-                        <Button onClick={handleAnalyze} variant="default" className="flex-1 gap-2">
+                        <Button onClick={handleAnalyze} variant="default" className="flex-1 gap-2 active:scale-[0.97]">
                           <RefreshCw className="h-4 w-4" />
                           Retry
                         </Button>
-                        <Button onClick={resetAll} variant="outline" className="gap-2">
+                        <Button onClick={resetAll} variant="outline" className="gap-2 active:scale-[0.97]">
                           <X className="h-4 w-4" />
                           Clear
                         </Button>
@@ -645,27 +684,31 @@ export default function Landing() {
                       initial={{ opacity: 0, scale: 0.95 }}
                       animate={{ opacity: 1, scale: 1 }}
                       exit={{ opacity: 0, scale: 0.95 }}
+                      transition={{ type: "spring", stiffness: 300, damping: 22 }}
                       className="text-center py-4"
                     >
-                      <div className="flex items-center justify-center gap-3 mb-3">
-                        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 dark:bg-emerald-950/30">
-                          <CheckCircle2 className="h-6 w-6 text-emerald-500" />
-                        </div>
-                        <div className="text-left">
-                          <p className="font-semibold text-foreground">
-                            Download started!
-                          </p>
-                          <p className="text-sm text-muted-foreground">
-                            Check your browser&apos;s downloads folder
-                          </p>
-                        </div>
+                      <motion.div
+                        initial={{ scale: 0 }}
+                        animate={{ scale: 1 }}
+                        transition={{ type: "spring", stiffness: 200, damping: 15, delay: 0.1 }}
+                        className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50 dark:bg-emerald-950/30"
+                      >
+                        <CheckCircle2 className="h-8 w-8 text-emerald-500" />
+                      </motion.div>
+                      <div className="text-center mb-4">
+                        <p className="font-semibold text-foreground text-lg">
+                          Download started!
+                        </p>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Check your browser&apos;s downloads folder
+                        </p>
                       </div>
-                      <div className="flex gap-2">
-                        <Button onClick={handleNewDownload} variant="default" className="flex-1 gap-2">
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <Button onClick={handleNewDownload} variant="default" className="flex-1 gap-2 active:scale-[0.97]">
                           <Download className="h-4 w-4" />
                           Download another
                         </Button>
-                        <Button onClick={handleDownload} variant="outline" className="gap-2">
+                        <Button onClick={handleDownload} variant="outline" className="flex-1 gap-2 active:scale-[0.97]">
                           <RefreshCw className="h-4 w-4" />
                           Try again
                         </Button>
@@ -698,7 +741,7 @@ export default function Landing() {
       <div ref={resultsRef} />
 
       {/* ═══ How it Works ═══ */}
-      <section ref={featuresRef} className="relative px-6 py-24 border-t border-border/30">
+      <section ref={featuresRef} className="scroll-mt-20 relative px-6 py-24 border-t border-border/30">
         <div className="mx-auto max-w-6xl">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -772,7 +815,7 @@ export default function Landing() {
       </section>
 
       {/* ═══ Supported Sites ═══ */}
-      <section className="relative px-6 py-24 border-t border-border/30 bg-muted/30">
+      <section className="scroll-mt-20 relative px-6 py-24 border-t border-border/30 bg-muted/30">
         <div className="mx-auto max-w-6xl">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -841,7 +884,7 @@ export default function Landing() {
       </section>
 
       {/* ═══ Features ═══ */}
-      <section className="relative px-6 py-24 border-t border-border/30">
+      <section className="scroll-mt-20 relative px-6 py-24 border-t border-border/30">
         <div className="mx-auto max-w-6xl">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -918,7 +961,7 @@ export default function Landing() {
       </section>
 
       {/* ═══ FAQ ═══ */}
-      <section className="relative px-6 py-24 border-t border-border/30 bg-muted/30">
+      <section className="scroll-mt-20 relative px-6 py-24 border-t border-border/30 bg-muted/30">
         <div className="mx-auto max-w-3xl">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -991,7 +1034,7 @@ export default function Landing() {
       </section>
 
       {/* ═══ CTA ═══ */}
-      <section className="relative px-6 py-24 border-t border-border/30">
+      <section className="scroll-mt-20 relative px-6 py-24 border-t border-border/30">
         <div className="absolute inset-0 bg-gradient-to-b from-primary/5 to-transparent pointer-events-none" />
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -1073,16 +1116,16 @@ function FormatCard({
     <button
       onClick={onSelect}
       className={cn(
-        "flex flex-col items-center gap-1 p-3 rounded-lg border text-center transition-all duration-150 cursor-pointer",
+        "flex flex-col items-center gap-1 p-3 rounded-lg border text-center transition-all duration-200 cursor-pointer select-none",
         selected
-          ? "border-primary/50 bg-primary/5 shadow-sm shadow-primary/10 ring-1 ring-primary/20"
-          : "border-border/40 bg-background hover:border-border/70 hover:bg-muted/50",
+          ? "border-primary/50 bg-primary/5 shadow-sm shadow-primary/10 ring-1 ring-primary/20 scale-[1.02]"
+          : "border-border/40 bg-background hover:border-border/70 hover:bg-muted/50 hover:shadow-sm hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98]",
       )}
     >
       {audio ? (
-        <Music className="h-4 w-4 text-muted-foreground" />
+        <Music className="h-4 w-4 text-muted-foreground transition-transform duration-200 group-hover:scale-110" />
       ) : (
-        <Video className="h-4 w-4 text-muted-foreground" />
+        <Video className="h-4 w-4 text-muted-foreground transition-transform duration-200 group-hover:scale-110" />
       )}
       <span className="font-semibold text-xs">{quality}</span>
       <span className="text-[10px] text-muted-foreground/60 font-mono">
@@ -1094,9 +1137,13 @@ function FormatCard({
         </span>
       )}
       {selected && (
-        <div className="mt-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary">
+        <motion.div
+          initial={{ scale: 0 }}
+          animate={{ scale: 1 }}
+          className="mt-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary"
+        >
           <CheckCircle2 className="h-3 w-3 text-primary-foreground" />
-        </div>
+        </motion.div>
       )}
     </button>
   );
