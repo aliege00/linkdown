@@ -49,6 +49,7 @@ jobs:
       - name: Build web app
         run: npm run build
         env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
           VITE_CONVEX_URL: ${{ secrets.VITE_CONVEX_URL || '' }}
           VITE_YTDLP_SERVER_URL: ${{ secrets.VITE_YTDLP_SERVER_URL || '' }}
 
