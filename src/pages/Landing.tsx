@@ -7,12 +7,12 @@ import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   getVideoInfo,
-  downloadVideo,
+  startDownload,
   formatDuration,
   formatSize,
   type YtDlpFormat,
   type YtDlpInfo,
-} from "@/lib/ytdlp";
+} from "@/lib/ytdlp-native";
 import { motion, useScroll, useTransform, AnimatePresence } from "framer-motion";
 import {
   ArrowDownToLine,
@@ -137,20 +137,43 @@ export default function Landing() {
   }, [url]);
 
   // ─── Download ──────────────────────────────────────────────────────
-  const handleDownload = useCallback(() => {
+  const handleDownload = useCallback(async () => {
     if (!url.trim() || !selectedFormat) return;
 
     setState("downloading");
+    setErrorMsg("");
 
-    const downloadUrl = downloadVideo(url.trim(), selectedFormat);
+    const workId = await startDownload(
+      url.trim(),
+      selectedFormat,
+      (progress) => {
+        // Real-time progress updates from the native foreground service
+        console.log(`Download progress: ${progress.percent}% at ${progress.speed}`);
+      }
+    );
 
-    if (!downloadUrl) {
-      setErrorMsg("Server not configured. Set VITE_YTDLP_SERVER_URL.");
-      setState("error");
-      return;
+    if (!workId) {
+      // Native engine not available — check for VITE_YTDLP_SERVER_URL fallback
+      const serverUrl = (import.meta as any).env.VITE_YTDLP_SERVER_URL;
+      if (serverUrl) {
+        // Fall back to remote yt-dlp server download
+        const a = document.createElement("a");
+        a.href = `${serverUrl}/api/download?url=${encodeURIComponent(url.trim())}&format_id=${encodeURIComponent(selectedFormat)}`;
+        a.download = "";
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      } else {
+        setErrorMsg(
+          "On-device yt-dlp engine not available. Build the APK and install on your Android device, or set VITE_YTDLP_SERVER_URL for cloud-based downloading."
+        );
+        setState("error");
+        return;
+      }
     }
 
-    // Poll for download completion (the browser handles the save dialog)
     setState("complete");
 
     // Reset after a delay

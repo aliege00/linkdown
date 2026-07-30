@@ -9,6 +9,6 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
 
         // Register the YtDlp native plugin for web-to-native bridging
-        registerPlugin(YtDlpPlugin.class);
+        registerPlugin(DownloadBridge.class);
     }
 }
