@@ -36,16 +36,13 @@ jobs:
       - name: Build web app
         run: npm run build
         env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
           VITE_CONVEX_URL: ${{ secrets.VITE_CONVEX_URL || '' }}
           VITE_YTDLP_SERVER_URL: ${{ secrets.VITE_YTDLP_SERVER_URL || '' }}
 
-      - name: Install PWABuilder CLI
-        run: npm install -g @pwabuilder/pwabuilder-cli
-
       - name: Generate Windows EXE with PWABuilder
         run: |
-          # Serve the built app and generate Windows package
-          npx pwabuilder package --platform windows --file dist --out pwabuild-output
+          npx -y pwa-builder/pwabuilder-cli package --platform windows --file dist --out pwabuild-output
 
       - name: List generated files
         run: |
