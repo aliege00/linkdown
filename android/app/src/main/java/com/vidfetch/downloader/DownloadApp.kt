@@ -4,15 +4,15 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
-import io.woong.ytdl.YoutubeDL
+import android.util.Log
+import com.yausername.youtubedl_android.YoutubeDL
 
 /**
  * Custom Application class that initializes the yt-dlp engine
  * and notification channels on app startup.
  *
- * The youtubedl-android library bundles a Python 3.10 runtime
- * compiled for Android ARM64 along with yt-dlp lazy extractors.
- * init() unpacks these assets into the app's internal storage.
+ * youtubedl-android bundles a Python runtime + yt-dlp for Android ARM64.
+ * init() unpacks these assets into the app's internal storage (idempotent).
  */
 class DownloadApp : Application() {
 
@@ -24,13 +24,15 @@ class DownloadApp : Application() {
     override fun onCreate() {
         super.onCreate()
 
-        // ── Initialize youtubedl-android engine ─────────────────────
-        // This must be called once before any download operations.
-        // It unpacks the embedded Python runtime + yt-dlp to internal storage.
-        YoutubeDL.getInstance().init(this)
+        try {
+            // Unpacks the embedded Python runtime + yt-dlp to internal storage.
+            // Safe to call repeatedly — it no-ops once initialized.
+            YoutubeDL.init(this)
+        } catch (e: Exception) {
+            Log.e("DownloadApp", "Failed to initialize yt-dlp engine", e)
+        }
 
         // ── Create notification channel (Android 8.0+) ──────────────
-        // Required for foreground service notifications.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 DOWNLOAD_CHANNEL_ID,

@@ -1,5 +1,7 @@
 dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    // PREFER_SETTINGS (not FAIL_ON_PROJECT_REPOS) so project-level repos
+    // like the flatDir block in app/build.gradle still work with Gradle 8+.
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
     repositories {
         google()
         mavenCentral()

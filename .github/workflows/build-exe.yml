@@ -40,51 +40,39 @@ jobs:
           VITE_CONVEX_URL: ${{ secrets.VITE_CONVEX_URL || '' }}
           VITE_YTDLP_SERVER_URL: ${{ secrets.VITE_YTDLP_SERVER_URL || '' }}
 
-      - name: Generate Windows EXE with PWABuilder
-        run: |
-          npx -y pwa-builder/pwabuilder-cli package --platform windows --file dist --out pwabuild-output
-
-      - name: List generated files
-        run: |
-          Get-ChildItem -Path pwabuild-output -Recurse | Select-Object FullName, Length
+      # The PWABuilder CLI is published on npm as "pwabuilder".
+      # npx runs it on the fly — no global install needed.
+      - name: Generate Windows package with PWABuilder
+        run: npx -y pwabuilder package --platform windows --file dist --out pwabuild-output
         shell: pwsh
 
-      - name: Rename and organize EXE
+      - name: Rename generated package
         run: |
           $VERSION = "${{ github.event.inputs.version_name || '1.0.0' }}"
           $COMMIT = (git rev-parse --short HEAD)
-          $EXT = "msix"  # PWABuilder typically generates .msix/.msixbundle
-          if (Test-Path "pwabuild-output/*.exe") { $EXT = "exe" }
-          if (Test-Path "pwabuild-output/*.msix") { $EXT = "msix" }
-          Get-ChildItem -Path pwabuild-output | ForEach-Object {
-            $newName = "VidFetch-v${VERSION}-windows-${COMMIT}.${EXT}"
+          $index = 1
+          Get-ChildItem -Path pwabuild-output -File | ForEach-Object {
+            $ext = $_.Extension.TrimStart('.')
+            $newName = "VidFetch-v${VERSION}-windows-${COMMIT}-${index}.${ext}"
             Move-Item $_.FullName -Destination $newName -Force
+            Write-Host "Renamed to $newName"
+            $index++
           }
         shell: pwsh
 
-      - name: Upload EXE artifact
+      - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
-          name: VidFetch-Windows-EXE
-          path: VidFetch-*.exe
+          name: VidFetch-Windows
+          path: VidFetch-*
           retention-days: 30
           compression-level: 0
           if-no-files-found: warn
-
-      - name: Upload MSIX artifact (fallback)
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: VidFetch-Windows-MSIX
-          path: VidFetch-*.msix
-          retention-days: 30
 
       - name: Upload to Release (if tagged)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            VidFetch-*.exe
-            VidFetch-*.msix
+          files: VidFetch-*
           generate_release_notes: true
           make_latest: false

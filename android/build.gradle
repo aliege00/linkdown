@@ -18,15 +18,10 @@ buildscript {
 
 apply from: "variables.gradle"
 
-// Note: repository resolution is now handled via dependencyResolutionManagement in settings.gradle
-// (Gradle 8+ uses settings-level repos by default; allprojects is ignored for dependency resolution)
-allprojects {
-    repositories {
-        google()
-        mavenCentral()
-        maven { url "https://jitpack.io" }
-    }
-}
+// NOTE: All repository declarations live in settings.gradle via
+// dependencyResolutionManagement (required by Gradle 8+). The old
+// allprojects { repositories { ... } } block was removed because it
+// conflicts with settings-level repos and breaks the build.
 
 task clean(type: Delete) {
     delete rootProject.buildDir

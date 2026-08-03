@@ -11,9 +11,10 @@ import androidx.work.CoroutineWorker
 import androidx.work.Data
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
-import io.woong.ytdl.YoutubeDL
-import io.woong.ytdl.YoutubeDLRequest
+import com.yausername.youtubedl_android.YoutubeDL
+import com.yausername.youtubedl_android.YoutubeDLRequest
 import java.io.File
+import java.util.regex.Pattern
 
 /**
  * WorkManager CoroutineWorker that downloads videos using yt-dlp
@@ -34,79 +35,88 @@ class DownloadWorker(
         const val KEY_PROGRESS = "progress"
         const val KEY_SPEED = "speed"
         const val KEY_ETA = "eta"
+        const val UNIQUE_WORK_NAME = "vidfetch_download"
         const val TAG = "vidfetch_download"
         private const val NOTIFICATION_ID = 1001
+
+        // Matches a speed token from the yt-dlp progress line, e.g. "12.5MiB/s"
+        private val SPEED_PATTERN =
+            Pattern.compile("([0-9]+(?:\\.[0-9]+)?\\s?[KMGTP]?i?B/s)")
+
+        // Tracks the live yt-dlp process so cancelDownload() can kill it.
+        @Volatile
+        var activeProcessId: String? = null
     }
 
     override suspend fun doWork(): Result {
         val url = inputData.getString(KEY_URL) ?: return Result.failure()
-        var formatId = inputData.getString(KEY_FORMAT_ID) ?: "best"
-        if (formatId.isEmpty()) formatId = "best"
+        val formatId = inputData.getString(KEY_FORMAT_ID)
+            ?.takeIf { it.isNotBlank() } ?: "best"
+        val processId = "vidfetch_${System.currentTimeMillis()}"
+        activeProcessId = processId
 
         return try {
             // ── Step 1: Promote to Foreground Service ──────────────
-            // This tells Android: "This task is important, don't kill it"
-            setForeground(createForegroundInfo("Starting download...", 0, false))
+            // Tells Android: "This task is important, don't kill it"
+            setForeground(createForegroundInfo("Starting download…", 0, false))
 
             // ── Step 2: Prepare output path ────────────────────────
-            val downloadDir = File(applicationContext.filesDir, "downloads")
-            if (!downloadDir.exists()) downloadDir.mkdirs()
+            val downloadDir = File(applicationContext.filesDir, "downloads").apply { mkdirs() }
             val outputTemplate = "${downloadDir.absolutePath}/%(title)s.%(ext)s"
 
             // ── Step 3: Build yt-dlp request ───────────────────────
             val request = YoutubeDLRequest(url).apply {
-                option("-f", formatId)
-                option("--no-playlist")
-                option("--no-warnings")
-                option("--no-cache-dir")
-                option("--merge-output-format", "mp4")
-                option("-o", outputTemplate)
-
-                // Real-time progress callback from yt-dlp stderr
-                progressCallback { data ->
-                    val percent = data.percent?.toInt() ?: 0
-                    val speed = data.speed ?: "0"
-                    val eta = data.eta ?: "--:--"
-
-                    // Update WorkManager progress (observed by UI)
-                    setProgress(Data.Builder()
-                        .putInt(KEY_PROGRESS, percent)
-                        .putString(KEY_SPEED, speed)
-                        .putString(KEY_ETA, eta)
-                        .build())
-
-                    // Update the persistent notification
-                    updateNotification("Downloading... $percent%", percent, false)
-                }
+                addOption("-f", formatId)
+                addOption("--no-playlist")
+                addOption("--no-warnings")
+                addOption("--no-cache-dir")
+                addOption("--merge-output-format", "mp4")
+                addOption("-o", outputTemplate)
             }
 
-            // ── Step 4: Execute download ───────────────────────────
-            val response = YoutubeDL.getInstance().execute(request)
-            val title = response.title ?: "video"
-            val ext = response.ext ?: "mp4"
-            val fileName = "${sanitizeFileName(title)}.$ext"
+            // ── Step 4: Execute download with real-time progress ──
+            // redirectErrorStream = true so progress lines reach the
+            // stdout parser. Callback args: (percent 0-100 Float,
+            // ETA seconds Long, raw progress line String).
+            YoutubeDL.execute(request, processId, true) { percent, etaSeconds, line ->
+                val pct = if (percent >= 0f) percent.toInt().coerceIn(0, 100) else 0
+                val speed = SPEED_PATTERN.find(line)?.groupValues?.get(1) ?: "0 B/s"
+                val eta = formatEta(etaSeconds)
 
-            // ── Step 5: Find the downloaded file ───────────────────
-            val downloadedFile = downloadDir.listFiles { _, name ->
-                name.contains(sanitizeFileName(title))
-            }?.firstOrNull()
+                // Update WorkManager progress (observed by the UI bridge)
+                setProgress(
+                    Data.Builder()
+                        .putInt(KEY_PROGRESS, pct)
+                        .putString(KEY_SPEED, speed)
+                        .putString(KEY_ETA, eta)
+                        .build()
+                )
+
+                // Update the persistent notification
+                updateNotification("Downloading… $pct% · $speed", pct, false)
+            }
+
+            // ── Step 5: Find the downloaded file (newest in folder) ─
+            val downloadedFile = downloadDir.listFiles()
+                ?.maxByOrNull { it.lastModified() }
 
             // ── Step 6: Save to public Downloads folder ────────────
             if (downloadedFile != null && downloadedFile.exists()) {
-                updateNotification("Saving to Downloads...", 100, false)
+                updateNotification("Saving to Downloads…", 100, false)
 
+                val mime = mimeTypeFor(downloadedFile)
                 val saved = MediaStoreHelper.saveToDownloads(
                     applicationContext,
                     downloadedFile,
-                    fileName,
-                    "video/mp4"
+                    downloadedFile.name,
+                    mime
                 )
 
                 if (saved) {
                     MediaStoreHelper.registerInMediaStore(
                         applicationContext,
                         downloadedFile.absolutePath,
-                        "video/mp4"
+                        mime
                     )
                 }
 
@@ -124,16 +134,17 @@ class DownloadWorker(
 
             // Retry up to 3 times for transient errors
             if (runAttemptCount < 3) Result.retry() else Result.failure()
+        } finally {
+            activeProcessId = null
         }
     }
 
     // ── Foreground Service Helpers ──────────────────────────────────
 
     private fun createForegroundInfo(text: String, progress: Int, done: Boolean): ForegroundInfo {
-        val notification = createNotification(text, progress, done)
         return ForegroundInfo(
             NOTIFICATION_ID,
-            notification,
+            createNotification(text, progress, done),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
         )
     }
@@ -160,7 +171,7 @@ class DownloadWorker(
             .setOngoing(!done)
             .setAutoCancel(done)
             .setContentIntent(pendingIntent)
-            .setProgress(100, progress, progress == 0)
+            .setProgress(100, progress, progress <= 0)
             .build()
     }
 
@@ -171,8 +182,21 @@ class DownloadWorker(
 
     // ── Helpers ─────────────────────────────────────────────────────
 
-    private fun sanitizeFileName(name: String): String {
-        return name.replace(Regex("[^a-zA-Z0-9\\-_. ]"), "_")
-            .take(80)
+    private fun formatEta(etaSeconds: Long): String {
+        if (etaSeconds < 0) return "--:--"
+        val minutes = etaSeconds / 60
+        val seconds = etaSeconds % 60
+        return "%02d:%02d".format(minutes, seconds)
+    }
+
+    private fun mimeTypeFor(file: File): String {
+        return when (file.extension.lowercase()) {
+            "webm" -> "video/webm"
+            "mkv" -> "video/x-matroska"
+            "mov" -> "video/quicktime"
+            "mp3" -> "audio/mpeg"
+            "m4a" -> "audio/mp4"
+            else -> "video/mp4"
+        }
     }
 }

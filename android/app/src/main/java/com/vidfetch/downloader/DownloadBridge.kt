@@ -6,9 +6,13 @@ import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
-import androidx.work.*
-import io.woong.ytdl.YoutubeDL
-import io.woong.ytdl.YoutubeDLRequest
+import androidx.work.Data
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequest
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
+import com.yausername.youtubedl_android.YoutubeDL
+import com.yausername.youtubedl_android.YoutubeDLRequest
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
@@ -52,49 +56,39 @@ class DownloadBridge : Plugin() {
         Thread {
             try {
                 val request = YoutubeDLRequest(url).apply {
-                    option("--dump-json")
-                    option("--no-download")
-                    option("--no-playlist")
-                    option("--no-warnings")
+                    addOption("--no-playlist")
+                    addOption("--no-warnings")
                 }
 
-                val response = YoutubeDL.getInstance().execute(request)
-                val jsonOutput = response.out ?: run {
-                    call.reject("No output from yt-dlp")
-                    return@Thread
-                }
+                // getInfo() adds --dump-json and parses the JSON for us
+                val info = YoutubeDL.getInfo(request)
 
-                // First line = first video (skip playlist entries)
-                val firstLine = jsonOutput.split("\n").first()
-                val data = JSONObject(firstLine)
-
-                // Build clean format list matching the old HTTP API structure
+                // Build the format list matching the existing VidFetch API contract
                 val formats = JSONArray()
-                val rawFormats = data.optJSONArray("formats")
-                if (rawFormats != null) {
-                    for (i in 0 until rawFormats.length()) {
-                        val f = rawFormats.getJSONObject(i)
-                        val vcodec = f.optString("vcodec", "none")
-                        val acodec = f.optString("acodec", "none")
+                info.formats?.forEach { f ->
+                    // Skip text-only formats (subtitles, etc.)
+                    if (f.vcodec == null && f.acodec == null) return@forEach
 
-                        // Skip text-only formats (subtitles, etc.)
-                        if (vcodec == "none" && acodec == "none") continue
-
-                        val clean = JSONObject().apply {
-                            put("format_id", f.optString("format_id", ""))
-                            put("ext", f.optString("ext", ""))
-                            put("resolution", f.optString("resolution", "unknown"))
-                            put("filesize", f.opt("filesize"))
-                            put("vcodec", if (vcodec == "none") JSONObject.NULL else vcodec)
-                            put("acodec", if (acodec == "none") JSONObject.NULL else acodec)
-                            put("fps", f.opt("fps"))
-                            put("tbr", f.opt("tbr"))
-                        }
-                        formats.put(clean)
+                    val resolution = when {
+                        f.width > 0 && f.height > 0 -> "${f.width}x${f.height}"
+                        !f.formatNote.isNullOrEmpty() -> f.formatNote!!
+                        else -> "unknown"
                     }
+
+                    val clean = JSONObject().apply {
+                        put("format_id", f.formatId ?: "")
+                        put("ext", f.ext ?: "")
+                        put("resolution", resolution)
+                        put("filesize", if (f.fileSize > 0) f.fileSize else JSONObject.NULL)
+                        put("vcodec", if (f.vcodec == null) JSONObject.NULL else f.vcodec)
+                        put("acodec", if (f.acodec == null) JSONObject.NULL else f.acodec)
+                        put("fps", f.fps)
+                        put("tbr", f.tbr)
+                    }
+                    formats.put(clean)
                 }
 
-                // Determine best combined format
+                // Determine best combined (video+audio) format
                 var bestFormatId = "best"
                 for (i in 0 until formats.length()) {
                     val f = formats.getJSONObject(i)
@@ -109,17 +103,16 @@ class DownloadBridge : Plugin() {
                 // Build response matching the existing VidFetch API contract
                 val result = JSObject().apply {
                     put("success", true)
-                    put("id", data.optString("id", ""))
-                    put("title", data.optString("title", "Unknown"))
-                    put("duration", data.opt("duration"))
-                    put("thumbnail", data.optString("thumbnail", ""))
-                    put("uploader", data.optString("uploader",
-                        data.optString("channel", "Unknown")))
-                    put("uploader_url", data.optString("uploader_url",
-                        data.optString("channel_url", "")))
-                    put("webpage_url", data.optString("webpage_url", url))
+                    put("id", info.id ?: "")
+                    put("title", info.title ?: info.fulltitle ?: "Unknown")
+                    put("duration", info.duration)
+                    put("thumbnail", info.thumbnail ?: "")
+                    put("uploader", info.uploader ?: "Unknown")
+                    put("uploader_url", info.webpageUrl ?: url)
+                    put("webpage_url", info.webpageUrl ?: url)
                     put("formats", formats)
                     put("best_format_id", bestFormatId)
+                    put("best_audio_format_id", JSONObject.NULL)
                     put("ffmpeg_available", true)
                 }
 
@@ -150,13 +143,8 @@ class DownloadBridge : Plugin() {
             .putString(DownloadWorker.KEY_FORMAT_ID, formatId)
             .build()
 
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
-
         val workRequest = OneTimeWorkRequest.Builder(DownloadWorker::class.java)
             .setInputData(inputData)
-            .setConstraints(constraints)
             .addTag(DownloadWorker.TAG)
             .build()
 
@@ -164,8 +152,8 @@ class DownloadBridge : Plugin() {
 
         WorkManager.getInstance(context)
             .enqueueUniqueWork(
-                "download_${System.currentTimeMillis()}",
-                ExistingWorkPolicy.KEEP,
+                DownloadWorker.UNIQUE_WORK_NAME,
+                ExistingWorkPolicy.REPLACE,
                 workRequest
             )
 
@@ -183,21 +171,20 @@ class DownloadBridge : Plugin() {
     @PluginMethod
     fun cancelDownload(call: PluginCall) {
         val workIdStr = call.getString("workId")
-        when {
-            !workIdStr.isNullOrEmpty() -> {
-                try {
-                    val workId = UUID.fromString(workIdStr)
-                    WorkManager.getInstance(context).cancelWorkById(workId)
-                    call.resolve()
-                } catch (e: Exception) {
-                    call.reject("Invalid workId: $workIdStr")
-                }
+        try {
+            if (!workIdStr.isNullOrEmpty()) {
+                WorkManager.getInstance(context).cancelWorkById(UUID.fromString(workIdStr))
+            } else {
+                WorkManager.getInstance(context)
+                    .cancelUniqueWork(DownloadWorker.UNIQUE_WORK_NAME)
             }
-            currentWorkId != null -> {
-                WorkManager.getInstance(context).cancelWorkById(currentWorkId!!)
-                call.resolve()
-            }
-            else -> call.reject("No active download to cancel")
+
+            // Kill the underlying yt-dlp process so the download actually stops
+            DownloadWorker.activeProcessId?.let { YoutubeDL.destroyProcessById(it) }
+
+            call.resolve()
+        } catch (e: Exception) {
+            call.reject("Cancel failed: ${e.message}")
         }
     }
 
