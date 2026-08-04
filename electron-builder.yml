@@ -1,0 +1,25 @@
+appId: com.vidfetch.desktop
+productName: VidFetch
+electronVersion: "43.2.0"
+
+directories:
+  output: pwabuild-output
+
+files:
+  - dist/**/*
+  - electron/**/*
+
+# Ship the yt-dlp + ffmpeg binaries alongside the app. They are downloaded
+# during the GitHub Actions build (see build-exe.yml) into native-tools/.
+extraResources:
+  - from: native-tools
+    to: native-tools
+
+asar: true
+npmRebuild: false
+
+win:
+  target:
+    - portable
+
+artifactName: VidFetch-${version}-windows-portable.${ext}
