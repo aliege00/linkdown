@@ -1,23 +1,20 @@
-name: Build Portable EXE
+name: Build EXE (Windows)
 
+# Runs automatically on every push to main/master, on version tags, and
+# manually via the "Run workflow" button in the Actions tab.
 on:
   push:
     branches: [main, master]
     tags: ["v*"]
   workflow_dispatch:
-    inputs:
-      version_name:
-        description: "Version name (e.g., 1.0.0)"
-        required: false
-        default: "1.0.0"
 
 concurrency:
   group: exe-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build Portable EXE
+  build-exe:
+    name: Build Windows EXE
     runs-on: windows-latest
 
     steps:
@@ -28,10 +25,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: "npm"
+          cache: npm
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Build web app
         run: npm run build
@@ -59,38 +56,35 @@ jobs:
         run: npx --yes electron-builder@26.15.3 --config electron-builder.yml
         shell: pwsh
 
-      - name: Rename generated package
+      # Copy the EXE to a clear, versioned filename so the downloaded
+      # artifact is self-explanatory (e.g. VidFetch-v0.0.0-windows-portable.exe).
+      - name: Stage EXE with clear name
+        id: stage
         shell: pwsh
         run: |
-          if (Test-Path pwabuild-output) {
-            $VERSION = "${{ github.event.inputs.version_name || '1.0.0' }}"
-            $COMMIT = (git rev-parse --short HEAD)
-            $index = 1
-            Get-ChildItem -Path pwabuild-output -File | ForEach-Object {
-              $ext = $_.Extension.TrimStart('.')
-              $newName = "VidFetch-v${VERSION}-windows-${COMMIT}-${index}.${ext}"
-              Move-Item $_.FullName -Destination $newName -Force
-              Write-Host "Renamed to $newName"
-              $index++
-            }
-          } else {
-            Write-Error "pwabuild-output not found — electron-builder step failed"
+          $VERSION = node -p "require('./package.json').version"
+          $EXE = Get-ChildItem -Path pwabuild-output -Filter "*.exe" | Select-Object -First 1
+          if (-not $EXE) {
+            Write-Error "No EXE file was produced by the build"
             exit 1
           }
+          New-Item -ItemType Directory -Force -Path staged-exe | Out-Null
+          $TARGET = "staged-exe/VidFetch-v${VERSION}-windows-portable.exe"
+          Copy-Item $EXE.FullName -Destination $TARGET -Force
+          "exe_file=$TARGET" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Upload Windows artifact
+      - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
         with:
-          name: VidFetch-Windows
-          path: VidFetch-*
+          name: VidFetch-Windows-EXE
+          path: ${{ steps.stage.outputs.exe_file }}
           retention-days: 30
-          compression-level: 0
-          if-no-files-found: warn
+          if-no-files-found: error
 
       - name: Upload to Release (if tagged)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: VidFetch-*
+          files: staged-exe/*
           generate_release_notes: true
           make_latest: false
