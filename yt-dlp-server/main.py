@@ -1,556 +1,451 @@
 """
 VidFetch yt-dlp Server
-=======================
-Self-hosted API server that wraps yt-dlp to extract video metadata
-and download videos from YouTube, TikTok, Twitter/X, Instagram, and 1000+ sites.
 
-Endpoints:
-  GET /api/info?url=<encoded_url>[&is_playlist=true]
-      → Video metadata + available formats (or playlist entries when the URL
-        is a playlist / is_playlist=true)
-  GET /api/download?url=<encoded_url>[&format_id=best][&is_playlist=true][&limit=N]
-      → Download video (streaming), or download a whole playlist as a ZIP
+Self-hosted video download API powered by yt-dlp. Supports 1000+ sites
+(YouTube, TikTok, Twitter/X, Instagram, Vimeo, Facebook, ...).
 
-Deploy anywhere: Railway, Fly.io, Render, or your own VPS.
+Endpoints
+    GET /api/health
+    GET /api/info?url=<url>[&is_playlist=true]
+    GET /api/download?url=<url>[&format_id=best][&is_playlist=true][&limit=N]
+
+Environment variables
+    HOST / PORT                Bind address and port (default 0.0.0.0:8080)
+    DOWNLOAD_DIR               Temp directory for downloads (default /tmp/vidfetch-downloads)
+    CLEANUP_AGE_SECONDS        Delete finished files older than this (default 1800)
+    MAX_FILE_SIZE              Max single file size in bytes (default 2 GiB)
+    YTDLP_COOKIES_FILE         Path to a Netscape-format cookies.txt (optional)
+    YTDLP_PO_TOKEN_PROVIDER    URL of a bgutil-ytdlp-pot-provider server (optional;
+                               requires the yt-dlp-get-pot plugin, which reads this
+                               variable itself)
+    YTDLP_PLAYER_CLIENT        YouTube player client override, e.g. "tv" (optional)
+
+The server also auto-detects a `cookies/youtube.txt` file next to main.py
+and uses it when YTDLP_COOKIES_FILE is not set.
 """
 
-import json
 import os
 import re
 import shutil
-import subprocess
+import tempfile
 import time
-import uuid
 import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
+try:
+    import yt_dlp
+except ImportError:  # pragma: no cover
+    yt_dlp = None
 
-HOST = os.getenv("HOST", "0.0.0.0")
-PORT = int(os.getenv("PORT", "8080"))
-DOWNLOAD_DIR = Path(os.getenv("DOWNLOAD_DIR", "/tmp/vidfetch-downloads"))
-CLEANUP_AGE_SECONDS = int(os.getenv("CLEANUP_AGE_SECONDS", "1800"))  # 30 min
-MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", str(2 * 1024**3)))  # 2 GB
+APP_NAME = "VidFetch"
+DOWNLOAD_DIR = Path(os.environ.get("DOWNLOAD_DIR", "/tmp/vidfetch-downloads"))
+CLEANUP_AGE_SECONDS = int(os.environ.get("CLEANUP_AGE_SECONDS", "1800"))
+MAX_FILE_SIZE = int(os.environ.get("MAX_FILE_SIZE", str(2 * 1024 ** 3)))
 
-# ── YouTube anti-bot mitigations (optional) ──────────────────────────
-# YouTube increasingly requires real browser cookies or a PO token provider
-# to bypass the "Sign in to confirm you're not a bot" check from flagged IPs.
-#
-#   YTDLP_COOKIES_FILE       path to a Netscape-format cookies.txt exported
-#                            from a logged-in browser session
-#   YTDLP_PO_TOKEN_PROVIDER  URL of a bgutil-ytdlp-pot-provider server
-#                            (e.g. http://127.0.0.1:4416) — requires the
-#                            bgutil plugin installed next to yt-dlp
-#   YTDLP_PLAYER_CLIENT      optional YouTube player client override, e.g.
-#                            "tv" or "web_embedded" (fewer bot checks, but
-#                            some formats may be unavailable)
-COOKIES_FILE = os.getenv("YTDLP_COOKIES_FILE", "")
-PO_TOKEN_PROVIDER = os.getenv("YTDLP_PO_TOKEN_PROVIDER", "")
-PLAYER_CLIENT = os.getenv("YTDLP_PLAYER_CLIENT", "")
-
-DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
-# Check for ffmpeg (needed for merging video+audio streams)
-FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None
-
-# ---------------------------------------------------------------------------
-# App setup
-# ---------------------------------------------------------------------------
+# Cheap URL heuristic for playlists (yt-dlp's own response is authoritative).
+PLAYLIST_URL_RE = re.compile(r"(?:[?&]list=|/playlist(?:[/?]|$))")
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup
-    os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+async def lifespan(_: FastAPI):
+    DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    _cleanup_old_files()
     yield
-    # Shutdown — cleanup all downloaded files
-    shutil.rmtree(DOWNLOAD_DIR, ignore_errors=True)
 
 
-app = FastAPI(
-    title="VidFetch yt-dlp API",
-    version="1.1.0",
-    description="Self-hosted video download API powered by yt-dlp. Supports 1000+ sites, including YouTube playlists.",
-    lifespan=lifespan,
-)
+app = FastAPI(title=f"{APP_NAME} yt-dlp API", version="1.0.0", lifespan=lifespan)
 
+# The web app fetches /api/info cross-origin (the server is a separate
+# deployment). No credentials are used, so a permissive origin list is safe.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET"],
     allow_headers=["*"],
 )
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
-URL_PATTERN = re.compile(
-    r"^https?://"  # http:// or https://
-    r"(?:[-\w.]|(?:%[\da-fA-F]{2}))+"  # domain
-    r"(?::\d+)?"  # optional port
-    r"(?:/[-%\w.~+]*)*"  # path
-    r"(?:\?[-\w&=%.~+]*)?",  # query string
-    re.IGNORECASE,
-)
+# ── yt-dlp helpers ────────────────────────────────────────────────────
 
-# Cheap URL-based playlist hint (YouTube playlists, generic /playlist/ paths).
-PLAYLIST_URL_PATTERN = re.compile(
-    r"[?&]list=[^&\s]+|/playlist([/?]|$)|/playlists?/|&playlist=",
-    re.IGNORECASE,
-)
+def _cookiefile() -> Optional[str]:
+    """Explicit YTDLP_COOKIES_FILE, or an auto-detected cookies/youtube.txt."""
+    path = (os.environ.get("YTDLP_COOKIES_FILE") or "").strip()
+    if path and os.path.isfile(path):
+        return path
+    auto = Path(__file__).resolve().parent / "cookies" / "youtube.txt"
+    if auto.is_file():
+        return str(auto)
+    return None
 
 
-def validate_url(url: str) -> str:
-    """Validate and normalize the URL. Raises 400 if invalid."""
-    if not url or not URL_PATTERN.match(url):
-        raise HTTPException(status_code=400, detail="Invalid URL format")
-    return url
+def _base_opts() -> dict:
+    opts: dict[str, Any] = {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": False,
+    }
+    cookies = _cookiefile()
+    if cookies:
+        opts["cookiefile"] = cookies
+    player_client = (os.environ.get("YTDLP_PLAYER_CLIENT") or "").strip()
+    if player_client:
+        opts["extractor_args"] = {"youtube": {"player_client": [player_client]}}
+    # YTDLP_PO_TOKEN_PROVIDER is consumed by the bgutil-ytdlp-get-pot plugin
+    # (https://github.com/Brainicism/bgutil-ytdlp-pot-provider) automatically.
+    return opts
 
 
-def looks_like_playlist(url: str) -> bool:
-    """Best-effort URL check for playlists. The server also relies on
-    yt-dlp's own response, so a false positive just means the analyze runs
-    in playlist mode and reports back a single video."""
-    return bool(PLAYLIST_URL_PATTERN.search(url))
+def _ffmpeg_available() -> bool:
+    return shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
 
 
-def run_ytdlp(args: List[str], timeout: int = 120) -> subprocess.CompletedProcess:
-    """Run yt-dlp with the given args and return the completed process.
-
-    `timeout` defaults to 120s for quick metadata calls; playlist downloads
-    pass a much larger budget because they download many videos.
-
-    Anti-bot args (cookies / PO token provider / player client) are appended
-    from the environment when configured, so every request is authenticated
-    the same way.
-    """
-    cmd = ["yt-dlp", "--no-warnings", "--no-cache-dir"]
-    if COOKIES_FILE and os.path.exists(COOKIES_FILE):
-        cmd += ["--cookies", COOKIES_FILE]
-    if PO_TOKEN_PROVIDER:
-        cmd += [
-            "--extractor-args",
-            f"youtubepot-bgutilhttp:base_url={PO_TOKEN_PROVIDER}",
-        ]
-    if PLAYER_CLIENT:
-        cmd += [
-            "--extractor-args",
-            f"youtube:player_client={PLAYER_CLIENT}",
-        ]
-    cmd += args
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        if result.returncode != 0:
-            stderr = result.stderr.strip()
-            raise RuntimeError(stderr or "yt-dlp failed")
-        return result
-    except subprocess.TimeoutExpired:
-        raise RuntimeError(f"yt-dlp timed out after {timeout} seconds")
-    except FileNotFoundError:
-        raise RuntimeError(
-            "yt-dlp is not installed. Install it with: pip install yt-dlp"
-        )
+def _absolutize(raw: str, base_url: str) -> str:
+    """Flat playlist entries often carry relative URLs (e.g. /watch?v=...)."""
+    if not raw:
+        return raw
+    if raw.startswith("http://") or raw.startswith("https://"):
+        return raw
+    if raw.startswith("/"):
+        m = re.match(r"^(https?://[^/]+)", base_url)
+        if m:
+            return m.group(1) + raw
+    return raw
 
 
-def sanitize_filename(name: str) -> str:
-    """Remove or replace characters that are problematic in filenames."""
-    return re.sub(r'[^\w\-_.() ]', "_", name)[:100]
+def _friendly_error(exc: Exception) -> str:
+    """Strip yt-dlp's noisy ERROR: prefix and cap the length."""
+    msg = str(exc)
+    m = re.search(r"ERROR:\s*(.+)", msg)
+    if m:
+        msg = m.group(1).strip()
+    if len(msg) > 500:
+        msg = msg[:500] + "..."
+    return msg or exc.__class__.__name__
 
 
-def cleanup_old_files():
-    """Remove downloaded files older than CLEANUP_AGE_SECONDS."""
-    now = time.time()
-    for f in DOWNLOAD_DIR.iterdir():
-        if f.is_file() and (now - f.stat().st_mtime) > CLEANUP_AGE_SECONDS:
-            try:
-                f.unlink()
-            except OSError:
-                pass
+def _cleanup_old_files() -> None:
+    if not DOWNLOAD_DIR.is_dir():
+        return
+    cutoff = time.time() - CLEANUP_AGE_SECONDS
+    for p in DOWNLOAD_DIR.iterdir():
+        try:
+            if p.is_file() and p.stat().st_mtime < cutoff:
+                p.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
-def build_format_selector(format_id: str) -> str:
-    """Translate the client's format_id into a yt-dlp format selector."""
-    if format_id == "best":
-        return "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
-    if format_id == "bestaudio":
-        return "bestaudio[ext=m4a]/bestaudio/best"
-    return format_id
+# ── Info payload builders ─────────────────────────────────────────────
+
+def _format_entry(f: dict) -> dict:
+    height = f.get("height")
+    width = f.get("width")
+    vcodec = f.get("vcodec")
+    acodec = f.get("acodec")
+    if vcodec == "none":
+        vcodec = None
+    if acodec == "none":
+        acodec = None
+    resolution = ""
+    if height:
+        resolution = f"{width or '?'}x{height}"
+    else:
+        note = f.get("format_note")
+        if note:
+            resolution = str(note)
+    return {
+        "format_id": str(f.get("format_id") or ""),
+        "ext": f.get("ext") or "",
+        "resolution": resolution,
+        "filesize": f.get("filesize") or f.get("filesize_approx"),
+        "vcodec": vcodec,
+        "acodec": acodec,
+        "fps": f.get("fps"),
+        "tbr": f.get("tbr"),
+    }
 
 
-def simplify_formats(raw_formats: List[Dict]) -> List[Dict]:
-    """Flatten yt-dlp formats into a clean, client-friendly list."""
-    seen = set()
-    clean = []
-    for f in raw_formats:
-        fmt_id = f.get("format_id", "")
-        ext = f.get("ext", "")
-        vcodec = f.get("vcodec", "none")
-        acodec = f.get("acodec", "none")
-
-        # Skip text-only formats (subtitles, etc.)
-        if vcodec == "none" and acodec == "none":
+def _curate_formats(formats: list) -> list:
+    """Drop unusable formats (storyboards, none/none) and cap the list."""
+    out: list = []
+    seen: set = set()
+    for f in formats or []:
+        fid = str(f.get("format_id") or "")
+        if not fid:
             continue
-
-        # Skip formats with no usable URL
-        if not f.get("url") and not f.get("manifest_url"):
+        if fid.startswith("sb"):
             continue
-
-        # Build a resolution label
-        width = f.get("width") or 0
-        height = f.get("height") or 0
-        if width and height:
-            resolution = f"{width}x{height}"
-        elif f.get("resolution") and f["resolution"] != "None":
-            resolution = f["resolution"]
-        else:
-            resolution = "audio only" if vcodec == "none" else "unknown"
-
-        # Deduplicate
-        key = (fmt_id, resolution, ext)
+        note = str(f.get("format_note") or "").lower()
+        if note in {"storyboard", "mhtml", "jpeg", "none"}:
+            continue
+        if f.get("vcodec") in (None, "none") and f.get("acodec") in (None, "none"):
+            continue
+        key = (fid, f.get("ext"))
         if key in seen:
             continue
         seen.add(key)
+        out.append(_format_entry(f))
+    return out[:60]
 
-        clean.append(
-            {
-                "format_id": fmt_id,
-                "ext": ext,
-                "resolution": resolution,
-                "filesize": f.get("filesize") or f.get("filesize_approx"),
-                "vcodec": vcodec if vcodec != "none" else None,
-                "acodec": acodec if acodec != "none" else None,
-                "fps": f.get("fps"),
-                "tbr": round(f.get("tbr", 0)) if f.get("tbr") else None,
-            }
+
+def _best_format_id(info: dict) -> tuple[str, Optional[str]]:
+    """Best video+audio combo (e.g. '137+140'), or the best single format."""
+    formats = info.get("formats") or []
+
+    def is_video(f: dict) -> bool:
+        return f.get("vcodec") not in (None, "none")
+
+    def is_audio(f: dict) -> bool:
+        return f.get("acodec") not in (None, "none")
+
+    video_only = [f for f in formats if is_video(f) and not is_audio(f)]
+    audio_only = [f for f in formats if is_audio(f) and not is_video(f)]
+    combined = [f for f in formats if is_video(f) and is_audio(f)]
+
+    def top(items: list) -> dict:
+        return max(
+            items,
+            key=lambda f: (
+                f.get("height") or 0,
+                f.get("tbr") or 0,
+                f.get("abr") or 0,
+            ),
         )
 
-    # Sort: video formats by resolution desc, then audio
-    def sort_key(f: Dict):
-        if f["vcodec"] and f["acodec"]:
-            res = f["resolution"]
-            h = int(res.split("x")[1]) if "x" in res else 0
-            return (0, -h, -(f["tbr"] or 0))
-        elif f["vcodec"]:
-            return (1, 0, 0)
-        else:
-            return (2, 0, -(f["tbr"] or 0))
-
-    clean.sort(key=sort_key)
-    return clean
-
-
-def build_best_format_ids(formats: List[Dict]) -> Dict[str, Optional[str]]:
-    """Pick a 'best' combined format and a 'best' audio-only format."""
-    best_video = None
-    best_audio = None
-    for f in formats:
-        if f["vcodec"] and f["acodec"]:
-            best_video = f["format_id"]
-            break
-        elif f["vcodec"] and not best_video:
-            best_video = f["format_id"]
-    for f in formats:
-        if not f["vcodec"] and f["acodec"]:
-            best_audio = f["format_id"]
-            break
-    return {"best_video": best_video or "best", "best_audio": best_audio}
+    if video_only and audio_only:
+        best_video = top(video_only)
+        best_audio = top(audio_only)
+        return f"{best_video['format_id']}+{best_audio['format_id']}", str(best_audio["format_id"])
+    if combined:
+        best = top(combined)
+        return str(best["format_id"]), None
+    if video_only:
+        return str(top(video_only)["format_id"]), None
+    if audio_only:
+        return str(top(audio_only)["format_id"]), str(top(audio_only)["format_id"])
+    return "best", None
 
 
-def parse_playlist_info(root: Dict[str, Any], url: str) -> Dict[str, Any]:
-    """Build the playlist-shaped response from a --flat-playlist dump."""
-    raw_entries = root.get("entries")
-    if raw_entries is None:
-        return {}
-
-    entries = []
-    for e in raw_entries:
-        if not e:
-            continue
-        entries.append(
-            {
-                "id": e.get("id", ""),
-                "title": e.get("title") or e.get("fulltitle") or "",
-                "url": e.get("url") or e.get("webpage_url") or "",
-                "duration": e.get("duration"),
-                "thumbnail": e.get("thumbnail"),
-            }
-        )
-
+def _entry_payload(entry: dict, base_url: str) -> dict:
+    thumbs = entry.get("thumbnails") or []
+    thumb = entry.get("thumbnail") or (thumbs[0].get("url") if thumbs else None)
     return {
-        "success": True,
-        "is_playlist": True,
-        "id": root.get("id", ""),
-        "title": root.get("title", "Playlist"),
-        "duration": None,
-        "thumbnail": root.get("thumbnail"),
-        "uploader": root.get("uploader") or root.get("channel") or "Unknown",
-        "uploader_url": root.get("uploader_url") or root.get("channel_url"),
-        "webpage_url": root.get("webpage_url") or url,
-        "formats": [],
-        "best_format_id": "best",
-        "best_audio_format_id": None,
-        "ffmpeg_available": FFMPEG_AVAILABLE,
-        "count": len(entries),
-        "entries": entries,
+        "id": entry.get("id"),
+        "title": entry.get("title") or "",
+        "url": _absolutize(
+            entry.get("webpage_url") or entry.get("url") or "", base_url
+        ),
+        "duration": entry.get("duration"),
+        "thumbnail": thumb,
     }
 
 
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
+def _info_payload(info: dict, base_url: str) -> dict:
+    thumbnails = info.get("thumbnails") or []
+    best_id, best_audio_id = _best_format_id(info)
+    return {
+        "success": True,
+        "id": info.get("id") or "",
+        "title": info.get("title") or "Untitled",
+        "duration": info.get("duration"),
+        "thumbnail": info.get("thumbnail")
+        or (thumbnails[0].get("url") if thumbnails else None),
+        "uploader": info.get("uploader") or info.get("channel") or "",
+        "uploader_url": info.get("uploader_url") or info.get("channel_url"),
+        "webpage_url": info.get("webpage_url") or base_url,
+        "formats": _curate_formats(info.get("formats") or []),
+        "best_format_id": best_id,
+        "best_audio_format_id": best_audio_id,
+        "ffmpeg_available": _ffmpeg_available(),
+        "is_playlist": False,
+    }
 
 
-@app.get("/api/info")
-def get_video_info(
-    url: str = Query(..., description="Video or playlist URL to extract info from"),
-    is_playlist: bool = Query(
-        False, description="Hint that the URL is a playlist (server also auto-detects)"
-    ),
-):
-    """
-    Extract video metadata and available formats from any supported URL.
-    Returns title, thumbnail, duration, uploader, and a clean list of formats.
+# ── Extraction ────────────────────────────────────────────────────────
 
-    When the URL is a playlist (or is_playlist=true), returns `is_playlist: true`
-    with `count` and `entries` (a flat list of the videos in the playlist).
-    """
-    validate_url(url)
-
-    try:
-        # ── Playlist path ──────────────────────────────────────────
-        if is_playlist or looks_like_playlist(url):
-            try:
-                result = run_ytdlp(
-                    [
-                        "--dump-json",
-                        "--no-download",
-                        "--flat-playlist",
-                        url,
-                    ]
-                )
-                root = json.loads(result.stdout.strip().split("\n")[0])
-            except (RuntimeError, json.JSONDecodeError):
-                root = {}
-
-            payload = parse_playlist_info(root, url)
-            # Only return the playlist payload when yt-dlp really found entries.
-            if payload.get("is_playlist"):
-                return payload
-            # Otherwise fall through to single-video extraction.
-
-        # ── Single video path ──────────────────────────────────────
-        result = run_ytdlp(
-            [
-                "--dump-json",
-                "--no-download",
-                "--no-playlist",
-                url,
-            ]
-        )
-        data = json.loads(result.stdout.strip().split("\n")[0])
-
-        formats = simplify_formats(data.get("formats") or [])
-        best = build_best_format_ids(formats)
-
-        return {
-            "success": True,
-            "is_playlist": False,
-            "id": data.get("id"),
-            "title": data.get("title", "Unknown"),
-            "duration": data.get("duration"),
-            "thumbnail": data.get("thumbnail"),
-            "uploader": data.get("uploader") or data.get("channel") or "Unknown",
-            "uploader_url": data.get("uploader_url") or data.get("channel_url"),
-            "webpage_url": data.get("webpage_url") or url,
-            "formats": formats,
-            "best_format_id": best["best_video"],
-            "best_audio_format_id": best["best_audio"],
-            "ffmpeg_available": FFMPEG_AVAILABLE,
-        }
-
-    except RuntimeError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=502, detail="Failed to parse video info")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+def _extract_flat(url: str) -> dict:
+    opts = _base_opts()
+    opts.update({"skip_download": True, "extract_flat": "in_playlist"})
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        return ydl.extract_info(url, download=False)
 
 
-@app.get("/api/download")
-def download_video(
-    url: str = Query(..., description="Video or playlist URL to download"),
-    format_id: str = Query("best", description="Format ID to download"),
-    is_playlist: bool = Query(
-        False, description="Download the whole playlist and return it as a ZIP"
-    ),
-    limit: int = Query(
-        0, ge=0, description="Max videos to download from a playlist (0 = all)"
-    ),
-):
-    """
-    Download a video from the given URL in the specified format, streaming the
-    file directly to the client as a download attachment.
+def _extract_single(url: str) -> dict:
+    opts = _base_opts()
+    opts.update({"skip_download": True, "noplaylist": True})
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        return ydl.extract_info(url, download=False)
 
-    When is_playlist=true, downloads every video in the playlist and returns
-    them packed in a single ZIP archive.
-    """
-    validate_url(url)
 
-    # Create a unique session ID for this download
-    session_id = str(uuid.uuid4())
-    fmt = build_format_selector(format_id)
+# ── API routes ────────────────────────────────────────────────────────
 
-    # ── Playlist download (multiple videos at once) ────────────────
-    if is_playlist:
-        work_dir = DOWNLOAD_DIR / session_id
-        work_dir.mkdir(parents=True, exist_ok=True)
-        zip_path = DOWNLOAD_DIR / f"{session_id}.zip"
-        try:
-            args = [
-                "--format",
-                fmt,
-                "--output",
-                str(
-                    work_dir
-                    / "%(playlist_index)03d - %(title).120B [%(id)s].%(ext)s"
-                ),
-                "--merge-output-format",
-                "mp4",
-            ]
-            if limit > 0:
-                args += ["--playlist-items", f"1-{limit}"]
-
-            # Playlist downloads can take a long time — give yt-dlp up to
-            # 2 hours before declaring the request dead.
-            run_ytdlp(args + [url], timeout=7200)
-
-            files = sorted(work_dir.rglob("*"))
-            video_files = [f for f in files if f.is_file()]
-            if not video_files:
-                raise RuntimeError(
-                    "No files were downloaded from the playlist. "
-                    "The playlist may be empty or private."
-                )
-
-            total_size = sum(f.stat().st_size for f in video_files)
-            if total_size > MAX_FILE_SIZE:
-                shutil.rmtree(work_dir, ignore_errors=True)
-                raise HTTPException(
-                    status_code=413,
-                    detail="Playlist exceeds maximum total size limit",
-                )
-
-            # Pack into a ZIP (videos are already compressed — store, don't re-compress)
-            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_STORED) as zf:
-                for f in video_files:
-                    zf.write(f, f.name)
-
-            shutil.rmtree(work_dir, ignore_errors=True)
-            cleanup_old_files()
-
-            return FileResponse(
-                path=str(zip_path),
-                filename=f"vidfetch_playlist_{sanitize_filename(session_id)}.zip",
-                media_type="application/zip",
-                headers={
-                    "X-Session-Id": session_id,
-                    "X-File-Count": str(len(video_files)),
-                    "X-File-Size": str(total_size),
-                },
-            )
-        except HTTPException:
-            raise
-        except RuntimeError as e:
-            shutil.rmtree(work_dir, ignore_errors=True)
-            raise HTTPException(status_code=422, detail=str(e))
-        except Exception as e:
-            shutil.rmtree(work_dir, ignore_errors=True)
-            raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
-
-    # ── Single video download ──────────────────────────────────────
-    output_template = str(DOWNLOAD_DIR / f"{session_id}.%(ext)s")
-
-    try:
-        ydl_opts = [
-            "--format",
-            fmt,
-            "--output",
-            output_template,
-            "--no-playlist",
-            "--merge-output-format",
-            "mp4",
-        ]
-
-        run_ytdlp(ydl_opts + [url], timeout=3600)
-
-        # Find the downloaded file
-        downloaded_files = list(DOWNLOAD_DIR.glob(f"{session_id}.*"))
-        if not downloaded_files:
-            # Try to find by searching for any recently modified file
-            candidates = sorted(
-                DOWNLOAD_DIR.iterdir(), key=lambda f: f.stat().st_mtime, reverse=True
-            )
-            for c in candidates[:5]:
-                if c.stat().st_mtime > time.time() - 30:
-                    downloaded_files = [c]
-                    break
-
-        if not downloaded_files:
-            raise RuntimeError("Download completed but output file not found")
-
-        file_path = downloaded_files[0]
-        if file_path.stat().st_size > MAX_FILE_SIZE:
-            file_path.unlink()
-            raise HTTPException(status_code=413, detail="File exceeds maximum size limit")
-
-        # Cleanup old files in background
-        cleanup_old_files()
-
-        return FileResponse(
-            path=str(file_path),
-            filename=f"vidfetch_{sanitize_filename(session_id)}{file_path.suffix}",
-            media_type="application/octet-stream",
-            headers={
-                "X-Session-Id": session_id,
-                "X-File-Size": str(file_path.stat().st_size),
-            },
-        )
-
-    except HTTPException:
-        raise
-    except RuntimeError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
+@app.get("/")
+def root() -> dict:
+    return {"service": APP_NAME, "docs": "/docs", "health": "/api/health"}
 
 
 @app.get("/api/health")
-def health_check():
-    """Health check endpoint to verify the server is running."""
+def health() -> dict:
     return {
         "status": "ok",
-        "yt_dlp_installed": shutil.which("yt-dlp") is not None,
-        "ffmpeg_available": FFMPEG_AVAILABLE,
-        "download_dir": str(DOWNLOAD_DIR),
-        "cleanup_age_seconds": CLEANUP_AGE_SECONDS,
+        "service": APP_NAME,
+        "yt_dlp_installed": yt_dlp is not None,
+        "ffmpeg_available": _ffmpeg_available(),
     }
 
 
-# ---------------------------------------------------------------------------
-# Entrypoint
-# ---------------------------------------------------------------------------
+@app.get("/api/info")
+def api_info(
+    url: str = Query(...),
+    is_playlist: Optional[str] = Query(None),
+) -> dict:
+    if yt_dlp is None:
+        raise HTTPException(
+            500, "yt-dlp is not installed on this server. Run: pip install -r requirements.txt"
+        )
+
+    playlist_hint = is_playlist is not None and is_playlist.lower() in {"1", "true", "yes", "on"}
+    try:
+        # Playlist mode: fetch the entry list fast (flat extraction), so the
+        # app can show every video and offer "Download all".
+        if playlist_hint or PLAYLIST_URL_RE.search(url):
+            info = _extract_flat(url)
+            entries = [e for e in (info.get("entries") or []) if e and e.get("id")]
+            if entries:
+                payload = _info_payload(info, url)
+                payload.update(
+                    {
+                        "is_playlist": True,
+                        "count": info.get("playlist_count") or len(entries),
+                        "entries": [_entry_payload(e, url) for e in entries],
+                        "formats": [],
+                        "best_format_id": "best",
+                        "best_audio_format_id": None,
+                        "duration": None,
+                    }
+                )
+                return payload
+            # URL hinted at a playlist but yt-dlp disagrees → single video.
+        info = _extract_single(url)
+        return _info_payload(info, url)
+    except Exception as exc:  # noqa: BLE001 - surface any extractor failure
+        raise HTTPException(422, _friendly_error(exc))
+
+
+def _run_ytdlp(
+    url: str,
+    format_id: str,
+    outtmpl: Path,
+    playlist: bool = False,
+    limit: int = 0,
+) -> None:
+    opts = _base_opts()
+    opts.update(
+        {
+            "format": format_id or "best",
+            "outtmpl": str(outtmpl),
+            "noplaylist": not playlist,
+        }
+    )
+    if playlist and limit and limit > 0:
+        opts["playlist_items"] = f"1-{limit}"
+    if "+" in (format_id or ""):
+        # Video+audio combo — merge into an mp4 container (needs ffmpeg).
+        opts["merge_output_format"] = "mp4"
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        ydl.download([url])
+
+
+def _finished_files(folder: Path) -> list:
+    return [
+        p
+        for p in folder.iterdir()
+        if p.is_file() and not p.name.endswith((".part", ".ytdl", ".temp"))
+    ]
+
+
+def _download_single(url: str, format_id: str, workdir: Path, background_tasks: BackgroundTasks):
+    _run_ytdlp(url, format_id, workdir / "%(title).100B [%(id)s].%(ext)s")
+    files = _finished_files(workdir)
+    if not files:
+        shutil.rmtree(workdir, ignore_errors=True)
+        raise HTTPException(422, "yt-dlp finished without producing a file")
+    target = files[0]
+    size = target.stat().st_size
+    if size > MAX_FILE_SIZE:
+        shutil.rmtree(workdir, ignore_errors=True)
+        raise HTTPException(
+            413,
+            f"File is {size / 1024 / 1024:.0f} MB — over the "
+            f"{MAX_FILE_SIZE / 1024 / 1024:.0f} MB server limit",
+        )
+    background_tasks.add_task(shutil.rmtree, workdir, ignore_errors=True)
+    return FileResponse(
+        str(target), media_type="application/octet-stream", filename=target.name
+    )
+
+
+def _download_playlist(
+    url: str, format_id: str, limit: int, workdir: Path, background_tasks: BackgroundTasks
+):
+    videos_dir = workdir / "videos"
+    videos_dir.mkdir()
+    _run_ytdlp(
+        url,
+        format_id,
+        videos_dir / "%(playlist_index)03d - %(title).80B [%(id)s].%(ext)s",
+        playlist=True,
+        limit=limit,
+    )
+    files = sorted(_finished_files(videos_dir))
+    if not files:
+        shutil.rmtree(workdir, ignore_errors=True)
+        raise HTTPException(422, "yt-dlp finished without producing any files")
+    zip_path = workdir / "playlist.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for i, f in enumerate(files, 1):
+            zf.write(f, f"{i:03d} - {f.name}")
+    background_tasks.add_task(shutil.rmtree, workdir, ignore_errors=True)
+    return FileResponse(str(zip_path), media_type="application/zip", filename="playlist.zip")
+
+
+@app.get("/api/download")
+def api_download(
+    url: str = Query(...),
+    format_id: str = Query("best"),
+    is_playlist: Optional[str] = Query(None),
+    limit: int = Query(0, ge=0),
+    background_tasks: BackgroundTasks = None,  # type: ignore[assignment]  # FastAPI injects it
+):
+    if yt_dlp is None:
+        raise HTTPException(
+            500, "yt-dlp is not installed on this server. Run: pip install -r requirements.txt"
+        )
+
+    _cleanup_old_files()
+    playlist = is_playlist is not None and is_playlist.lower() in {"1", "true", "yes", "on"}
+    workdir = Path(tempfile.mkdtemp(prefix="vidfetch-", dir=DOWNLOAD_DIR))
+    try:
+        if playlist:
+            return _download_playlist(url, format_id, limit, workdir, background_tasks)
+        return _download_single(url, format_id, workdir, background_tasks)
+    except HTTPException:
+        shutil.rmtree(workdir, ignore_errors=True)
+        raise
+    except Exception as exc:  # noqa: BLE001 - surface any download failure
+        shutil.rmtree(workdir, ignore_errors=True)
+        raise HTTPException(422, _friendly_error(exc))
+
 
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("main:app", host=HOST, port=PORT, reload=False)
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", "8080"))
+    uvicorn.run(app, host=host, port=port)

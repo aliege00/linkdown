@@ -163,7 +163,6 @@ export interface DesktopBridge {
 
 const Desktop = (window as any).vidfetch as DesktopBridge | undefined;
 
-let progressListeners: Map<string, ProgressCallback> = new Map();
 let nativeAvailable: boolean | null = null;
 
 /**
