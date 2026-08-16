@@ -83,6 +83,95 @@ const BUILD_TAG =
     ? ((window as any).__VIDFETCH_BUILD__ as string | undefined) ?? null
     : null;
 
+// ─── Bilingual YouTube bot-check help guide ───────────────────────────
+// Shown prominently below the download card. The same content is written
+// in plain language for end users (TR + EN), with a toggle in the card.
+type HelpLang = "tr" | "en";
+
+const HELP_CONTENT = {
+  tr: {
+    kicker: "Yardım merkezi",
+    title: "YouTube indirme sorunları — kısa rehber",
+    introTitle: "Neden 'bot kontrolü' hatası alıyorum?",
+    intro:
+      "Bazen YouTube, bir videoyu indirmeye çalışırken \"Sign in to confirm you're not a bot\" (Devam etmek için giriş yapın) uyarısını gösterir ve erişimi engeller. Bu, uygulamanın hatası değildir. YouTube; VPN, veri merkezi veya ortak ağlardan gelen istekleri otomatik olarak şüpheli görür ve geçici olarak kısıtlar. Diğer siteler (Vimeo, TikTok, Instagram vb.) bu kontrolden etkilenmez — sorun yalnızca YouTube'a özeldir.",
+    causesTitle: "En sık nedenler",
+    causes: [
+      "VPN, kurumsal veya veri merkezi ağına bağlı olman",
+      "Tarayıcıda YouTube'a giriş yapılmamış olması",
+      "Kısa sürede çok fazla indirme yapılması",
+      "YouTube'un yeni bir altyapı değişikliği yayınlaması (birkaç gün sürebilir)",
+    ],
+    fixesTitle: "Nasıl çözülür?",
+    fixes: [
+      {
+        badge: "Windows",
+        title: "Tarayıcı cookies — en kolay yol",
+        body: "Chrome, Edge veya Firefox'ta YouTube'a giriş yap. Uygulamada Gelişmiş → YouTube sorun giderme → Tarayıcı cookies bölümünden tarayıcını seç. İndirme sırasında tarayıcının kapalı veya kilidi açık olması gerekir.",
+      },
+      {
+        badge: "Android + Windows",
+        title: "cookies.txt dosyası",
+        body: "Tarayıcına \"Get cookies.txt LOCALLY\" eklentisini kur, YouTube'a giriş yap ve cookies dosyasını dışa aktar. Ardından uygulamada Gelişmiş → YouTube sorun giderme bölümünden bu dosyayı seç.",
+      },
+      {
+        badge: "Windows • İleri düzey",
+        title: "PO token sağlayıcı",
+        body: "Bilgisayarında token sunucusunu çalıştır: docker run -d --init -p 4416:4416 brainicism/bgutil-ytdlp-pot-provider. Ardından uygulamaya http://127.0.0.1:4416 yaz ve Kaydet'e bas.",
+      },
+    ],
+    note: "Bu ayarlar yalnızca YouTube isteklerini etkiler ve Gelişmiş → YouTube sorun giderme bölümündedir. En güvenilir çözüm, giriş yaptığın bir tarayıcıdan cookies almaktır. VPN'i kapatmak da çoğu zaman yeterlidir.",
+    retryTip:
+      "Bu bir YouTube bot kontrolü hatasına benziyor. Aşağıdaki rehbere bak.",
+  },
+  en: {
+    kicker: "Help center",
+    title: "YouTube download issues — quick guide",
+    introTitle: "Why am I getting a 'bot check' error?",
+    intro:
+      "Sometimes YouTube shows \"Sign in to confirm you're not a bot\" and blocks access while you try to download a video. This is not a bug in the app. YouTube automatically treats requests coming from VPNs, datacenter or shared networks as suspicious and temporarily restricts them. Other sites (Vimeo, TikTok, Instagram, etc.) are not affected by this check — it only applies to YouTube.",
+    causesTitle: "Most common causes",
+    causes: [
+      "You are on a VPN, corporate or datacenter network",
+      "You are not logged into YouTube in your browser",
+      "Too many downloads in a short period of time",
+      "YouTube just rolled out an infrastructure change (may last a few days)",
+    ],
+    fixesTitle: "How to fix it",
+    fixes: [
+      {
+        badge: "Windows",
+        title: "Browser cookies — easiest way",
+        body: "Log into YouTube in Chrome, Edge or Firefox. In the app open Advanced → YouTube troubleshooting → Browser cookies and pick your browser. The browser must be closed or unlocked while downloading.",
+      },
+      {
+        badge: "Android + Windows",
+        title: "cookies.txt file",
+        body: "Install the \"Get cookies.txt LOCALLY\" browser extension, log into YouTube and export the cookies file. Then choose that file under Advanced → YouTube troubleshooting in the app.",
+      },
+      {
+        badge: "Windows • Advanced",
+        title: "PO token provider",
+        body: "Run a token server on this PC: docker run -d --init -p 4416:4416 brainicism/bgutil-ytdlp-pot-provider. Then enter http://127.0.0.1:4416 in the app and press Save.",
+      },
+    ],
+    note: "These settings only affect YouTube requests and live under Advanced → YouTube troubleshooting. The most reliable fix is importing cookies from a browser where you are logged in. Turning your VPN off also fixes most cases.",
+    retryTip:
+      "This looks like a YouTube bot check — see the help guide below.",
+  },
+} as const;
+
+/** True when an error message looks like YouTube's anti-bot "Sign in" check. */
+function isBotCheckError(msg: string): boolean {
+  const m = (msg || "").toLowerCase();
+  return (
+    m.includes("not a bot") ||
+    m.includes("sign in to confirm") ||
+    m.includes("bot") ||
+    m.includes("captcha")
+  );
+}
+
 function groupFormats(formats: YtDlpFormat[]) {
   const video: YtDlpFormat[] = [];
   const videoOnly: YtDlpFormat[] = [];
@@ -174,6 +263,7 @@ export default function Landing() {
   const [ytSettings, setYtSettings] = useState<YouTubeSettings | null>(null);
   const [poProviderInput, setPoProviderInput] = useState("");
   const [pickingCookies, setPickingCookies] = useState(false);
+  const [helpLang, setHelpLang] = useState<HelpLang>("tr");
   const nativeAvailable = isNativeAvailable();
   // Desktop (EXE) only: browser-cookies and PO-token-provider settings are
   // not available on Android, so the UI shows them just on Windows.
@@ -810,6 +900,13 @@ export default function Landing() {
                           <p className="text-red-600 dark:text-red-400/80 mt-1 text-xs leading-relaxed">
                             {errorMsg}
                           </p>
+                          {isBotCheckError(errorMsg) && (
+                            <p className="mt-2 text-[11px] leading-relaxed rounded-md border border-amber-300/50 dark:border-amber-700/40 bg-amber-50 dark:bg-amber-950/30 px-2.5 py-1.5 text-amber-700 dark:text-amber-300">
+                              {helpLang === "tr"
+                                ? "Bu bir YouTube bot kontrolü hatasına benziyor. Aşağıdaki rehbere bak."
+                                : "This looks like a YouTube bot check — see the help guide below."}
+                            </p>
+                          )}
                         </div>
                       </div>
                       <div className="flex gap-2">
@@ -1188,6 +1285,116 @@ export default function Landing() {
               </CardContent>
             </Card>
           </motion.div>
+
+          {/* ═══ Bilingual help: YouTube bot check (always visible) ═══ */}
+          {(() => {
+            const help = HELP_CONTENT[helpLang];
+            return (
+              <div className="mt-6 mx-auto max-w-2xl" id="youtube-help-guide">
+                <Card className="border-amber-500/25 bg-gradient-to-b from-amber-50/70 to-card dark:from-amber-500/5 dark:to-card shadow-sm">
+                  <CardContent className="p-4 sm:p-5 text-left">
+                    {/* Header + language toggle */}
+                    <div className="flex items-center gap-3 pb-3 mb-4 border-b border-border/30">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-500">
+                        <AlertCircle className="h-4 w-4" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">
+                          {help.kicker}
+                        </p>
+                        <p className="text-sm font-semibold leading-snug">
+                          {help.title}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-0.5 rounded-full border border-border/50 bg-background p-0.5">
+                        <button
+                          type="button"
+                          onClick={() => setHelpLang("tr")}
+                          className={cn(
+                            "rounded-full px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer",
+                            helpLang === "tr"
+                              ? "bg-primary text-primary-foreground"
+                              : "text-muted-foreground hover:text-foreground"
+                          )}
+                        >
+                          Türkçe
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setHelpLang("en")}
+                          className={cn(
+                            "rounded-full px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer",
+                            helpLang === "en"
+                              ? "bg-primary text-primary-foreground"
+                              : "text-muted-foreground hover:text-foreground"
+                          )}
+                        >
+                          English
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* What is happening */}
+                    <div className="mb-4">
+                      <p className="text-sm font-semibold flex items-center gap-1.5">
+                        <Globe className="h-3.5 w-3.5 text-primary" />
+                        {help.introTitle}
+                      </p>
+                      <p className="text-xs text-muted-foreground leading-relaxed mt-1.5">
+                        {help.intro}
+                      </p>
+                    </div>
+
+                    {/* Common causes */}
+                    <div className="mb-4">
+                      <p className="text-sm font-semibold">{help.causesTitle}</p>
+                      <ul className="mt-1.5 space-y-1.5">
+                        {help.causes.map((cause, i) => (
+                          <li
+                            key={i}
+                            className="flex items-start gap-2 text-xs text-muted-foreground leading-relaxed"
+                          >
+                            <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-amber-500/70" />
+                            {cause}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    {/* Fixes */}
+                    <div className="mb-4">
+                      <p className="text-sm font-semibold mb-2">{help.fixesTitle}</p>
+                      <div className="space-y-2.5">
+                        {help.fixes.map((fix, i) => (
+                          <div
+                            key={i}
+                            className="rounded-lg border border-border/40 bg-background/60 p-3"
+                          >
+                            <div className="flex flex-wrap items-center gap-2 mb-1">
+                              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-bold text-primary">
+                                {i + 1}
+                              </span>
+                              <p className="text-sm font-medium">{fix.title}</p>
+                              <span className="rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[10px] font-medium text-primary">
+                                {fix.badge}
+                              </span>
+                            </div>
+                            <p className="text-xs text-muted-foreground leading-relaxed">
+                              {fix.body}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <p className="text-[11px] text-muted-foreground/70 leading-relaxed border-t border-border/30 pt-3">
+                      {help.note}
+                    </p>
+                  </CardContent>
+                </Card>
+              </div>
+            );
+          })()}
 
           {/* Recent downloads (APK only) */}
           {nativeAvailable && (
