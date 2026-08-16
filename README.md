@@ -1,3 +1,5 @@
+[![Build APK](https://github.com/aliege00/linkdown/actions/workflows/build-apk.yml/badge.svg)](https://github.com/aliege00/linkdown/actions/workflows/build-apk.yml) [![Build EXE](https://github.com/aliege00/linkdown/actions/workflows/build-exe.yml/badge.svg)](https://github.com/aliege00/linkdown/actions/workflows/build-exe.yml)
+
 ## Overview
 
 This project uses the following tech stack:

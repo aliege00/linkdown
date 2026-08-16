@@ -67,8 +67,9 @@ export default defineConfig({
     },
     // Increase chunk size warning limit for better chunking
     chunkSizeWarningLimit: 1000,
-    // Target modern browsers for better optimization
-    target: 'esnext',
+    // es2019 keeps the bundle parseable by older Android System WebViews
+    // (the esnext output caused a blank white screen in the Capacitor APK).
+    target: 'es2019',
     // Minify options - using esbuild (faster than terser)
     minify: 'esbuild',
   },

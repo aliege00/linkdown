@@ -16,7 +16,11 @@ import {
 
 import { useAuth } from "@/hooks/use-auth";
 import logo from "@/assets/logo.svg";
-import { ArrowRight, Loader2, Mail, UserX } from "lucide-react";
+
+// True only when built with a real Convex URL; packaged builds run offline
+// and never reach the auth screen's live flows.
+const HAS_CONVEX = !!import.meta.env.VITE_CONVEX_URL;
+import { ArrowRight, Loader2, Mail, ServerOff, UserX } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 
@@ -52,6 +56,36 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       navigate(redirect);
     }
   }, [authLoading, isAuthenticated, navigate, redirect]);
+
+  // Offline builds (no VITE_CONVEX_URL) have no backend to authenticate
+  // against — show a friendly notice instead of a broken form.
+  if (!HAS_CONVEX) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6">
+        <Card className="w-full max-w-sm text-center">
+          <CardHeader>
+            <div className="flex justify-center mb-2">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                <ServerOff className="h-5 w-5" />
+              </div>
+            </div>
+            <CardTitle>Accounts not available</CardTitle>
+            <CardDescription>
+              This build has no backend connected, so signing in is disabled.
+              The downloader on the home page works without an account.
+            </CardDescription>
+          </CardHeader>
+          <CardFooter className="justify-center">
+            <Button className="w-full gap-2" onClick={() => navigate("/")}>
+              <ArrowRight className="h-4 w-4" />
+              Go to downloader
+            </Button>
+          </CardFooter>
+        </Card>
+      </div>
+    );
+  }
+
   const handleEmailSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsLoading(true);

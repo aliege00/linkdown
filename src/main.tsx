@@ -1,7 +1,5 @@
-import '@vly-ai/integrations';
 import { Toaster } from "@/components/ui/sonner";
 import { RequireAuth } from "@/components/RequireAuth";
-import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
 import { ConvexReactClient } from "convex/react";
 import { ThemeProvider } from "next-themes";
@@ -10,11 +8,28 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router";
 import "./index.css";
 
-// Lazy load route components for better code splitting
+// Convex deployment URL baked in by Vite at build time. On CI/packaged builds
+// it is usually empty, so `convex` below stays null and the app runs fully
+// offline: landing page + on-device downloads work with no backend at all.
+const CONVEX_URL = import.meta.env.VITE_CONVEX_URL as string | undefined;
+const HAS_CONVEX = !!CONVEX_URL;
+
+// Lazy load route components for better code splitting. VlyToolbar is also
+// lazy: its heavy dependencies (@zumer/snapdom) load in a separate chunk, so
+// if they ever fail to evaluate inside the packaged APK/EXE the toolbar simply
+// never appears instead of white-screening the whole app at module load.
 const Landing = lazy(() => import("./pages/Landing.tsx"));
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
+const VlyToolbar = lazy(() =>
+  import("../vly-toolbar-readonly.tsx").then((m) => ({ default: m.VlyToolbar })),
+);
+
+// Only construct the Convex client when a real deployment URL exists.
+// `new ConvexReactClient("")` throws at module load, which crashed the whole
+// app on builds without VITE_CONVEX_URL (the white-screen APK bug).
+const convex = CONVEX_URL ? new ConvexReactClient(CONVEX_URL) : null;
 
 // Simple loading fallback for route transitions
 function RouteLoading() {
@@ -81,10 +96,6 @@ class RootErrorBoundary extends React.Component<
   }
 }
 
-const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
-
-
-
 function RouteSyncer() {
   const location = useLocation();
   useEffect(() => {
@@ -108,39 +119,54 @@ function RouteSyncer() {
   return null;
 }
 
+function AppRoutes() {
+  return (
+    <BrowserRouter>
+      <RouteSyncer />
+      <Suspense fallback={<RouteLoading />}>
+        <Routes>
+          <Route path="/" element={<Landing />} />
+          <Route
+            path="/auth"
+            element={<AuthPage redirectAfterAuth="/dashboard" />}
+          />
+          <Route
+            path="/dashboard"
+            element={
+              <RequireAuth>
+                <Dashboard />
+              </RequireAuth>
+            }
+          />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </Suspense>
+      <Toaster />
+    </BrowserRouter>
+  );
+}
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <RootErrorBoundary>
       <ToolbarErrorBoundary>
-        <VlyToolbar />
+        <Suspense fallback={null}>
+          <VlyToolbar />
+        </Suspense>
       </ToolbarErrorBoundary>
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-        <ConvexAuthProvider client={convex}>
-          <BrowserRouter>
-            <RouteSyncer />
-            <Suspense fallback={<RouteLoading />}>
-              <Routes>
-                <Route path="/" element={<Landing />} />
-                <Route
-                  path="/auth"
-                  element={<AuthPage redirectAfterAuth="/dashboard" />}
-                />
-                <Route
-                  path="/dashboard"
-                  element={
-                    <RequireAuth>
-                      <Dashboard />
-                    </RequireAuth>
-                  }
-                />
-                <Route path="*" element={<NotFound />} />
-              </Routes>
-            </Suspense>
-          </BrowserRouter>
-          <Toaster />
-        </ConvexAuthProvider>
+        {HAS_CONVEX && convex ? (
+          <ConvexAuthProvider client={convex}>
+            <AppRoutes />
+          </ConvexAuthProvider>
+        ) : (
+          <AppRoutes />
+        )}
       </ThemeProvider>
     </RootErrorBoundary>
   </StrictMode>,
 );
+
+// Tell the inline watchdog in index.html that React mounted successfully,
+// so it never paints a false "did not start" screen in the packaged apps.
+(window as any).__VIDFETCH_READY__?.();

@@ -2,12 +2,15 @@
   "name": "vite-template",
   "private": true,
   "version": "0.0.0",
+  "description": "VidFetch - on-device video downloader (desktop shell)",
+  "author": "VidFetch",
+  "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "build:apk": "npm run build && npx cap sync android && cd android && ./gradlew assembleDebug",
-    "build:exe": "npm run build && npx pwabuilder package --platform windows --file dist --out pwabuild-output",
+    "build:exe": "npm run build && npx electron-builder --config electron-builder.yml",
     "lint": "eslint .",
     "format": "prettier --write .",
     "preview": "vite preview"
@@ -76,6 +79,7 @@
     "zod": "^4.1.13"
   },
   "devDependencies": {
+    "electron": "43.2.0",
     "@eslint/js": "^9.39.1",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.7",

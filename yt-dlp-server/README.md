@@ -26,6 +26,23 @@ docker build -t vidfetch-ytdlp .
 docker run -p 8080:8080 vidfetch-ytdlp
 ```
 
+## YouTube anti-bot settings (optional)
+
+YouTube sometimes blocks server IPs with "Sign in to confirm you're not a bot".
+If that happens, configure one (or both) of these environment variables:
+
+| Variable | Description |
+|---|---|
+| `YTDLP_COOKIES_FILE` | Path to a Netscape-format `cookies.txt` exported from a logged-in browser session |
+| `YTDLP_PO_TOKEN_PROVIDER` | URL of a [bgutil-ytdlp-pot-provider](https://github.com/Brainicism/bgutil-ytdlp-pot-provider) server (e.g. `http://127.0.0.1:4416`) — requires the bgutil plugin installed next to yt-dlp |
+| `YTDLP_PLAYER_CLIENT` | Optional YouTube player client override, e.g. `tv` or `web_embedded` (fewer bot checks, some formats may be unavailable) |
+
+Example:
+
+```bash
+YTDLP_COOKIES_FILE=/data/cookies.txt python main.py
+```
+
 ## Deploy Options
 
 ### Option 1: Railway.app (Recommended — easiest)
@@ -91,9 +108,12 @@ uvicorn main:app --host 0.0.0.0 --port 8080
 
 ## API Endpoints
 
-### `GET /api/info?url=<encoded_url>`
+### `GET /api/info?url=<encoded_url>[&is_playlist=true]`
 
-Returns video metadata + available formats.
+Returns video metadata + available formats. When the URL is a YouTube
+playlist (or `is_playlist=true` is passed), returns `is_playlist: true` with
+the playlist's `count` and a flat `entries` list so clients can show every
+video and offer a "Download all" button.
 
 ```json
 {
@@ -119,11 +139,15 @@ Returns video metadata + available formats.
 }
 ```
 
-### `GET /api/download?url=<encoded_url>&format_id=best`
+### `GET /api/download?url=<encoded_url>[&format_id=best][&is_playlist=true][&limit=N]`
 
 Downloads the video file as a streaming attachment.
 
 - `format_id`: Optional. Use `best`, `bestaudio`, or a specific format ID from `/api/info`.
+- `is_playlist=true`: Downloads **every video** in the playlist and returns a
+  single ZIP archive with one numbered file per video.
+- `limit`: Optional. With playlists, only grabs the first N videos (e.g.
+  `limit=10`). Default `0` = download the whole playlist.
 
 ### `GET /api/health`
 

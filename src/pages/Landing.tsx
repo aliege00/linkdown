@@ -8,10 +8,26 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   getVideoInfo,
   startDownload,
+  openFile,
+  getDownloads,
+  pickFolder,
+  getDownloadLocation,
+  resetDownloadLocation,
+  getYouTubeSettings,
+  setCookiesBrowser,
+  pickCookieFile,
+  clearCookieFile,
+  setPoTokenProvider,
+  isNativeAvailable,
   formatDuration,
   formatSize,
   type YtDlpFormat,
   type YtDlpInfo,
+  type PlaylistEntry,
+  type DownloadEntry,
+  type CompletedDownload,
+  type DownloadLocation,
+  type YouTubeSettings,
 } from "@/lib/ytdlp-native";
 import { motion, useScroll, useTransform, AnimatePresence } from "framer-motion";
 import {
@@ -29,12 +45,14 @@ import {
   Image,
   Keyboard,
   Link,
+  ListVideo,
   Loader2,
   Monitor,
   Music,
   Play,
   RefreshCw,
   Search,
+  Settings2,
   Shield,
   Sparkles,
   User,
@@ -42,11 +60,13 @@ import {
   X,
   Zap,
   AlertCircle,
-  Server,
+  Smartphone,
   Youtube,
   FileVideo,
+  FolderCog,
+  FolderOpen,
 } from "lucide-react";
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, memo } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -56,9 +76,12 @@ type PageState = "idle" | "loading" | "loaded" | "downloading" | "complete" | "e
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
-function getServerConfigured(): boolean {
-  return !!((import.meta as any).env.VITE_YTDLP_SERVER_URL);
-}
+// Build fingerprint injected by index.html (fix10, etc.) so a screenshot of
+// the app or its footer tells us exactly which APK/EXE build is installed.
+const BUILD_TAG =
+  typeof window !== "undefined"
+    ? ((window as any).__VIDFETCH_BUILD__ as string | undefined) ?? null
+    : null;
 
 function groupFormats(formats: YtDlpFormat[]) {
   const video: YtDlpFormat[] = [];
@@ -86,6 +109,39 @@ function getQualityLabel(resolution: string): string {
   return resolution;
 }
 
+/**
+ * Cheap URL-based playlist hint. Engines double-check this against
+ * yt-dlp's own response, so a false positive just means the analyze
+ * runs in playlist mode and reports back a single video.
+ */
+function looksLikePlaylist(raw: string): boolean {
+  return /[?&]list=[^&\s]+/.test(raw) || /\/playlist([/?]|$)/.test(raw);
+}
+
+/** Quality presets for playlist downloads (yt-dlp format selectors). */
+const PLAYLIST_PRESETS = [
+  { id: "best", label: "Best", desc: "Best available", spec: "best" },
+  {
+    id: "1080p",
+    label: "1080p",
+    desc: "Full HD + audio",
+    spec: "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
+  },
+  {
+    id: "720p",
+    label: "720p",
+    desc: "HD + audio",
+    spec: "bestvideo[height<=720]+bestaudio/best[height<=720]",
+  },
+  {
+    id: "480p",
+    label: "480p",
+    desc: "SD + audio",
+    spec: "bestvideo[height<=480]+bestaudio/best[height<=480]",
+  },
+  { id: "audio", label: "Audio", desc: "MP3 / M4A", spec: "bestaudio" },
+] as const;
+
 // ─── Component ────────────────────────────────────────────────────────
 
 export default function Landing() {
@@ -96,12 +152,34 @@ export default function Landing() {
   const [errorMsg, setErrorMsg] = useState("");
   const [videoInfo, setVideoInfo] = useState<YtDlpInfo | null>(null);
   const [selectedFormat, setSelectedFormat] = useState<string>("");
-  const [downloadProgress, setDownloadProgress] = useState({
-    percent: 0,
-    speed: "0",
-    eta: "--:--",
-  });
+  const [playlistQuality, setPlaylistQuality] = useState<string>("best");
+  const [playlistSummary, setPlaylistSummary] = useState<{
+    saved: number;
+    total: number | null;
+    folder: string | null;
+  } | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<{
+    percent: number;
+    speed: string;
+    eta: string;
+    item?: number;
+    itemCount?: number;
+    fileName?: string;
+  }>({ percent: 0, speed: "0", eta: "--:--" });
   const [footerOpen, setFooterOpen] = useState<number | null>(null);
+  const [savedDownloads, setSavedDownloads] = useState<DownloadEntry[]>([]);
+  const [lastCompleted, setLastCompleted] = useState<CompletedDownload | null>(null);
+  const [downloadLocation, setDownloadLocation] = useState<DownloadLocation | null>(null);
+  const [pickingFolder, setPickingFolder] = useState(false);
+  const [ytSettings, setYtSettings] = useState<YouTubeSettings | null>(null);
+  const [poProviderInput, setPoProviderInput] = useState("");
+  const [pickingCookies, setPickingCookies] = useState(false);
+  const nativeAvailable = isNativeAvailable();
+  // Desktop (EXE) only: browser-cookies and PO-token-provider settings are
+  // not available on Android, so the UI shows them just on Windows.
+  const isDesktop =
+    typeof (window as any).vidfetch?.isDesktop === "boolean" &&
+    (window as any).vidfetch.isDesktop;
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
   const featuresRef = useRef<HTMLDivElement>(null);
@@ -109,7 +187,82 @@ export default function Landing() {
   const { scrollYProgress } = useScroll();
   const heroOpacity = useTransform(scrollYProgress, [0, 0.15], [1, 0.85]);
 
-  const serverConfigured = getServerConfigured();
+  // Load the list of files already saved (APK only) + the chosen location
+  useEffect(() => {
+    if (!isNativeAvailable()) return;
+    getDownloads().then((list) => {
+      if (list.length > 0) setSavedDownloads(list);
+    });
+    getDownloadLocation().then((loc) => {
+      if (loc?.uri) setDownloadLocation(loc);
+    });
+    getYouTubeSettings().then((s) => {
+      setYtSettings(s);
+      setPoProviderInput(s.poTokenProvider);
+    });
+  }, []);
+
+  // ── YouTube anti-bot settings handlers ────────────────────────────
+  const refreshYtSettings = useCallback(async () => {
+    const s = await getYouTubeSettings();
+    setYtSettings(s);
+    setPoProviderInput((prev) => prev || s.poTokenProvider);
+    return s;
+  }, []);
+
+  const handleSetCookiesBrowser = useCallback(
+    async (browser: string) => {
+      await setCookiesBrowser(browser);
+      await refreshYtSettings();
+    },
+    [refreshYtSettings],
+  );
+
+  const handlePickCookieFile = useCallback(async () => {
+    if (pickingCookies) return;
+    setPickingCookies(true);
+    try {
+      const s = await pickCookieFile();
+      if (s) setYtSettings(s);
+    } finally {
+      setPickingCookies(false);
+    }
+  }, [pickingCookies]);
+
+  const handleClearCookieFile = useCallback(async () => {
+    await clearCookieFile();
+    await refreshYtSettings();
+  }, [refreshYtSettings]);
+
+  const handleSavePoProvider = useCallback(async () => {
+    await setPoTokenProvider(poProviderInput.trim());
+    await refreshYtSettings();
+  }, [poProviderInput, refreshYtSettings]);
+
+  // Stable callback so memoized FormatCards don't re-render on progress ticks
+  const handleSelectFormat = useCallback((id: string) => setSelectedFormat(id), []);
+
+  const handlePickFolder = useCallback(async () => {
+    if (pickingFolder) return;
+    setPickingFolder(true);
+    try {
+      const loc = await pickFolder();
+      if (loc?.uri) {
+        setDownloadLocation(loc);
+        const list = await getDownloads();
+        setSavedDownloads(list);
+      }
+    } finally {
+      setPickingFolder(false);
+    }
+  }, [pickingFolder]);
+
+  const handleResetLocation = useCallback(async () => {
+    await resetDownloadLocation();
+    setDownloadLocation(null);
+    const list = await getDownloads();
+    setSavedDownloads(list);
+  }, []);
 
   // Scroll to results
   const scrollToResults = () => {
@@ -126,8 +279,10 @@ export default function Landing() {
     setErrorMsg("");
     setVideoInfo(null);
     setSelectedFormat("");
+    setPlaylistSummary(null);
+    setPlaylistQuality("best");
 
-    const result = await getVideoInfo(url.trim());
+    const result = await getVideoInfo(url.trim(), looksLikePlaylist(url.trim()));
 
     if (!result.success) {
       setErrorMsg(result.error);
@@ -149,10 +304,22 @@ export default function Landing() {
     setErrorMsg("");
     setDownloadProgress({ percent: 0, speed: "0", eta: "--:--" });
 
-    const workId = await startDownload(
-      url.trim(),
-      selectedFormat,
-      (progress) => {
+    // Video-only formats (common above 1080p on YouTube) carry no audio
+    // track. When ffmpeg is available (bundled in both the APK and the EXE),
+    // append bestaudio so the engine merges video + audio into one playable
+    // file instead of saving a silent video.
+    const picked = videoInfo?.formats.find(
+      (f) => f.format_id === selectedFormat,
+    );
+    const formatSpec =
+      picked && picked.vcodec && !picked.acodec && videoInfo?.ffmpeg_available
+        ? `${selectedFormat}+bestaudio/bestaudio`
+        : selectedFormat;
+
+    const workId = await startDownload({
+      url: url.trim(),
+      formatId: formatSpec,
+      onProgress: (progress) => {
         // Real-time progress updates from the native foreground service
         setDownloadProgress({
           percent: progress.percent,
@@ -164,43 +331,127 @@ export default function Landing() {
         if (progress.percent >= 100) {
           setState("complete");
         }
-      }
-    );
+      },
+      onComplete: async (completed) => {
+        // Foreground service finished — remember the file & refresh the list
+        setLastCompleted(completed);
+        setState("complete");
+        const list = await getDownloads();
+        if (list.length > 0) setSavedDownloads(list);
+      },
+      onError: (error) => {
+        setErrorMsg(error);
+        setState("error");
+      },
+    });
 
     if (!workId) {
-      // Native engine not available — check for VITE_YTDLP_SERVER_URL fallback
-      const serverUrl = (import.meta as any).env.VITE_YTDLP_SERVER_URL;
-      if (serverUrl) {
-        // Fall back to remote yt-dlp server download
-        const a = document.createElement("a");
-        a.href = `${serverUrl}/api/download?url=${encodeURIComponent(url.trim())}&format_id=${encodeURIComponent(selectedFormat)}`;
-        a.download = "";
-        a.target = "_blank";
-        a.rel = "noopener noreferrer";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setState("complete");
-      } else {
-        setErrorMsg(
-          "On-device yt-dlp engine not available. Build the APK and install on your Android device, or set VITE_YTDLP_SERVER_URL for cloud-based downloading."
-        );
-        setState("error");
-        return;
-      }
-    } else {
-      // If we got a workId but never hit 100% from the callback,
-      // poll for a short while then show complete
-      setTimeout(() => {
-        setState((s) => (s === "downloading" ? "complete" : s));
-      }, 2000);
+      // The on-device engine only exists inside the APK / EXE build.
+      // In a plain browser there is nothing to do the download — be honest.
+      setErrorMsg(
+        "This preview runs in a browser, where there is no download engine. Install the Android APK or the Windows EXE — the engine runs right on your device. No server, no API key, unlimited."
+      );
+      setState("error");
+      return;
     }
+
+    // Safety net ONLY: the native foreground service reliably emits
+    // downloadComplete/downloadError, and progress events keep the
+    // progress screen alive until 100%. This long fallback exists purely
+    // so the UI can never get stuck on "downloading" if an event is lost
+    // (e.g. an old build without the complete event). It must NOT fire
+    // while the download is still running — a real video download takes
+    // far longer than a few seconds.
+    setTimeout(() => {
+      setState((s) => (s === "downloading" ? "complete" : s));
+    }, 120000);
 
     // Reset "complete" state after a delay
     setTimeout(() => {
       setState((s) => (s === "complete" ? "loaded" : s));
     }, 5000);
-  }, [url, selectedFormat]);
+  }, [url, selectedFormat, videoInfo]);
+
+  // ─── Playlist download (all videos at once) ───────────────────────
+  const handleDownloadPlaylist = useCallback(async () => {
+    if (!url.trim() || !videoInfo?.is_playlist) return;
+
+    const total = videoInfo.count ?? videoInfo.entries?.length ?? 0;
+    const preset =
+      PLAYLIST_PRESETS.find((p) => p.id === playlistQuality) ??
+      PLAYLIST_PRESETS[0];
+
+    setState("downloading");
+    setErrorMsg("");
+    setPlaylistSummary(null);
+    setDownloadProgress({
+      percent: 0,
+      speed: "0",
+      eta: "--:--",
+      item: 0,
+      itemCount: total || undefined,
+    });
+
+    const workId = await startDownload({
+      url: url.trim(),
+      formatId: preset.spec,
+      isPlaylist: true,
+      onProgress: (progress) => {
+        setDownloadProgress((prev) => ({
+          percent: progress.percent,
+          speed: progress.speed,
+          eta: progress.eta,
+          item: progress.item ?? prev.item,
+          itemCount: progress.itemCount ?? prev.itemCount,
+          fileName: progress.fileName ?? prev.fileName,
+        }));
+
+        // The last item reaching 100% means the whole playlist finished.
+        if (
+          progress.item &&
+          progress.itemCount &&
+          progress.item >= progress.itemCount &&
+          progress.percent >= 100
+        ) {
+          setState("complete");
+        }
+      },
+      onComplete: async (completed) => {
+        setLastCompleted(completed);
+        setPlaylistSummary({
+          saved: completed.fileCount ?? total,
+          total: total || null,
+          folder: completed.fileName ?? null,
+        });
+        setState("complete");
+        const list = await getDownloads();
+        if (list.length > 0) setSavedDownloads(list);
+      },
+      onError: (error) => {
+        setErrorMsg(error);
+        setState("error");
+      },
+    });
+
+    if (!workId) {
+      setErrorMsg(
+        "This preview runs in a browser, where there is no download engine. Install the Android APK or the Windows EXE — the engine runs right on your device. No server, no API key, unlimited."
+      );
+      setState("error");
+      return;
+    }
+
+    // Safety net ONLY — same reasoning as single-video downloads. The
+    // real completion is driven by progress events (last item at 100%)
+    // and the downloadComplete event; this long fallback just prevents a
+    // permanently stuck "downloading" screen if an event is ever lost.
+    setTimeout(() => {
+      setState((s) => (s === "downloading" ? "complete" : s));
+    }, 10 * 60 * 1000);
+    setTimeout(() => {
+      setState((s) => (s === "complete" ? "loaded" : s));
+    }, 10000);
+  }, [url, videoInfo, playlistQuality]);
 
   // ─── Paste ─────────────────────────────────────────────────────────
   const handlePaste = async () => {
@@ -234,35 +485,48 @@ export default function Landing() {
   // ─── Video info ────────────────────────────────────────────────────
   const grouped = videoInfo ? groupFormats(videoInfo.formats) : null;
 
+  // Overall progress across a whole playlist: ((item-1) + item%) / total.
+  const overallPercent =
+    downloadProgress.item && downloadProgress.itemCount
+      ? Math.min(
+          100,
+          Math.round(
+            ((downloadProgress.item - 1) * 100 + downloadProgress.percent) /
+              downloadProgress.itemCount
+          ),
+        )
+      : downloadProgress.percent;
+  const isPlaylistDownload = !!downloadProgress.itemCount;
+
   // ─── FAQ data ──────────────────────────────────────────────────────
   const faqs = [
     {
       q: "How does VidFetch work?",
-      a: "Paste any video URL from YouTube, TikTok, Twitter/X, Instagram, Vimeo, and thousands of other sites. Our self-hosted yt-dlp server extracts the video and streams it to you as a download. No sign-ups required.",
+      a: "Paste any video URL from YouTube, TikTok, Twitter/X, Instagram, Vimeo, and thousands of other sites. The built-in yt-dlp engine extracts the video and saves it straight to your device. No sign-ups required.",
     },
     {
       q: "What sites are supported?",
       a: "Over 1,000 sites including YouTube, TikTok, Twitter/X, Instagram, Vimeo, Facebook, Reddit, Twitch, Dailymotion, and many more. If you can watch it online, we can probably download it.",
     },
     {
-      q: "How do I set up the yt-dlp server?",
-      a: "You need to deploy the yt-dlp server (in the yt-dlp-server/ folder) to Railway, Fly.io, Render, or your own VPS. Then set the VITE_YTDLP_SERVER_URL environment variable. See the README for step-by-step instructions.",
+      q: "Do I need a server or an API key?",
+      a: "No. There is no server — the phone or the desktop app IS the engine. Everything runs on your device, completely free and unlimited, with no API keys and no setup.",
     },
     {
       q: "Is this service free?",
-      a: "The web app is free to use. You deploy the yt-dlp server on your own infrastructure — Railway and Render have free tiers that are more than sufficient.",
+      a: "Yes — 100% free and unlimited. No accounts, no API keys, no rate limits, no monthly caps. Your device does all the work.",
     },
     {
       q: "Are there any file size limits?",
-      a: "The yt-dlp server has a 2 GB default limit, configurable via MAX_FILE_SIZE. Most videos are well under this limit.",
+      a: "None at all. Since downloads run on your device, the only limit is your own storage space.",
     },
     {
       q: "Is my privacy protected?",
-      a: "Yes. The yt-dlp server is self-hosted — you control the data. Downloaded files are temporarily stored and automatically deleted after 30 minutes. We don't log or track anything.",
+      a: "Yes. Everything happens on your device — videos are downloaded directly to your phone or PC. Nothing is ever uploaded to a server, and we don't log or track anything.",
     },
   ];
 
-  // ─── Render ────────────────────────────────────────────────────────
+  // ─── Page render ───────────────────────────────────────────────────
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -364,7 +628,7 @@ export default function Landing() {
             className="mt-5 text-base sm:text-lg text-muted-foreground max-w-2xl mx-auto leading-relaxed"
           >
             YouTube, TikTok, Twitter/X, Instagram &mdash; paste any video link,
-            pick your quality, and download. Powered by your own yt-dlp server.
+            pick your quality, and download. The engine runs right on your device.
           </motion.p>
 
           {/* Downloader Card */}
@@ -376,27 +640,19 @@ export default function Landing() {
           >
             <Card className="border-border/50 shadow-lg shadow-primary/5 bg-card/95 backdrop-blur-sm">
               <CardContent className="p-4 sm:p-6 space-y-4">
-                {/* Server status banner */}
-                {!serverConfigured && (
-                  <div className="flex items-start gap-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200/50 dark:border-amber-800/30">
-                    <AlertCircle className="h-5 w-5 text-amber-500 mt-0.5 shrink-0" />
-                    <div className="text-left text-sm">
-                      <p className="font-medium text-amber-800 dark:text-amber-300">
-                        yt-dlp server not configured
-                      </p>
-                      <p className="text-amber-600 dark:text-amber-400/80 mt-0.5">
-                        Set the{" "}
-                        <code className="text-xs bg-amber-100 dark:bg-amber-900/30 px-1 rounded">
-                          VITE_YTDLP_SERVER_URL
-                        </code>{" "}
-                        env var, or deploy the server from{" "}
-                        <code className="text-xs bg-amber-100 dark:bg-amber-900/30 px-1 rounded">
-                          yt-dlp-server/
-                        </code>
-                      </p>
-                    </div>
+                {/* On-device engine note */}
+                <div className="flex items-start gap-3 p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200/50 dark:border-emerald-800/30">
+                  <CheckCircle2 className="h-5 w-5 text-emerald-500 mt-0.5 shrink-0" />
+                  <div className="text-left text-sm">
+                    <p className="font-medium text-emerald-800 dark:text-emerald-300">
+                      No server. No API key. Unlimited.
+                    </p>
+                    <p className="text-emerald-600 dark:text-emerald-400/80 mt-0.5">
+                      The download engine runs entirely on your device — the Android app
+                      and the Windows app both have it built in.
+                    </p>
                   </div>
-                )}
+                </div>
 
                 {/* URL Input */}
                 <div className="flex items-center gap-2">
@@ -475,6 +731,7 @@ export default function Landing() {
                           <div className="flex flex-wrap justify-center gap-1.5">
                             {[
                               { label: "YouTube", url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" },
+                              { label: "Playlist", url: "https://www.youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf" },
                               { label: "TikTok", url: "https://www.tiktok.com/@nba/video/7441322573611494702" },
                               { label: "Twitter/X", url: "https://x.com/NASA/status/1868180428428595520" },
                             ].map((ex) => (
@@ -487,6 +744,7 @@ export default function Landing() {
                                 className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] font-medium text-muted-foreground/70 hover:text-foreground hover:bg-muted/80 border border-border/20 hover:border-border/50 transition-all duration-150"
                               >
                                 {ex.label === "YouTube" && <Youtube className="h-3 w-3 text-red-400" />}
+                                {ex.label === "Playlist" && <ListVideo className="h-3 w-3 text-emerald-400" />}
                                 <span>{ex.label}</span>
                               </button>
                             ))}
@@ -515,7 +773,7 @@ export default function Landing() {
                           Extracting video info
                         </p>
                         <p className="text-sm text-muted-foreground mt-1">
-                          Connecting to yt-dlp server&hellip;
+                          Analyzing video&hellip;
                         </p>
                       </div>
                       <div className="w-full max-w-xs bg-muted rounded-full h-1.5 overflow-hidden">
@@ -591,8 +849,18 @@ export default function Landing() {
                                 variant="secondary"
                                 className="text-[10px] px-1.5 py-0.5 bg-black/70 text-white border-none"
                               >
-                                <Clock className="h-2.5 w-2.5 mr-0.5" />
-                                {formatDuration(videoInfo.duration)}
+                                {videoInfo.is_playlist ? (
+                                  <>
+                                    <ListVideo className="h-2.5 w-2.5 mr-0.5" />
+                                    {videoInfo.count ?? videoInfo.entries?.length ?? 0}{" "}
+                                    videos
+                                  </>
+                                ) : (
+                                  <>
+                                    <Clock className="h-2.5 w-2.5 mr-0.5" />
+                                    {formatDuration(videoInfo.duration)}
+                                  </>
+                                )}
                               </Badge>
                             </div>
                           </div>
@@ -629,6 +897,22 @@ export default function Landing() {
 
                       <Separator />
 
+                      {/* ── Playlist mode ── */}
+                      {videoInfo.is_playlist && (
+                        <PlaylistPanel
+                          count={
+                            videoInfo.count ?? videoInfo.entries?.length ?? 0
+                          }
+                          entries={videoInfo.entries ?? []}
+                          quality={playlistQuality}
+                          onQuality={setPlaylistQuality}
+                          onDownloadAll={handleDownloadPlaylist}
+                        />
+                      )}
+
+                      {/* ── Single video mode ── */}
+                      {!videoInfo.is_playlist && (
+                        <>
                       {/* Format selector */}
                       <div className="text-left">
                         <p className="text-sm font-medium text-foreground mb-3">
@@ -649,7 +933,7 @@ export default function Landing() {
                                       key={f.format_id}
                                       format={f}
                                       selected={selectedFormat === f.format_id}
-                                      onSelect={() => setSelectedFormat(f.format_id)}
+                                      onSelect={handleSelectFormat}
                                     />
                                   ))}
                                 </div>
@@ -690,7 +974,7 @@ export default function Landing() {
                                       key={f.format_id}
                                       format={f}
                                       selected={selectedFormat === f.format_id}
-                                      onSelect={() => setSelectedFormat(f.format_id)}
+                                      onSelect={handleSelectFormat}
                                       audio
                                     />
                                   ))}
@@ -709,18 +993,20 @@ export default function Landing() {
                         )}
                       </div>
 
-                      <Button
-                        onClick={handleDownload}
-                        disabled={!selectedFormat}
-                        size="lg"
-                        className="w-full h-12 gap-2 text-base font-medium shadow-md shadow-primary/20"
-                      >
-                        <Download className="h-5 w-5" />
-                        Download{" "}
-                        {videoInfo.best_format_id === selectedFormat
-                          ? "(Best Quality)"
-                          : ""}
-                      </Button>
+                          <Button
+                            onClick={handleDownload}
+                            disabled={!selectedFormat}
+                            size="lg"
+                            className="w-full h-12 gap-2 text-base font-medium shadow-md shadow-primary/20"
+                          >
+                            <Download className="h-5 w-5" />
+                            Download{" "}
+                            {videoInfo.best_format_id === selectedFormat
+                              ? "(Best Quality)"
+                              : ""}
+                          </Button>
+                        </>
+                      )}
                     </motion.div>
                   )}
 
@@ -752,23 +1038,39 @@ export default function Landing() {
                               strokeLinecap="round"
                               className="stroke-primary"
                               initial={{ pathLength: 0 }}
-                              animate={{ pathLength: downloadProgress.percent / 100 }}
+                              animate={{ pathLength: overallPercent / 100 }}
                               transition={{ duration: 0.4, ease: "easeOut" }}
                             />
                           </svg>
                           {/* Percentage in the center */}
                           <div className="absolute inset-0 flex items-center justify-center">
                             <motion.span
-                              key={downloadProgress.percent}
+                              key={overallPercent}
                               initial={{ opacity: 0.5, scale: 0.8 }}
                               animate={{ opacity: 1, scale: 1 }}
                               className="text-2xl font-bold tabular-nums"
                             >
-                              {downloadProgress.percent}%
+                              {overallPercent}%
                             </motion.span>
                           </div>
                         </div>
                       </div>
+
+                      {/* Playlist item tracker */}
+                      {isPlaylistDownload && (
+                        <div className="text-center">
+                          <p className="text-sm font-medium text-foreground flex items-center justify-center gap-1.5">
+                            <ListVideo className="h-4 w-4 text-primary" />
+                            Video {downloadProgress.item ?? 1} of{" "}
+                            {downloadProgress.itemCount}
+                          </p>
+                          {downloadProgress.fileName && (
+                            <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-md mx-auto">
+                              {downloadProgress.fileName}
+                            </p>
+                          )}
+                        </div>
+                      )}
 
                       {/* Speed + ETA row */}
                       <div className="flex items-center justify-center gap-6 text-sm">
@@ -791,13 +1093,15 @@ export default function Landing() {
                         <motion.div
                           className="h-full bg-gradient-to-r from-primary/70 to-primary rounded-full"
                           initial={{ width: "0%" }}
-                          animate={{ width: `${downloadProgress.percent}%` }}
+                          animate={{ width: `${overallPercent}%` }}
                           transition={{ duration: 0.3, ease: "easeOut" }}
                         />
                       </div>
 
                       <p className="text-xs text-center text-muted-foreground">
-                        Downloading in background &mdash; you can leave this page
+                        {isPlaylistDownload
+                          ? "Downloading the playlist in background — you can leave this page"
+                          : "Downloading in background &mdash; you can leave this page"}
                       </p>
 
                       <Button
@@ -832,14 +1136,44 @@ export default function Landing() {
                       </motion.div>
                       <div className="text-center mb-4">
                         <p className="font-semibold text-foreground text-lg">
-                          Ready!
+                          {playlistSummary ? "Playlist saved!" : "Ready!"}
                         </p>
                         <p className="text-sm text-muted-foreground mt-1">
-                          Video saved to <strong>Downloads/VidFetch</strong>
+                          {playlistSummary ? (
+                            <>
+                              {playlistSummary.saved} videos saved to{" "}
+                              <strong>
+                                Downloads/VidFetch
+                                {playlistSummary.folder
+                                  ? `/${playlistSummary.folder}`
+                                  : ""}
+                              </strong>
+                            </>
+                          ) : (
+                            <>
+                              Video saved to <strong>Downloads/VidFetch</strong>
+                            </>
+                          )}
                         </p>
                       </div>
                       <div className="flex flex-col sm:flex-row gap-2">
-                        <Button onClick={handleNewDownload} variant="default" className="flex-1 gap-2 active:scale-[0.97]">
+                        {lastCompleted?.uri && (
+                          <Button
+                            onClick={() => {
+                              if (lastCompleted?.uri) openFile(lastCompleted.uri);
+                            }}
+                            variant="default"
+                            className="flex-1 gap-2 active:scale-[0.97]"
+                          >
+                            <FolderOpen className="h-4 w-4" />
+                            Open video
+                          </Button>
+                        )}
+                        <Button
+                          onClick={handleNewDownload}
+                          variant={lastCompleted?.uri ? "outline" : "default"}
+                          className="flex-1 gap-2 active:scale-[0.97]"
+                        >
                           <Download className="h-4 w-4" />
                           Download another
                         </Button>
@@ -854,6 +1188,231 @@ export default function Landing() {
               </CardContent>
             </Card>
           </motion.div>
+
+          {/* Recent downloads (APK only) */}
+          {nativeAvailable && (
+            <div className="mt-6 mx-auto max-w-2xl">
+              <Card className="border-border/50 shadow-sm bg-card/95 backdrop-blur-sm">
+                <CardContent className="p-4 sm:p-5 text-left">
+                  {/* Download location — changeable via the system folder picker */}
+                  <div className="flex items-center gap-3 pb-3 mb-3 border-b border-border/30">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                      <FolderCog className="h-4 w-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">
+                        Download location
+                      </p>
+                      <p className="text-sm font-semibold truncate">
+                        {downloadLocation?.uri ? downloadLocation.name : "Downloads/VidFetch"}
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="gap-1.5 shrink-0"
+                      onClick={handlePickFolder}
+                      disabled={pickingFolder}
+                    >
+                      {pickingFolder ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <FolderCog className="h-3.5 w-3.5" />
+                      )}
+                      Change
+                    </Button>
+                    {downloadLocation?.uri && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="gap-1.5 shrink-0"
+                        onClick={handleResetLocation}
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                        Reset
+                      </Button>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm font-semibold flex items-center gap-2">
+                      <FolderOpen className="h-4 w-4 text-primary" />
+                      Recent downloads
+                      {savedDownloads.length > 0 && (
+                        <span className="text-xs font-normal text-muted-foreground">
+                          ({savedDownloads.length})
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                  {savedDownloads.length === 0 ? (
+                    <p className="text-sm text-muted-foreground/80 text-center py-4">
+                      Videos you download will appear here.
+                    </p>
+                  ) : (
+                    <ul className="divide-y divide-border/40">
+                      {savedDownloads.map((dl) => (
+                        <li key={dl.uri} className="flex items-center gap-3 py-2.5">
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                            <FileVideo className="h-4 w-4" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{dl.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {dl.size ? formatSize(dl.size) : "—"}
+                              {dl.date
+                                ? ` · ${new Date(dl.date * 1000).toLocaleDateString()}`
+                                : ""}
+                            </p>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="gap-1.5 shrink-0"
+                            onClick={() => openFile(dl.uri)}
+                          >
+                            <FolderOpen className="h-3.5 w-3.5" />
+                            Open
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* YouTube anti-bot troubleshooting (optional, advanced) */}
+              <Card className="mt-4 border-border/50 shadow-sm bg-card/95 backdrop-blur-sm">
+                <CardContent className="p-4 sm:p-5 text-left">
+                  <div className="flex items-center gap-3 pb-3 mb-3 border-b border-border/30">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                      <Settings2 className="h-4 w-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">
+                        Advanced
+                      </p>
+                      <p className="text-sm font-semibold">
+                        YouTube troubleshooting
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Browser cookies — desktop only */}
+                  {isDesktop && (
+                    <div className="mb-4">
+                      <label className="text-sm font-medium text-foreground">
+                        Browser cookies
+                      </label>
+                      <p className="text-xs text-muted-foreground mt-0.5 mb-2">
+                        Read your logged-in YouTube session from a browser to
+                        bypass the bot check. The browser must be closed or
+                        unlocked while downloading.
+                      </p>
+                      <select
+                        value={ytSettings?.cookiesBrowser ?? ""}
+                        onChange={(e) => handleSetCookiesBrowser(e.target.value)}
+                        className="w-full h-9 rounded-md border border-border/50 bg-background px-3 text-sm outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30"
+                      >
+                        <option value="">Off — no browser cookies</option>
+                        <option value="chrome">Chrome</option>
+                        <option value="edge">Edge</option>
+                        <option value="firefox">Firefox</option>
+                        <option value="brave">Brave</option>
+                        <option value="opera">Opera</option>
+                        <option value="vivaldi">Vivaldi</option>
+                      </select>
+                    </div>
+                  )}
+
+                  {/* cookies.txt file — both platforms */}
+                  <div className="mb-4">
+                    <label className="text-sm font-medium text-foreground">
+                      cookies.txt file
+                    </label>
+                    <p className="text-xs text-muted-foreground mt-0.5 mb-2">
+                      Export cookies from a logged-in YouTube tab (e.g. with the
+                      "Get cookies.txt LOCALLY" extension) and import the file
+                      here.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <span className="flex-1 min-w-0 truncate rounded-md border border-border/40 bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
+                        {ytSettings?.cookiesFileName
+                          ? ytSettings.cookiesFileName
+                          : "No cookies file imported"}
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="gap-1.5 shrink-0"
+                        onClick={handlePickCookieFile}
+                        disabled={pickingCookies}
+                      >
+                        {pickingCookies ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <FolderOpen className="h-3.5 w-3.5" />
+                        )}
+                        Choose file
+                      </Button>
+                      {ytSettings?.cookiesFileName && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="gap-1.5 shrink-0"
+                          onClick={handleClearCookieFile}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                          Clear
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* PO token provider — desktop only */}
+                  {isDesktop && (
+                    <div className="mb-4">
+                      <label className="text-sm font-medium text-foreground">
+                        PO token provider URL
+                      </label>
+                      <p className="text-xs text-muted-foreground mt-0.5 mb-2">
+                        Run the token server on this PC with:{" "}
+                        <code className="text-[11px]">
+                          docker run -d --init -p 4416:4416
+                          brainicism/bgutil-ytdlp-pot-provider
+                        </code>{" "}
+                        and enter{" "}
+                        <code className="text-[11px]">http://127.0.0.1:4416</code>. Leave
+                        empty to disable.
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          value={poProviderInput}
+                          onChange={(e) => setPoProviderInput(e.target.value)}
+                          placeholder="http://127.0.0.1:4416"
+                          className="flex-1"
+                        />
+                        <Button
+                          size="sm"
+                          className="gap-1.5 shrink-0"
+                          onClick={handleSavePoProvider}
+                        >
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          Save
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  <p className="text-[11px] text-muted-foreground/70 leading-relaxed">
+                    These settings only affect YouTube requests. If a video
+                    still fails with "Sign in to confirm you're not a bot",
+                    import cookies from a browser where you are logged in —
+                    that is the most reliable fix.
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+          )}
         </div>
 
         {/* Scroll indicator */}
@@ -891,34 +1450,34 @@ export default function Landing() {
               How it works
             </Badge>
             <h2 className="text-3xl sm:text-4xl font-bold tracking-tight">
-              Self-hosted, privacy-first
+              Your device is the engine
             </h2>
             <p className="mt-3 text-muted-foreground max-w-xl mx-auto">
-              You deploy the engine. We provide the beautiful UI.
+              No servers to deploy. No API keys to manage. It just works.
             </p>
           </motion.div>
 
           <div className="grid md:grid-cols-3 gap-8">
             {[
               {
-                icon: Server,
-                title: "Deploy the server",
+                icon: Smartphone,
+                title: "Engine on your device",
                 description:
-                  "Deploy the yt-dlp FastAPI server (in yt-dlp-server/) to Railway, Fly.io, or Render. Free tiers work great.",
+                  "The yt-dlp engine is built into the Android and Windows apps. No server, no API key, no setup.",
                 step: "01",
               },
               {
                 icon: Youtube,
                 title: "Paste & analyze",
                 description:
-                  "Paste any video URL. VidFetch calls your server to extract video metadata and available formats using yt-dlp.",
+                  "Paste any video URL. VidFetch's on-device engine extracts the metadata and available formats instantly.",
                 step: "02",
               },
               {
                 icon: Download,
                 title: "Choose & download",
                 description:
-                  "Pick your preferred quality from 4K to audio-only. The video streams directly from your server to your device.",
+                  "Pick your preferred quality from 4K to audio-only. The video saves directly to your device.",
                 step: "03",
               },
             ].map((item, i) => (
@@ -1034,7 +1593,7 @@ export default function Landing() {
               Features
             </Badge>
             <h2 className="text-3xl sm:text-4xl font-bold tracking-tight">
-              Why go self-hosted
+              Why you'll love it
             </h2>
           </motion.div>
 
@@ -1042,8 +1601,8 @@ export default function Landing() {
             {[
               {
                 icon: Shield,
-                title: "Your data, your server",
-                desc: "The yt-dlp server runs on your infrastructure. Zero third-party requests, zero logs, zero tracking.",
+                title: "Your data stays on your device",
+                desc: "Downloads run locally on your phone or PC. Zero third-party requests, zero logs, zero tracking.",
               },
               {
                 icon: Zap,
@@ -1067,8 +1626,8 @@ export default function Landing() {
               },
               {
                 icon: Monitor,
-                title: "Self-contained deployment",
-                desc: "One Dockerfile, one command. Deploy to Railway, Fly.io, Render, or any VPS.",
+                title: "Runs on your device",
+                desc: "The engine ships inside the app itself — phone or desktop. Nothing to host, nothing to deploy.",
               },
             ].map((feature, i) => (
               <motion.div
@@ -1178,11 +1737,11 @@ export default function Landing() {
           className="mx-auto max-w-2xl text-center relative z-10"
         >
           <h2 className="text-3xl sm:text-4xl font-bold tracking-tight">
-            Ready to self-host?
+            Ready to download?
           </h2>
           <p className="mt-4 text-muted-foreground">
-            Deploy the yt-dlp server, set your env var, and start downloading
-            from 1000+ sites.
+            No server. No API key. No limits. Paste a link and download from
+            1000+ sites, right on your device.
           </p>
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
             <Button
@@ -1219,7 +1778,12 @@ export default function Landing() {
               <span className="text-sm font-semibold">VidFetch</span>
             </div>
             <p className="text-xs text-muted-foreground">
-              Self-hosted video downloader. Powered by yt-dlp.
+              On-device video downloader. Powered by yt-dlp.
+              {BUILD_TAG && (
+                <span className="ml-2 font-mono text-[10px] text-muted-foreground/50">
+                  build {BUILD_TAG}
+                </span>
+              )}
             </p>
           </div>
         </div>
@@ -1230,7 +1794,7 @@ export default function Landing() {
 
 // ─── Format Card ──────────────────────────────────────────────────────
 
-function FormatCard({
+const FormatCard = memo(function FormatCard({
   format,
   selected,
   onSelect,
@@ -1238,7 +1802,7 @@ function FormatCard({
 }: {
   format: YtDlpFormat;
   selected: boolean;
-  onSelect: () => void;
+  onSelect: (id: string) => void;
   audio?: boolean;
 }) {
   const quality = audio
@@ -1249,7 +1813,7 @@ function FormatCard({
 
   return (
     <button
-      onClick={onSelect}
+      onClick={() => onSelect(format.format_id)}
       className={cn(
         "flex flex-col items-center gap-1 p-3 rounded-lg border text-center transition-all duration-200 cursor-pointer select-none",
         selected
@@ -1282,6 +1846,112 @@ function FormatCard({
       )}
     </button>
   );
-}
+});
+
+// ─── Playlist Panel ──────────────────────────────────────────────────
+
+const PlaylistPanel = memo(function PlaylistPanel({
+  count,
+  entries,
+  quality,
+  onQuality,
+  onDownloadAll,
+}: {
+  count: number;
+  entries: PlaylistEntry[];
+  quality: string;
+  onQuality: (id: string) => void;
+  onDownloadAll: () => void;
+}) {
+  return (
+    <div className="space-y-4">
+      {/* Quality presets — one choice applies to every video */}
+      <div className="text-left">
+        <p className="text-sm font-medium text-foreground mb-3">Quality</p>
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+          {PLAYLIST_PRESETS.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => onQuality(p.id)}
+              className={cn(
+                "flex flex-col items-center gap-0.5 px-2 py-3 rounded-lg border text-center transition-all duration-200 cursor-pointer select-none",
+                quality === p.id
+                  ? "border-primary/50 bg-primary/5 shadow-sm shadow-primary/10 ring-1 ring-primary/20 scale-[1.02]"
+                  : "border-border/40 bg-background hover:border-border/70 hover:bg-muted/50 hover:-translate-y-0.5 active:translate-y-0",
+              )}
+            >
+              <span className="font-semibold text-xs">{p.label}</span>
+              <span className="text-[10px] text-muted-foreground/60">
+                {p.desc}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Playlist entries */}
+      <div className="text-left">
+        <p className="text-sm font-medium text-foreground mb-2">
+          Videos ({count})
+        </p>
+        {entries.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-4 text-center border border-border/30 rounded-lg bg-background/50">
+            Reading playlist… press Download all to grab every video.
+          </p>
+        ) : (
+          <>
+            <ul className="max-h-64 overflow-y-auto divide-y divide-border/40 rounded-lg border border-border/30 bg-background/50">
+              {entries.slice(0, 100).map((entry, i) => (
+                <li
+                  key={entry.id || i}
+                  className="flex items-center gap-3 px-3 py-2"
+                >
+                  <span className="w-6 shrink-0 text-right text-[11px] font-mono text-muted-foreground/50">
+                    {i + 1}
+                  </span>
+                  {entry.thumbnail && (
+                    <img
+                      src={entry.thumbnail}
+                      alt=""
+                      loading="lazy"
+                      className="h-9 w-14 shrink-0 rounded object-cover bg-muted"
+                    />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm truncate">
+                      {entry.title || `Video ${i + 1}`}
+                    </p>
+                    <p className="text-xs text-muted-foreground/70">
+                      {entry.duration ? formatDuration(entry.duration) : ""}
+                    </p>
+                  </div>
+                  <Play className="h-3 w-3 shrink-0 text-muted-foreground/40" />
+                </li>
+              ))}
+            </ul>
+            {count > 100 && (
+              <p className="text-xs text-muted-foreground mt-1.5">
+                Showing the first 100 of {count} videos — the whole playlist
+                downloads.
+              </p>
+            )}
+          </>
+        )}
+      </div>
+
+      <Button
+        onClick={onDownloadAll}
+        size="lg"
+        className="w-full h-12 gap-2 text-base font-medium shadow-md shadow-primary/20"
+      >
+        <Download className="h-5 w-5" />
+        Download all ({count})
+      </Button>
+      <p className="text-xs text-center text-muted-foreground/70 -mt-2">
+        Saves every video into one playlist folder in Downloads/VidFetch
+      </p>
+    </div>
+  );
+});
 
 

@@ -1,8 +1,45 @@
 import { api } from "@/convex/_generated/api";
+import type { Doc } from "@/convex/_generated/dataModel";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { useConvexAuth, useQuery } from "convex/react";
 
-export function useAuth() {
+// True when the app was built with a real Convex deployment URL. On the
+// packaged APK/EXE this is false, so auth is disabled and the app runs fully
+// on-device with no backend. This is a build-time constant — the early return
+// below never changes hook order at runtime.
+const HAS_CONVEX = !!import.meta.env.VITE_CONVEX_URL;
+
+type SignInFn = (provider: string, options?: any) => Promise<unknown>;
+type SignOutFn = () => Promise<unknown>;
+
+export type AuthState = {
+  isLoading: boolean;
+  isAuthenticated: boolean;
+  user: Doc<"users"> | null | undefined;
+  signIn: SignInFn;
+  signOut: SignOutFn;
+};
+
+/**
+ * Guest state used when the app is built without VITE_CONVEX_URL (offline APK
+ * mode). In that mode the Convex auth providers are not mounted, so the hooks
+ * below would throw "must be used within ConvexAuthProvider". HAS_CONVEX is a
+ * build-time constant, so this branch is identical on every render — the early
+ * return never changes the hook order at runtime.
+ */
+const GUEST_AUTH: AuthState = {
+  isLoading: false,
+  isAuthenticated: false,
+  user: null,
+  signIn: async () => {},
+  signOut: async () => {},
+};
+
+export function useAuth(): AuthState {
+  if (!HAS_CONVEX) {
+    return GUEST_AUTH;
+  }
+
   const { isLoading: isAuthLoading, isAuthenticated } = useConvexAuth();
   const user = useQuery(api.users.currentUser);
   const { signIn, signOut } = useAuthActions();

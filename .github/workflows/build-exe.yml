@@ -1,23 +1,20 @@
-name: Build Portable EXE (PWABuilder)
+name: Build EXE (Windows)
 
+# Runs automatically on every push to main/master, on version tags, and
+# manually via the "Run workflow" button in the Actions tab.
 on:
   push:
     branches: [main, master]
     tags: ["v*"]
   workflow_dispatch:
-    inputs:
-      version_name:
-        description: "Version name (e.g., 1.0.0)"
-        required: false
-        default: "1.0.0"
 
 concurrency:
   group: exe-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build Portable EXE
+  build-exe:
+    name: Build Windows EXE
     runs-on: windows-latest
 
     steps:
@@ -28,10 +25,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: "npm"
+          cache: npm
 
+      # npm install (not npm ci): the committed package-lock.json is out of
+      # date with package.json (electron was added later), and npm ci refuses
+      # to work with a mismatched lockfile. npm install reconciles it on the fly.
       - name: Install dependencies
-        run: npm install
+        run: npm install --no-audit --no-fund
 
       - name: Build web app
         run: npm run build
@@ -40,39 +40,71 @@ jobs:
           VITE_CONVEX_URL: ${{ secrets.VITE_CONVEX_URL || '' }}
           VITE_YTDLP_SERVER_URL: ${{ secrets.VITE_YTDLP_SERVER_URL || '' }}
 
-      # The PWABuilder CLI is published on npm as "pwabuilder".
-      # npx runs it on the fly — no global install needed.
-      - name: Generate Windows package with PWABuilder
-        run: npx -y pwabuilder package --platform windows --file dist --out pwabuild-output
+      # Download the real download engine (yt-dlp + ffmpeg) so the EXE can
+      # actually download videos, exactly like the Android app.
+      - name: Download yt-dlp & ffmpeg engines
         shell: pwsh
-
-      - name: Rename generated package
         run: |
-          $VERSION = "${{ github.event.inputs.version_name || '1.0.0' }}"
-          $COMMIT = (git rev-parse --short HEAD)
-          $index = 1
-          Get-ChildItem -Path pwabuild-output -File | ForEach-Object {
-            $ext = $_.Extension.TrimStart('.')
-            $newName = "VidFetch-v${VERSION}-windows-${COMMIT}-${index}.${ext}"
-            Move-Item $_.FullName -Destination $newName -Force
-            Write-Host "Renamed to $newName"
-            $index++
+          New-Item -ItemType Directory -Force -Path native-tools | Out-Null
+          Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" -OutFile "native-tools/yt-dlp.exe"
+          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile "ffmpeg.zip"
+          Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg-tmp -Force
+          Copy-Item (Get-ChildItem -Path "ffmpeg-tmp" -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1).FullName "native-tools/ffmpeg.exe"
+          Remove-Item -Recurse -Force ffmpeg.zip, ffmpeg-tmp
+
+          # Ship the bgutil PO-token provider plugin next to yt-dlp.exe so the
+          # "PO token provider URL" advanced setting works. Standalone yt-dlp
+          # loads plugins from a yt-dlp-plugins folder next to the executable,
+          # expecting an EXTRACTED <plugins>/yt_dlp_plugins/extractor/... tree
+          # — a bare .zip file is never loaded. So download, expand, and remove
+          # the zip. (The plugin is inert unless the user runs the provider
+          # server.)
+          New-Item -ItemType Directory -Force -Path "native-tools/yt-dlp-plugins" | Out-Null
+          Invoke-WebRequest -Uri "https://github.com/Brainicism/bgutil-ytdlp-pot-provider/releases/latest/download/bgutil-ytdlp-pot-provider.zip" -OutFile "bgutil-plugin.zip"
+          Expand-Archive -Path bgutil-plugin.zip -DestinationPath "native-tools/yt-dlp-plugins" -Force
+          Remove-Item bgutil-plugin.zip
+          # Sanity check: the plugin must end up at the exact path yt-dlp scans.
+          if (-not (Test-Path "native-tools/yt-dlp-plugins/yt_dlp_plugins/extractor")) {
+            Write-Error "bgutil plugin extraction failed — yt_dlp_plugins/extractor not found"
+            exit 1
           }
+          Get-ChildItem native-tools | Select-Object Name, Length
+
+      # Package the built web app into a portable Windows EXE using
+      # Electron + electron-builder. Output goes to pwabuild-output/.
+      - name: Package portable EXE with Electron
+        run: npx --yes electron-builder@26.15.3 --config electron-builder.yml
         shell: pwsh
 
-      - name: Upload Windows artifact
+      # Copy the EXE to a clear, versioned filename so the downloaded
+      # artifact is self-explanatory (e.g. VidFetch-v0.0.0-windows-portable.exe).
+      - name: Stage EXE with clear name
+        id: stage
+        shell: pwsh
+        run: |
+          $VERSION = node -p "require('./package.json').version"
+          $EXE = Get-ChildItem -Path pwabuild-output -Filter "*.exe" | Select-Object -First 1
+          if (-not $EXE) {
+            Write-Error "No EXE file was produced by the build"
+            exit 1
+          }
+          New-Item -ItemType Directory -Force -Path staged-exe | Out-Null
+          $TARGET = "staged-exe/VidFetch-v${VERSION}-windows-portable.exe"
+          Copy-Item $EXE.FullName -Destination $TARGET -Force
+          "exe_file=$TARGET" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
         with:
-          name: VidFetch-Windows
-          path: VidFetch-*
+          name: VidFetch-Windows-EXE
+          path: ${{ steps.stage.outputs.exe_file }}
           retention-days: 30
-          compression-level: 0
-          if-no-files-found: warn
+          if-no-files-found: error
 
       - name: Upload to Release (if tagged)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: VidFetch-*
+          files: staged-exe/*
           generate_release_notes: true
           make_latest: false

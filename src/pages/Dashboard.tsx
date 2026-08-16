@@ -1,47 +1,30 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/hooks/use-auth";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   Download,
   LogOut,
-  ExternalLink,
-  Server,
   CheckCircle2,
-  XCircle,
-  Copy,
-  Check,
   ArrowRight,
-  Rocket,
   BookOpen,
   Globe,
-  Terminal,
-  Settings,
-  FileCode,
+  Shield,
+  Zap,
+  Smartphone,
+  Monitor,
+  Infinity as InfinityIcon,
+  FileVideo,
 } from "lucide-react";
 import { useNavigate } from "react-router";
-import { useState } from "react";
 
 export default function Dashboard() {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
-  const [copied, setCopied] = useState(false);
 
   const handleSignOut = async () => {
     await signOut();
     navigate("/");
-  };
-
-  const serverUrl = (import.meta as any).env.VITE_YTDLP_SERVER_URL || "";
-  const isConfigured = !!serverUrl;
-
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
   };
 
   return (
@@ -80,87 +63,64 @@ export default function Dashboard() {
           </div>
         </header>
 
-        {/* Server Status */}
+        {/* Engine Status — on-device, no server needed */}
         <Card className="border-border/40 shadow-sm">
           <CardHeader>
             <div className="mb-3 flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
-              <Server className="size-5" />
+              <Zap className="size-5" />
             </div>
-            <CardTitle>yt-dlp Server Status</CardTitle>
+            <CardTitle>Download engine</CardTitle>
             <CardDescription>
-              Your self-hosted video extraction engine that powers all downloads.
+              Everything runs right on this device — no servers, no API keys, no limits.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex items-center gap-3 p-3 sm:p-4 rounded-lg border border-border/30">
-              {isConfigured ? (
-                <>
-                  <div className="flex h-8 w-8 sm:h-10 sm:w-10 items-center justify-center rounded-full bg-emerald-50 dark:bg-emerald-950/30 shrink-0">
-                    <CheckCircle2 className="h-4 w-4 sm:h-5 sm:w-5 text-emerald-500" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sm">Server configured</p>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {serverUrl}
-                    </p>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="flex h-8 w-8 sm:h-10 sm:w-10 items-center justify-center rounded-full bg-amber-50 dark:bg-amber-950/30 shrink-0">
-                    <XCircle className="h-4 w-4 sm:h-5 sm:w-5 text-amber-500" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sm text-amber-600 dark:text-amber-400">
-                      Server not configured
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Deploy the yt-dlp server and set VITE_YTDLP_SERVER_URL
-                    </p>
-                  </div>
-                </>
-              )}
+            <div className="flex items-center gap-3 p-3 sm:p-4 rounded-lg border border-emerald-200/60 bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/20">
+              <div className="flex h-8 w-8 sm:h-10 sm:w-10 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/40 shrink-0">
+                <CheckCircle2 className="h-4 w-4 sm:h-5 sm:w-5 text-emerald-600 dark:text-emerald-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-sm text-emerald-700 dark:text-emerald-300">
+                  Built-in engine — always ready
+                </p>
+                <p className="text-xs text-emerald-600/80 dark:text-emerald-400/70 mt-0.5">
+                  The yt-dlp engine is embedded in this app. Paste a link, pick a quality, download.
+                </p>
+              </div>
             </div>
 
-            {!isConfigured && (
-              <div className="p-4 sm:p-5 rounded-lg bg-muted/50 border border-border/30">
-                <p className="text-sm font-medium mb-3 flex items-center gap-2">
-                  <Rocket className="h-4 w-4 text-primary" />
-                  Quick deploy guide
-                </p>
-                <ol className="space-y-3 text-sm text-muted-foreground">
-                  <li className="flex items-start gap-3">
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-primary text-[10px] font-bold shrink-0 mt-0.5">1</span>
-                    <span>Deploy the yt-dlp FastAPI server to <strong className="text-foreground">Railway</strong>, <strong className="text-foreground">Fly.io</strong>, or <strong className="text-foreground">Render</strong> using the Dockerfile in <code className="text-xs bg-muted px-1 rounded">yt-dlp-server/</code></span>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-primary text-[10px] font-bold shrink-0 mt-0.5">2</span>
-                    <span>Get your server URL (e.g. <code className="text-xs bg-muted px-1 rounded">https://vidfetch-ytdlp.up.railway.app</code>)</span>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-primary text-[10px] font-bold shrink-0 mt-0.5">3</span>
-                    <span>Go to your project's <strong className="text-foreground">Keys/API Keys</strong> tab and add:</span>
-                  </li>
-                </ol>
-                <div className="mt-3 flex items-center gap-2 p-2.5 rounded-md bg-background border border-border/40">
-                  <span className="text-xs font-mono text-muted-foreground shrink-0">Key:</span>
-                  <code className="text-xs font-mono text-foreground flex-1 break-all">VITE_YTDLP_SERVER_URL</code>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 shrink-0"
-                    onClick={() => copyToClipboard("VITE_YTDLP_SERVER_URL")}
-                    aria-label="Copy key"
-                  >
-                    {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                  </Button>
+            <div className="grid sm:grid-cols-3 gap-3">
+              {[
+                {
+                  icon: Zap,
+                  title: "No server needed",
+                  desc: "The phone or desktop app is the engine. Nothing to deploy.",
+                },
+                {
+                  icon: InfinityIcon,
+                  title: "Unlimited downloads",
+                  desc: "No rate limits, no API keys, no monthly caps. Ever.",
+                },
+                {
+                  icon: Shield,
+                  title: "Private by design",
+                  desc: "Videos are processed and saved on your device — nothing leaves it.",
+                },
+              ].map((item) => (
+                <div
+                  key={item.title}
+                  className="p-4 rounded-lg border border-border/30 bg-muted/30"
+                >
+                  <div className="flex size-8 items-center justify-center rounded-md bg-primary/10 text-primary mb-2.5">
+                    <item.icon className="size-4" />
+                  </div>
+                  <p className="text-sm font-medium">{item.title}</p>
+                  <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                    {item.desc}
+                  </p>
                 </div>
-                <div className="mt-2 flex items-center gap-2 p-2.5 rounded-md bg-background border border-border/40">
-                  <span className="text-xs font-mono text-muted-foreground shrink-0">Value:</span>
-                  <code className="text-xs font-mono text-muted-foreground flex-1 break-all">https://your-server-url.railway.app</code>
-                </div>
-              </div>
-            )}
+              ))}
+            </div>
           </CardContent>
         </Card>
 
@@ -169,14 +129,15 @@ export default function Dashboard() {
           <Card className="border-border/40 shadow-sm hover:shadow-md transition-all duration-200 group cursor-pointer" onClick={() => navigate("/")}>
             <CardContent className="p-6 flex items-start gap-4">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary group-hover:bg-primary/15 transition-colors">
-                <Download className="size-5" />
+                <FileVideo className="size-5" />
               </div>
-              <div>
+              <div className="flex-1">
                 <p className="font-semibold text-sm">Go to downloader</p>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   Paste a URL and download from 1000+ sites
                 </p>
               </div>
+              <ArrowRight className="size-4 text-muted-foreground group-hover:text-primary group-hover:translate-x-0.5 transition-all mt-1" />
             </CardContent>
           </Card>
 
@@ -185,67 +146,54 @@ export default function Dashboard() {
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary group-hover:bg-primary/15 transition-colors">
                 <BookOpen className="size-5" />
               </div>
-              <div>
+              <div className="flex-1">
                 <p className="font-semibold text-sm">yt-dlp docs</p>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   Learn about the engine powering your downloads
                 </p>
               </div>
+              <ArrowRight className="size-4 text-muted-foreground group-hover:text-primary group-hover:translate-x-0.5 transition-all mt-1" />
             </CardContent>
           </Card>
         </div>
 
-        {/* Deployment Options */}
+        {/* Runs everywhere */}
         <Card className="border-border/40 shadow-sm">
           <CardHeader>
             <div className="mb-3 flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
               <Globe className="size-5" />
             </div>
-            <CardTitle>Deployment options</CardTitle>
+            <CardTitle>Take the engine anywhere</CardTitle>
             <CardDescription>
-              Choose how to host your yt-dlp server
+              One app, fully self-contained on every device you use
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid sm:grid-cols-3 gap-4">
+            <div className="grid sm:grid-cols-2 gap-4">
               {[
                 {
-                  name: "Railway",
-                  desc: "One-click deploy from GitHub. Free tier includes enough compute for personal use.",
-                  icon: Rocket,
-                  color: "text-purple-500",
-                  url: "https://railway.app",
+                  name: "Android (APK)",
+                  desc: "The full yt-dlp engine runs on your phone. Downloads continue in the background with progress notifications, and videos land in your chosen folder.",
+                  icon: Smartphone,
                 },
                 {
-                  name: "Fly.io",
-                  desc: "Global edge deployment with generous free allowance. Great for low-latency downloads.",
-                  icon: Globe,
-                  color: "text-blue-500",
-                  url: "https://fly.io",
-                },
-                {
-                  name: "Render",
-                  desc: "Simple Docker deploys. Free web services with 512 MB RAM — plenty for yt-dlp.",
-                  icon: Server,
-                  color: "text-emerald-500",
-                  url: "https://render.com",
+                  name: "Windows (EXE)",
+                  desc: "A portable desktop app with the engine built in. No install, no setup — just paste and download.",
+                  icon: Monitor,
                 },
               ].map((option) => (
-                <a
+                <div
                   key={option.name}
-                  href={option.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block p-4 rounded-lg border border-border/30 hover:border-border/60 hover:bg-muted/30 transition-all duration-200 group"
+                  className="p-4 rounded-lg border border-border/30 hover:border-border/60 hover:bg-muted/30 transition-all duration-200 group"
                 >
-                  <div className={`flex h-9 w-9 items-center justify-center rounded-lg bg-background border border-border/40 mb-3 ${option.color} group-hover:bg-primary/5 transition-colors`}>
-                    <option.icon className="h-4.5 w-4.5" />
+                  <div className="flex size-9 items-center justify-center rounded-lg bg-background border border-border/40 mb-3 text-primary group-hover:bg-primary/5 transition-colors">
+                    <option.icon className="size-4.5" />
                   </div>
                   <p className="font-semibold text-sm">{option.name}</p>
                   <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
                     {option.desc}
                   </p>
-                </a>
+                </div>
               ))}
             </div>
           </CardContent>
@@ -255,18 +203,18 @@ export default function Dashboard() {
         <Card className="border-border/40 shadow-sm">
           <CardHeader>
             <div className="mb-3 flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
-              <FileCode className="size-5" />
+              <Zap className="size-5" />
             </div>
             <CardTitle>About VidFetch</CardTitle>
             <CardDescription>
-              Self-hosted video downloader powered by yt-dlp
+              A video downloader that lives entirely on your device
             </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="flex flex-col sm:flex-row items-start gap-6">
               <div className="space-y-2 text-sm text-muted-foreground flex-1">
                 <p>
-                  VidFetch is a beautiful frontend for{" "}
+                  VidFetch wraps{" "}
                   <a
                     href="https://github.com/yt-dlp/yt-dlp"
                     target="_blank"
@@ -275,15 +223,18 @@ export default function Dashboard() {
                   >
                     yt-dlp
                   </a>
-                  , the most powerful video extraction engine available.
+                  , the most powerful video extraction engine available, directly into your
+                  phone and desktop apps.
                 </p>
                 <p>
-                  The yt-dlp server runs on your own infrastructure &mdash; no data
-                  ever passes through third-party services. You control everything.
+                  There is no server, no cloud, and no account to manage &mdash; the device
+                  you're holding is the engine. Your downloads never pass through
+                  third-party services.
                 </p>
                 <p>
                   Supports over 1,000 sites including YouTube, TikTok, Twitter/X,
-                  Instagram, Vimeo, Facebook, Twitch, and more.
+                  Instagram, Vimeo, Facebook, Twitch, and more &mdash; with unlimited,
+                  key-free downloads.
                 </p>
               </div>
             </div>

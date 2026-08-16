@@ -1,8 +1,13 @@
 /**
  * yt-dlp API Client
- * 
- * Communicates with the self-hosted yt-dlp FastAPI server to extract
- * video metadata and trigger downloads from 1000+ supported sites.
+ *
+ * Communicates with the self-hosted yt-dlp FastAPI server (yt-dlp-server/) to
+ * extract video metadata and trigger downloads from 1000+ supported sites.
+ *
+ * Supports both single videos and playlists:
+ *   - getVideoInfo(url, isPlaylist) returns is_playlist + entries for playlists
+ *   - downloadVideo(url, formatId, isPlaylist) downloads a whole playlist as a
+ *     ZIP when isPlaylist is true
  */
 
 export interface YtDlpFormat {
@@ -14,6 +19,15 @@ export interface YtDlpFormat {
   acodec: string | null;
   fps: number | null;
   tbr: number | null;
+}
+
+/** A single video inside a playlist. */
+export interface PlaylistEntry {
+  id: string;
+  title: string;
+  url: string;
+  duration: number | null;
+  thumbnail: string | null;
 }
 
 export interface YtDlpInfo {
@@ -29,6 +43,12 @@ export interface YtDlpInfo {
   best_format_id: string;
   best_audio_format_id: string | null;
   ffmpeg_available: boolean;
+  /** true when the analyzed URL resolved to a playlist */
+  is_playlist?: boolean;
+  /** number of videos in the playlist (when is_playlist) */
+  count?: number | null;
+  /** the videos inside the playlist (when is_playlist) */
+  entries?: PlaylistEntry[];
 }
 
 export interface YtDlpError {
@@ -38,27 +58,40 @@ export interface YtDlpError {
 
 export type YtDlpResult = YtDlpInfo | YtDlpError;
 
-function getServerUrl(): string {
+export function getServerUrl(): string {
   return (import.meta as any).env.VITE_YTDLP_SERVER_URL || "";
+}
+
+/** True when a self-hosted yt-dlp server URL is configured. */
+export function hasServer(): boolean {
+  return !!getServerUrl();
 }
 
 /**
  * Extract video metadata and available formats from a URL.
  * Returns title, thumbnail, duration, and a curated list of formats.
+ *
+ * @param url        Video or playlist URL
+ * @param isPlaylist Hint that the URL is a playlist. The server also detects
+ *                   playlists itself from yt-dlp's response and returns
+ *                   `is_playlist: true` with the playlist's entries.
  */
-export async function getVideoInfo(url: string): Promise<YtDlpResult> {
+export async function getVideoInfo(
+  url: string,
+  isPlaylist: boolean = false,
+): Promise<YtDlpResult> {
   const baseUrl = getServerUrl();
   if (!baseUrl) {
     return {
       success: false,
       error:
-        "No yt-dlp server URL configured. Set VITE_YTDLP_SERVER_URL in your environment.",
+        "The download engine runs on your device — there is no server. Install the Android APK or Windows EXE; no API key or setup needed.",
     };
   }
 
   try {
     const response = await fetch(
-      `${baseUrl}/api/info?url=${encodeURIComponent(url)}`,
+      `${baseUrl}/api/info?url=${encodeURIComponent(url)}&is_playlist=${isPlaylist ? "true" : "false"}`,
       { signal: AbortSignal.timeout(30000) },
     );
 
@@ -84,19 +117,25 @@ export async function getVideoInfo(url: string): Promise<YtDlpResult> {
 }
 
 /**
- * Trigger a video download. Opens the download URL in a new tab
+ * Trigger a video (or playlist) download. Opens the download URL in a new tab
  * or triggers a browser download.
+ *
+ * @param url        Video or playlist URL
+ * @param formatId   yt-dlp format selector (default: "best")
+ * @param isPlaylist When true, downloads the whole playlist and returns a ZIP
+ * @returns the download URL, or null when no server is configured
  */
 export function downloadVideo(
   url: string,
   formatId: string = "best",
+  isPlaylist: boolean = false,
 ): string | null {
   const baseUrl = getServerUrl();
   if (!baseUrl) return null;
 
-  const downloadUrl = `${baseUrl}/api/download?url=${encodeURIComponent(url)}&format_id=${encodeURIComponent(formatId)}`;
+  const downloadUrl = `${baseUrl}/api/download?url=${encodeURIComponent(url)}&format_id=${encodeURIComponent(formatId)}&is_playlist=${isPlaylist ? "true" : "false"}`;
 
-  // Open in a new tab (which will trigger the download)
+  // Trigger the browser download (works in iframes/previews too)
   const a = document.createElement("a");
   a.href = downloadUrl;
   a.download = "";

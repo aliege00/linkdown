@@ -13,6 +13,7 @@ import { action } from "./_generated/server";
 export const downloadVideo = action({
   args: {
     url: v.string(),
+    isPlaylist: v.optional(v.boolean()),
     ytdlpServerUrl: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -27,9 +28,11 @@ export const downloadVideo = action({
     }
 
     try {
-      // Forward to the yt-dlp server — it handles extraction & streaming
+      // Forward to the yt-dlp server — it handles extraction & streaming.
+      // is_playlist hints at playlist mode so the server returns playlist
+      // entries (count + list) instead of a single video's formats.
       const response = await fetch(
-        `${serverUrl}/api/info?url=${encodeURIComponent(args.url)}`,
+        `${serverUrl}/api/info?url=${encodeURIComponent(args.url)}&is_playlist=${args.isPlaylist ? "true" : "false"}`,
         { signal: AbortSignal.timeout(30000) },
       );
 
