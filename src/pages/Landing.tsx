@@ -43,7 +43,6 @@ import {
   Film,
   Globe,
   Image,
-  Keyboard,
   Link,
   ListVideo,
   Loader2,
@@ -80,7 +79,7 @@ type PageState = "idle" | "loading" | "loaded" | "downloading" | "complete" | "e
 // the app or its footer tells us exactly which APK/EXE build is installed.
 const BUILD_TAG =
   typeof window !== "undefined"
-    ? ((window as any).__VIDFETCH_BUILD__ as string | undefined) ?? null
+    ? window.__VIDFETCH_BUILD__ ?? null
     : null;
 
 // ─── Bilingual YouTube bot-check help guide ───────────────────────────
@@ -235,7 +234,7 @@ const PLAYLIST_PRESETS = [
 
 export default function Landing() {
   const navigate = useNavigate();
-  const { isAuthenticated, signIn } = useAuth();
+  const { isAuthenticated } = useAuth();
   const [url, setUrl] = useState("");
   const [state, setState] = useState<PageState>("idle");
   const [errorMsg, setErrorMsg] = useState("");
@@ -267,9 +266,11 @@ export default function Landing() {
   const nativeAvailable = isNativeAvailable();
   // Desktop (EXE) only: browser-cookies and PO-token-provider settings are
   // not available on Android, so the UI shows them just on Windows.
+  const desktopBridge = window.vidfetch;
   const isDesktop =
-    typeof (window as any).vidfetch?.isDesktop === "boolean" &&
-    (window as any).vidfetch.isDesktop;
+    !!desktopBridge &&
+    typeof desktopBridge.isDesktop === "boolean" &&
+    desktopBridge.isDesktop;
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
   const featuresRef = useRef<HTMLDivElement>(null);
