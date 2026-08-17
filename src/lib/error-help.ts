@@ -17,6 +17,7 @@ export type ErrorCategory =
   | "age"
   | "geo"
   | "login"
+  | "paid"
   | "network"
   | "ffmpeg"
   | "playlist"
@@ -218,6 +219,26 @@ const COPY: Record<
       ],
     },
   },
+  paid: {
+    tr: {
+      title: "Ücretli / premium içerik",
+      message:
+        "Bu içerik yalnızca siteye abone olan veya ödeme yapan kullanıcılara açık; ücretsiz erişimle indirilemiyor.",
+      steps: [
+        "İçeriğin ücretsiz örneğini (tanıtım vb.) dene",
+        "Erişimin olan bir hesapla oturum açtıysan tekrar dene",
+      ],
+    },
+    en: {
+      title: "Paid / premium content",
+      message:
+        "This content is only available to subscribers or paying users, so it can't be downloaded without access.",
+      steps: [
+        "Try a free sample of the content (e.g. a trailer)",
+        "If you have an account with access, log in and retry",
+      ],
+    },
+  },
   network: {
     tr: {
       title: "İnternet bağlantısı sorunu",
@@ -307,12 +328,13 @@ const COPY: Record<
 const MATCHERS: Array<{ category: ErrorCategory; pattern: RegExp }> = [
   {
     category: "no-engine",
-    pattern: /(no download engine|runs in a browser|on your device — there is no server|no server\. install)/i,
+    pattern:
+      /(no download engine|runs in a browser|on your device — there is no server|no server\. install|download engine only exists|install one of those|no server, no api key|only exists inside the)/i,
   },
   {
     category: "bot-check",
     pattern:
-      /(not a bot|sign in to confirm|confirm you'?re (not )?(a )?(human|bot)|captcha|recaptcha|unusual traffic|we'?ve detected|verify you'?re (not )?a (human|bot)|blocked.*bot|http error 403)/i,
+      /(not a bot|sign in to confirm|confirm you'?re (not )?(a )?(human|bot)|captcha|recaptcha|unusual traffic|we'?ve detected|verify you'?re (not )?a (human|bot)|blocked.*bot|http error 403|http error 429|too many requests|rate.?limit|request throttl)/i,
   },
   {
     category: "invalid-url",
@@ -323,21 +345,27 @@ const MATCHERS: Array<{ category: ErrorCategory; pattern: RegExp }> = [
     // Checked before "private": "not available in your country/region" is geo.
     category: "geo",
     pattern:
-      /(geo[- ]restricted|geo restriction|not available in your (country|region)|blocked in your country|unavailable in your (country|region))/i,
+      /(geo[- ]restricted|geo restriction|not .{0,40}available in (your|this) (country|region)|blocked in your country|unavailable in (your|this) (country|region)|not available in your (country|region))/i,
   },
   {
     category: "private",
     pattern:
-      /(private video|this video is private|video.*(is )?private|has been removed|removed video|no longer available|video is not available|unavailable)/i,
+      /(private video|this video is private|video.*(is )?private|has been removed|removed video|no longer available|video is not available|unavailable|video unavailable|http error 404|404 not found)/i,
   },
   {
     category: "age",
-    pattern: /(age[- ]restricted|age restriction|content warning|sign in to view)/i,
+    pattern:
+      /(age[- ]restricted|age restriction|content warning|sign in to view|mature content|nsfw|adult content)/i,
   },
   {
     category: "network",
     pattern:
       /(timed? ?out|timeout|connection|network|offline|dns|getaddrinfo|econnrefused|enotfound|unable to connect|certificate|ssl|502|503|failed to resolve|no route)/i,
+  },
+  {
+    category: "paid",
+    pattern:
+      /(paid content|premium content|members.?only|subscriber.?only|requires (a )?(premium|paid|pro) (account|subscription)|isn'?t available.*(premium|paywall)|paywall|exclusive content|only available to .*(premium|member|subscriber)|premium member|paid subscriber|only subscribers|only (premium|paid) (members|users|viewers))/i,
   },
   {
     category: "login",

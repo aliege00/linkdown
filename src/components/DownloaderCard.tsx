@@ -30,6 +30,7 @@ import {
   type YouTubeSettings,
 } from "@/lib/ytdlp-native";
 import { explainError } from "@/lib/error-help";
+import { normalizeVideoUrl } from "@/lib/url";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowDownToLine,
@@ -1369,7 +1370,15 @@ export default function DownloaderCard({
 
   // ─── Fetch video info ──────────────────────────────────────────────
   const handleAnalyze = useCallback(async () => {
-    if (!url.trim()) return;
+    // Clean the pasted text first — links often arrive with extra
+    // whitespace, quotes or surrounding words from chat apps / notes.
+    const cleanUrl = normalizeVideoUrl(url);
+    if (!cleanUrl) {
+      setErrorMsg(url.trim());
+      setErrorPhase("analyze");
+      updateState("error");
+      return;
+    }
 
     updateState("loading");
     setErrorMsg("");
@@ -1378,7 +1387,7 @@ export default function DownloaderCard({
     setPlaylistSummary(null);
     setPlaylistQuality("best");
 
-    const result = await getVideoInfo(url.trim(), looksLikePlaylist(url.trim()));
+    const result = await getVideoInfo(cleanUrl, looksLikePlaylist(cleanUrl));
 
     if (!result.success) {
       setErrorMsg(result.error);
@@ -1395,7 +1404,8 @@ export default function DownloaderCard({
 
   // ─── Download ──────────────────────────────────────────────────────
   const handleDownload = useCallback(async () => {
-    if (!url.trim() || !selectedFormat) return;
+    const cleanUrl = normalizeVideoUrl(url);
+    if (!cleanUrl || !selectedFormat) return;
 
     updateState("downloading");
     setErrorMsg("");
@@ -1416,7 +1426,7 @@ export default function DownloaderCard({
         : selectedFormat;
 
     const workId = await startDownload({
-      url: url.trim(),
+      url: cleanUrl,
       formatId: formatSpec,
       onProgress: (progress) => {
         // Auto-complete when we hit 100%
@@ -1484,7 +1494,8 @@ export default function DownloaderCard({
 
   // ─── Playlist download (all videos at once) ───────────────────────
   const handleDownloadPlaylist = useCallback(async () => {
-    if (!url.trim() || !videoInfo?.is_playlist) return;
+    const cleanUrl = normalizeVideoUrl(url);
+    if (!cleanUrl || !videoInfo?.is_playlist) return;
 
     const total = videoInfo.count ?? videoInfo.entries?.length ?? 0;
     const preset =
@@ -1505,7 +1516,7 @@ export default function DownloaderCard({
     let lastTick = 0;
 
     const workId = await startDownload({
-      url: url.trim(),
+      url: cleanUrl,
       formatId: preset.spec,
       isPlaylist: true,
       onProgress: (progress) => {
