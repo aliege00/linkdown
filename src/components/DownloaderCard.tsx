@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   getVideoInfo,
   startDownload,
@@ -28,19 +29,25 @@ import {
   type DownloadLocation,
   type YouTubeSettings,
 } from "@/lib/ytdlp-native";
+import { explainError } from "@/lib/error-help";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowDownToLine,
   AlertCircle,
+  Check,
   CheckCircle2,
-  Globe,
+  ChevronDown,
   ClipboardPaste,
   Clock,
+  Copy,
   Download,
   ExternalLink,
   FileVideo,
   FolderCog,
   FolderOpen,
+  Globe,
+  HelpCircle,
+  Lightbulb,
   Link,
   ListVideo,
   Loader2,
@@ -49,6 +56,7 @@ import {
   RefreshCw,
   Search,
   Settings2,
+  ShieldAlert,
   User,
   Video,
   X,
@@ -83,86 +91,251 @@ type HelpLang = "tr" | "en";
 const HELP_CONTENT = {
   tr: {
     kicker: "Yardım merkezi",
-    title: "YouTube indirme sorunları — kısa rehber",
-    introTitle: "Neden 'bot kontrolü' hatası alıyorum?",
-    intro:
-      "Bazen YouTube, bir videoyu indirmeye çalışırken \"Sign in to confirm you're not a bot\" (Devam etmek için giriş yapın) uyarısını gösterir ve erişimi engeller. Bu, uygulamanın hatası değildir. YouTube; VPN, veri merkezi veya ortak ağlardan gelen istekleri otomatik olarak şüpheli görür ve geçici olarak kısıtlar. Diğer siteler (Vimeo, TikTok, Instagram vb.) bu kontrolden etkilenmez — sorun yalnızca YouTube'a özeldir.",
-    causesTitle: "En sık nedenler",
-    causes: [
-      "VPN, kurumsal veya veri merkezi ağına bağlı olman",
-      "Tarayıcıda YouTube'a giriş yapılmamış olması",
-      "Kısa sürede çok fazla indirme yapılması",
-      "YouTube'un yeni bir altyapı değişikliği yayınlaması (birkaç gün sürebilir)",
-    ],
-    fixesTitle: "Nasıl çözülür?",
-    fixes: [
-      {
-        badge: "Windows",
-        title: "Tarayıcı cookies — en kolay yol",
-        body: "Chrome, Edge veya Firefox'ta YouTube'a giriş yap. Uygulamada Gelişmiş → YouTube sorun giderme → Tarayıcı cookies bölümünden tarayıcını seç. İndirme sırasında tarayıcının kapalı veya kilidi açık olması gerekir.",
-      },
-      {
-        badge: "Android + Windows",
-        title: "cookies.txt dosyası",
-        body: "Tarayıcına \"Get cookies.txt LOCALLY\" eklentisini kur, YouTube'a giriş yap ve cookies dosyasını dışa aktar. Ardından uygulamada Gelişmiş → YouTube sorun giderme bölümünden bu dosyayı seç.",
-      },
-      {
-        badge: "Windows • İleri düzey",
-        title: "PO token sağlayıcı",
-        body: "Bilgisayarında token sunucusunu çalıştır: docker run -d --init -p 4416:4416 brainicism/bgutil-ytdlp-pot-provider. Ardından uygulamaya http://127.0.0.1:4416 yaz ve Kaydet'e bas.",
-      },
-    ],
-    note: "Bu ayarlar yalnızca YouTube isteklerini etkiler ve Gelişmiş → YouTube sorun giderme bölümündedir. En güvenilir çözüm, giriş yaptığın bir tarayıcıdan cookies almaktır. VPN'i kapatmak da çoğu zaman yeterlidir.",
-    retryTip:
-      "Bu bir YouTube bot kontrolü hatasına benziyor. Aşağıdaki rehbere bak.",
+    title: "VidFetch yardım merkezi",
+    copyLabel: "Kopyala",
+    copiedLabel: "Kopyalandı",
+    tabs: {
+      bot: "YouTube bot kontrolü",
+      errors: "Sık hatalar",
+      tips: "İpuçları",
+    },
+    bot: {
+      introTitle: "Neden 'bot kontrolü' hatası alıyorum?",
+      intro:
+        "Bazen YouTube, bir videoyu indirmeye çalışırken \"Sign in to confirm you're not a bot\" (Devam etmek için giriş yapın) uyarısını gösterir ve erişimi engeller. Bu, uygulamanın hatası değildir. YouTube; VPN, veri merkezi veya ortak ağlardan gelen istekleri otomatik olarak şüpheli görür ve geçici olarak kısıtlar. Diğer siteler (Vimeo, TikTok, Instagram vb.) bu kontrolden etkilenmez — sorun yalnızca YouTube'a özeldir.",
+      causesTitle: "En sık nedenler",
+      causes: [
+        "VPN, kurumsal veya veri merkezi ağına bağlı olman",
+        "Tarayıcıda YouTube'a giriş yapılmamış olması",
+        "Kısa sürede çok fazla indirme yapılması",
+        "YouTube'un yeni bir altyapı değişikliği yayınlaması (birkaç gün sürebilir)",
+      ],
+      fixesTitle: "Nasıl çözülür?",
+      fixes: [
+        {
+          badge: "Windows",
+          title: "Tarayıcı cookies — en kolay yol",
+          body: "Chrome, Edge veya Firefox'ta YouTube'a giriş yap. Uygulamada Gelişmiş → YouTube sorun giderme → Tarayıcı cookies bölümünden tarayıcını seç. İndirme sırasında tarayıcının kapalı veya kilidi açık olması gerekir.",
+        },
+        {
+          badge: "Android + Windows",
+          title: "cookies.txt dosyası",
+          body: "Tarayıcına \"Get cookies.txt LOCALLY\" eklentisini kur, YouTube'a giriş yap ve cookies dosyasını dışa aktar. Ardından uygulamada Gelişmiş → YouTube sorun giderme bölümünden bu dosyayı seç.",
+        },
+        {
+          badge: "Windows • İleri düzey",
+          title: "PO token sağlayıcı",
+          body: "Bilgisayarında token sunucusunu çalıştır, ardından uygulamaya http://127.0.0.1:4416 yaz ve Kaydet'e bas:",
+          command: "docker run -d --init -p 4416:4416 brainicism/bgutil-ytdlp-pot-provider",
+        },
+      ],
+      note: "Bu ayarlar yalnızca YouTube isteklerini etkiler ve Gelişmiş → YouTube sorun giderme bölümündedir. En güvenilir çözüm, giriş yaptığın bir tarayıcıdan cookies almaktır. VPN'i kapatmak da çoğu zaman yeterlidir.",
+    },
+    errors: {
+      title: "Sık karşılaşılan hatalar",
+      intro:
+        "Aşağıdaki hatalardan birini görürsen panik yapma — çoğu birkaç saniyede çözülür. Her hata için ne anlama geldiği ve ne yapman gerektiği aşağıda.",
+      items: [
+        {
+          title: "Geçersiz veya tanınmayan bağlantı",
+          what: "Bağlantı bir video sayfasına ait değil ya da site desteklenmiyor.",
+          fix: "Bağlantıyı tarayıcının adres çubuğundan kopyala; YouTube, TikTok, Twitter/X gibi desteklenen bir siteden video kullan.",
+        },
+        {
+          title: "Video gizli veya kaldırılmış",
+          what: "Video özel (private), kaldırılmış ya da artık kullanılamıyor.",
+          fix: "Videonun tarayıcıda açılıp açılmadığını kontrol et; başka bir video dene.",
+        },
+        {
+          title: "Yaş sınırı olan video",
+          what: "YouTube, yaş sınırı olan videolara doğrulama istemeden erişimi engelleyebiliyor.",
+          fix: "YouTube hesabınla tarayıcıda oturum aç ve tarayıcı cookies'ini içe aktar.",
+        },
+        {
+          title: "Bölge kısıtlaması",
+          what: "Video, bulunduğun ülkede/bölgede yayınlanmadığı için erişilemiyor.",
+          fix: "Bölgende yayınlanan bir video dene; VPN kullanıyorsan kapat veya sunucu değiştir.",
+        },
+        {
+          title: "İnternet bağlantısı",
+          what: "Uygulama video sunucusuna ulaşamadı; bağlantı kesik, yavaş veya engellenmiş olabilir.",
+          fix: "İnterneti kontrol et, VPN'i kapat, birkaç saniye bekleyip tekrar dene.",
+        },
+        {
+          title: "Giriş gerekiyor",
+          what: "Site, içeriği indirmek için hesaba giriş yapılmasını istiyor.",
+          fix: "Sitede hesabına giriş yap; tarayıcı cookies'ini içe aktar ve tekrar dene.",
+        },
+        {
+          title: "Ses birleştirme hatası (ffmpeg)",
+          what: "Video ve ses ayrı indirildi ama birleştirilemedi.",
+          fix: "Daha düşük bir kalite seç (ör. 1080p) veya uygulamayı güncelle.",
+        },
+        {
+          title: "Diğer hatalar",
+          what: "Yukarıdakilere benzemeyen bir sorun oluştu.",
+          fix: "Birkaç dakika sonra tekrar dene; uygulamayı kapatıp yeniden aç. Sorun sürerse hatanın altındaki teknik ayrıntıyı not al.",
+        },
+      ],
+    },
+    tips: {
+      title: "Genel ipuçları",
+      items: [
+        {
+          title: "Tarayıcı cookies en güvenilir çözümdür",
+          body: "YouTube'a giriş yaptığın tarayıcıdan cookies içe aktarmak bot kontrolünü aşmanın en etkili yoludur. Gelişmiş → YouTube sorun giderme bölümünden yapabilirsin.",
+        },
+        {
+          title: "VPN'ini kapat",
+          body: "VPN, kurumsal veya veri merkezi ağları YouTube tarafından şüpheli görülür. Kapatmak çoğu YouTube sorununu çözer.",
+        },
+        {
+          title: "Bağlantıyı adres çubuğundan kopyala",
+          body: "Kısa veya paylaşım bağlantıları yerine tarayıcının adres çubuğundaki tam URL'yi kullan; bu, analiz hatalarını azaltır.",
+        },
+        {
+          title: "İnternetini kontrol et",
+          body: "Yavaş veya kesintili bağlantı hem analiz hem indirme hatalarına yol açar. Wi-Fi yerine mobil veriyi de deneyebilirsin.",
+        },
+        {
+          title: "Uygulamayı güncel tut",
+          body: "Her güncelleme yeni site desteği ve hata düzeltmeleri getirir. Güncel sürüm kullandığından emin ol.",
+        },
+        {
+          title: "Depolama alanını kontrol et",
+          body: "Yetersiz depolama alanı indirmenin sessizce başarısız olmasına neden olabilir. Cihazında yeterli boş alan olduğundan emin ol.",
+        },
+      ],
+    },
+    stuck: {
+      title: "Hâlâ çözülmedi mi?",
+      body: "Yukarıdaki adımları denediysen ve hâlâ indiremiyorsan: uygulamanın güncel olduğundan emin ol, cihazı yeniden başlat ve başka bir video ile test et. Sorun yalnızca YouTube'da görünüyorsa birkaç saat sonra tekrar dene — YouTube zaman zaman geçici kısıtlamalar uygular.",
+    },
   },
   en: {
     kicker: "Help center",
-    title: "YouTube download issues — quick guide",
-    introTitle: "Why am I getting a 'bot check' error?",
-    intro:
-      "Sometimes YouTube shows \"Sign in to confirm you're not a bot\" and blocks access while you try to download a video. This is not a bug in the app. YouTube automatically treats requests coming from VPNs, datacenter or shared networks as suspicious and temporarily restricts them. Other sites (Vimeo, TikTok, Instagram, etc.) are not affected by this check — it only applies to YouTube.",
-    causesTitle: "Most common causes",
-    causes: [
-      "You are on a VPN, corporate or datacenter network",
-      "You are not logged into YouTube in your browser",
-      "Too many downloads in a short period of time",
-      "YouTube just rolled out an infrastructure change (may last a few days)",
-    ],
-    fixesTitle: "How to fix it",
-    fixes: [
-      {
-        badge: "Windows",
-        title: "Browser cookies — easiest way",
-        body: "Log into YouTube in Chrome, Edge or Firefox. In the app open Advanced → YouTube troubleshooting → Browser cookies and pick your browser. The browser must be closed or unlocked while downloading.",
-      },
-      {
-        badge: "Android + Windows",
-        title: "cookies.txt file",
-        body: "Install the \"Get cookies.txt LOCALLY\" browser extension, log into YouTube and export the cookies file. Then choose that file under Advanced → YouTube troubleshooting in the app.",
-      },
-      {
-        badge: "Windows • Advanced",
-        title: "PO token provider",
-        body: "Run a token server on this PC: docker run -d --init -p 4416:4416 brainicism/bgutil-ytdlp-pot-provider. Then enter http://127.0.0.1:4416 in the app and press Save.",
-      },
-    ],
-    note: "These settings only affect YouTube requests and live under Advanced → YouTube troubleshooting. The most reliable fix is importing cookies from a browser where you are logged in. Turning your VPN off also fixes most cases.",
-    retryTip:
-      "This looks like a YouTube bot check — see the help guide below.",
+    title: "VidFetch help center",
+    copyLabel: "Copy",
+    copiedLabel: "Copied",
+    tabs: {
+      bot: "YouTube bot check",
+      errors: "Common errors",
+      tips: "Tips",
+    },
+    bot: {
+      introTitle: "Why am I getting a 'bot check' error?",
+      intro:
+        "Sometimes YouTube shows \"Sign in to confirm you're not a bot\" and blocks access while you try to download a video. This is not a bug in the app. YouTube automatically treats requests coming from VPNs, datacenter or shared networks as suspicious and temporarily restricts them. Other sites (Vimeo, TikTok, Instagram, etc.) are not affected by this check — it only applies to YouTube.",
+      causesTitle: "Most common causes",
+      causes: [
+        "You are on a VPN, corporate or datacenter network",
+        "You are not logged into YouTube in your browser",
+        "Too many downloads in a short period of time",
+        "YouTube just rolled out an infrastructure change (may last a few days)",
+      ],
+      fixesTitle: "How to fix it",
+      fixes: [
+        {
+          badge: "Windows",
+          title: "Browser cookies — easiest way",
+          body: "Log into YouTube in Chrome, Edge or Firefox. In the app open Advanced → YouTube troubleshooting → Browser cookies and pick your browser. The browser must be closed or unlocked while downloading.",
+        },
+        {
+          badge: "Android + Windows",
+          title: "cookies.txt file",
+          body: "Install the \"Get cookies.txt LOCALLY\" browser extension, log into YouTube and export the cookies file. Then choose that file under Advanced → YouTube troubleshooting in the app.",
+        },
+        {
+          badge: "Windows • Advanced",
+          title: "PO token provider",
+          body: "Run a token server on this PC, then enter http://127.0.0.1:4416 in the app and press Save:",
+          command: "docker run -d --init -p 4416:4416 brainicism/bgutil-ytdlp-pot-provider",
+        },
+      ],
+      note: "These settings only affect YouTube requests and live under Advanced → YouTube troubleshooting. The most reliable fix is importing cookies from a browser where you are logged in. Turning your VPN off also fixes most cases.",
+    },
+    errors: {
+      title: "Common errors",
+      intro:
+        "If you see one of these errors, don't panic — most are fixed in seconds. Here's what each one means and what to do.",
+      items: [
+        {
+          title: "Invalid or unrecognized link",
+          what: "The link isn't a video page, or the site isn't supported.",
+          fix: "Copy the link from your browser's address bar; use a video from a supported site like YouTube or TikTok.",
+        },
+        {
+          title: "Video is private or removed",
+          what: "The video is private, has been removed, or is no longer available.",
+          fix: "Check whether the video opens in your browser; try a different video.",
+        },
+        {
+          title: "Age-restricted video",
+          what: "YouTube can block age-restricted videos without a verification step.",
+          fix: "Log into YouTube in your browser and import browser cookies.",
+        },
+        {
+          title: "Region restriction",
+          what: "The video isn't published in your country or region.",
+          fix: "Try a video published in your region; if you use a VPN, turn it off or switch servers.",
+        },
+        {
+          title: "Internet connection",
+          what: "The app couldn't reach the video server; the connection may be down, slow or blocked.",
+          fix: "Check your internet, turn your VPN off, wait a few seconds and try again.",
+        },
+        {
+          title: "Login required",
+          what: "The site requires you to be logged into an account before downloading.",
+          fix: "Log into your account on the site; import browser cookies and try again.",
+        },
+        {
+          title: "Audio merge error (ffmpeg)",
+          what: "Video and audio downloaded separately but couldn't be merged.",
+          fix: "Pick a lower quality (e.g. 1080p) or update the app.",
+        },
+        {
+          title: "Other errors",
+          what: "Something that doesn't match the cases above happened.",
+          fix: "Wait a few minutes and retry; restart the app. If it persists, note the technical detail shown under the error.",
+        },
+      ],
+    },
+    tips: {
+      title: "General tips",
+      items: [
+        {
+          title: "Browser cookies are the most reliable fix",
+          body: "Importing cookies from a browser where you're logged into YouTube is the most effective way to get past the bot check. It lives under Advanced → YouTube troubleshooting.",
+        },
+        {
+          title: "Turn your VPN off",
+          body: "VPNs, corporate and datacenter networks look suspicious to YouTube. Turning it off fixes most YouTube issues.",
+        },
+        {
+          title: "Copy the link from the address bar",
+          body: "Use the full URL from your browser's address bar instead of short or share links; this avoids analysis errors.",
+        },
+        {
+          title: "Check your internet",
+          body: "Slow or flaky connections cause both analysis and download errors. You can also try mobile data instead of Wi-Fi.",
+        },
+        {
+          title: "Keep the app updated",
+          body: "Every update brings new site support and bug fixes. Make sure you're on the latest version.",
+        },
+        {
+          title: "Check your storage",
+          body: "Not enough free storage can make downloads fail silently. Make sure your device has free space.",
+        },
+      ],
+    },
+    stuck: {
+      title: "Still stuck?",
+      body: "If you tried the steps above and still can't download: make sure the app is up to date, restart the device, and test with another video. If the issue only shows on YouTube, try again in a few hours — YouTube occasionally applies temporary restrictions.",
+    },
   },
 } as const;
-
-/** True when an error message looks like YouTube's anti-bot "Sign in" check. */
-function isBotCheckError(msg: string): boolean {
-  const m = (msg || "").toLowerCase();
-  return (
-    m.includes("not a bot") ||
-    m.includes("sign in to confirm") ||
-    m.includes("bot") ||
-    m.includes("captcha")
-  );
-}
 
 function groupFormats(formats: YtDlpFormat[]) {
   const video: YtDlpFormat[] = [];
@@ -223,7 +396,46 @@ const PLAYLIST_PRESETS = [
   { id: "audio", label: "Audio", desc: "MP3 / M4A", spec: "bestaudio" },
 ] as const;
 
-// ─── Help Guide Card (bilingual YouTube bot-check help) ──────────────
+// ─── Copy Command (small copy-to-clipboard button) ────────────────────
+
+const CopyCommand = memo(function CopyCommand({
+  command,
+  label,
+  copiedLabel,
+}: {
+  command: string;
+  label: string;
+  copiedLabel: string;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(command);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      // Clipboard unavailable — nothing to do.
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border/40 bg-background px-2 py-1.5 text-[10px] font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground cursor-pointer"
+    >
+      {copied ? (
+        <Check className="h-3 w-3 text-emerald-500" />
+      ) : (
+        <Copy className="h-3 w-3" />
+      )}
+      {copied ? copiedLabel : label}
+    </button>
+  );
+});
+
+// ─── Help Guide Card (bilingual help center) ──────────────────────────
 // Memoized so typing in the URL input and progress updates never
 // re-render this large text-heavy card.
 
@@ -235,12 +447,14 @@ const HelpGuideCard = memo(function HelpGuideCard({
   onLangChange: (lang: HelpLang) => void;
 }) {
   const help = HELP_CONTENT[lang];
+  const [tab, setTab] = useState("bot");
+
   return (
     <div className="mt-6 mx-auto max-w-2xl" id="youtube-help-guide">
       <Card className="border-amber-500/25 bg-gradient-to-b from-amber-50/70 to-card dark:from-amber-500/5 dark:to-card shadow-sm">
         <CardContent className="p-4 sm:p-5 text-left">
           {/* Header + language toggle */}
-          <div className="flex items-center gap-3 pb-3 mb-4 border-b border-border/30">
+          <div className="flex items-center gap-3 pb-3 mb-3 border-b border-border/30">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-500">
               <AlertCircle className="h-4 w-4" />
             </div>
@@ -280,64 +494,249 @@ const HelpGuideCard = memo(function HelpGuideCard({
             </div>
           </div>
 
-          {/* What is happening */}
-          <div className="mb-4">
-            <p className="text-sm font-semibold flex items-center gap-1.5">
-              <Globe className="h-3.5 w-3.5 text-primary" />
-              {help.introTitle}
-            </p>
-            <p className="text-xs text-muted-foreground leading-relaxed mt-1.5">
-              {help.intro}
-            </p>
-          </div>
+          <Tabs value={tab} onValueChange={setTab}>
+            <TabsList className="w-full h-auto grid grid-cols-3 gap-0.5 p-1">
+              <TabsTrigger
+                value="bot"
+                className="gap-1 px-1 py-1.5 text-[11px] sm:text-xs leading-tight whitespace-normal text-center"
+              >
+                <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
+                {help.tabs.bot}
+              </TabsTrigger>
+              <TabsTrigger
+                value="errors"
+                className="gap-1 px-1 py-1.5 text-[11px] sm:text-xs leading-tight whitespace-normal text-center"
+              >
+                <HelpCircle className="h-3.5 w-3.5 shrink-0" />
+                {help.tabs.errors}
+              </TabsTrigger>
+              <TabsTrigger
+                value="tips"
+                className="gap-1 px-1 py-1.5 text-[11px] sm:text-xs leading-tight whitespace-normal text-center"
+              >
+                <Lightbulb className="h-3.5 w-3.5 shrink-0" />
+                {help.tabs.tips}
+              </TabsTrigger>
+            </TabsList>
 
-          {/* Common causes */}
-          <div className="mb-4">
-            <p className="text-sm font-semibold">{help.causesTitle}</p>
-            <ul className="mt-1.5 space-y-1.5">
-              {help.causes.map((cause, i) => (
-                <li
-                  key={i}
-                  className="flex items-start gap-2 text-xs text-muted-foreground leading-relaxed"
-                >
-                  <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-amber-500/70" />
-                  {cause}
-                </li>
-              ))}
-            </ul>
-          </div>
+            {/* ── Bot check tab ── */}
+            <TabsContent value="bot" className="mt-4">
+              <div className="mb-4">
+                <p className="text-sm font-semibold flex items-center gap-1.5">
+                  <Globe className="h-3.5 w-3.5 text-primary" />
+                  {help.bot.introTitle}
+                </p>
+                <p className="text-xs text-muted-foreground leading-relaxed mt-1.5">
+                  {help.bot.intro}
+                </p>
+              </div>
 
-          {/* Fixes */}
-          <div className="mb-4">
-            <p className="text-sm font-semibold mb-2">{help.fixesTitle}</p>
-            <div className="space-y-2.5">
-              {help.fixes.map((fix, i) => (
-                <div
-                  key={i}
-                  className="rounded-lg border border-border/40 bg-background/60 p-3"
-                >
-                  <div className="flex flex-wrap items-center gap-2 mb-1">
-                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-bold text-primary">
-                      {i + 1}
-                    </span>
-                    <p className="text-sm font-medium">{fix.title}</p>
-                    <span className="rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[10px] font-medium text-primary">
-                      {fix.badge}
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    {fix.body}
-                  </p>
+              <div className="mb-4">
+                <p className="text-sm font-semibold">{help.bot.causesTitle}</p>
+                <ul className="mt-1.5 space-y-1.5">
+                  {help.bot.causes.map((cause, i) => (
+                    <li
+                      key={i}
+                      className="flex items-start gap-2 text-xs text-muted-foreground leading-relaxed"
+                    >
+                      <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-amber-500/70" />
+                      {cause}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div className="mb-4">
+                <p className="text-sm font-semibold mb-2">{help.bot.fixesTitle}</p>
+                <div className="space-y-2.5">
+                  {help.bot.fixes.map((fix, i) => (
+                    <div
+                      key={i}
+                      className="rounded-lg border border-border/40 bg-background/60 p-3"
+                    >
+                      <div className="flex flex-wrap items-center gap-2 mb-1">
+                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-bold text-primary">
+                          {i + 1}
+                        </span>
+                        <p className="text-sm font-medium">{fix.title}</p>
+                        <span className="rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[10px] font-medium text-primary">
+                          {fix.badge}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        {fix.body}
+                      </p>
+                      {"command" in fix && fix.command && (
+                        <div className="mt-2 flex items-start gap-2">
+                          <code className="flex-1 min-w-0 break-all rounded-md border border-border/40 bg-background px-2 py-1.5 font-mono text-[10px] leading-relaxed text-muted-foreground">
+                            {fix.command}
+                          </code>
+                          <CopyCommand
+                            command={fix.command}
+                            label={help.copyLabel}
+                            copiedLabel={help.copiedLabel}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </div>
+              </div>
 
-          <p className="text-[11px] text-muted-foreground/70 leading-relaxed border-t border-border/30 pt-3">
-            {help.note}
-          </p>
+              <p className="text-[11px] text-muted-foreground/70 leading-relaxed border-t border-border/30 pt-3">
+                {help.bot.note}
+              </p>
+            </TabsContent>
+
+            {/* ── Common errors tab ── */}
+            <TabsContent value="errors" className="mt-4">
+              <p className="text-sm font-semibold">{help.errors.title}</p>
+              <p className="text-xs text-muted-foreground leading-relaxed mt-1">
+                {help.errors.intro}
+              </p>
+              <div className="mt-3 space-y-2.5">
+                {help.errors.items.map((item, i) => (
+                  <div
+                    key={i}
+                    className="rounded-lg border border-border/40 bg-background/60 p-3"
+                  >
+                    <p className="text-sm font-medium flex items-center gap-2">
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-500/10 text-[11px] font-bold text-amber-500">
+                        {i + 1}
+                      </span>
+                      {item.title}
+                    </p>
+                    <p className="text-xs text-muted-foreground leading-relaxed mt-1">
+                      {item.what}
+                    </p>
+                    <p className="mt-1 flex items-start gap-1.5 text-xs leading-relaxed text-foreground/80">
+                      <CheckCircle2 className="h-3.5 w-3.5 mt-0.5 shrink-0 text-emerald-500" />
+                      <span>{item.fix}</span>
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </TabsContent>
+
+            {/* ── Tips tab ── */}
+            <TabsContent value="tips" className="mt-4">
+              <p className="text-sm font-semibold">{help.tips.title}</p>
+              <div className="mt-3 space-y-2.5">
+                {help.tips.items.map((item, i) => (
+                  <div
+                    key={i}
+                    className="flex items-start gap-3 rounded-lg border border-border/40 bg-background/60 p-3"
+                  >
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-500">
+                      <Lightbulb className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">{item.title}</p>
+                      <p className="text-xs text-muted-foreground leading-relaxed mt-0.5">
+                        {item.body}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </TabsContent>
+          </Tabs>
+
+          {/* Still stuck */}
+          <div className="mt-4 rounded-lg border border-amber-500/25 bg-amber-500/5 p-3">
+            <p className="text-sm font-semibold flex items-center gap-1.5">
+              <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
+              {help.stuck.title}
+            </p>
+            <p className="text-xs text-muted-foreground leading-relaxed mt-1">
+              {help.stuck.body}
+            </p>
+          </div>
         </CardContent>
       </Card>
+    </div>
+  );
+});
+
+// ─── Error Box (plain-language error explanations) ────────────────────
+// Converts raw engine errors into a friendly, localized explanation with
+// actionable steps. Memoized so it only re-renders when the error changes.
+
+const ErrorBox = memo(function ErrorBox({
+  message,
+  phase,
+  lang,
+}: {
+  message: string;
+  phase: "analyze" | "download";
+  lang: HelpLang;
+}) {
+  const info = explainError(message, lang);
+
+  const scrollToHelpGuide = () => {
+    document.getElementById("youtube-help-guide")?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  };
+
+  return (
+    <div className="flex items-start gap-3 p-4 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200/50 dark:border-red-800/30">
+      <AlertCircle className="h-5 w-5 text-red-500 mt-0.5 shrink-0" />
+      <div className="text-left text-sm flex-1 min-w-0">
+        <p className="text-[10px] uppercase tracking-wider text-red-500/70 font-medium">
+          {phase === "download"
+            ? lang === "tr"
+              ? "İndirme hatası"
+              : "Download error"
+            : lang === "tr"
+              ? "Analiz hatası"
+              : "Analysis error"}
+        </p>
+        <p className="font-medium text-red-800 dark:text-red-300 mt-0.5">
+          {info.title}
+        </p>
+        <p className="text-red-600 dark:text-red-400/80 mt-1 text-xs leading-relaxed">
+          {info.message}
+        </p>
+        {info.steps.length > 0 && (
+          <ul className="mt-2 space-y-1.5">
+            {info.steps.map((step, i) => (
+              <li
+                key={i}
+                className="flex items-start gap-2 text-xs text-red-700 dark:text-red-300/90 leading-relaxed"
+              >
+                <CheckCircle2 className="h-3.5 w-3.5 mt-0.5 shrink-0 text-red-400" />
+                <span>{step}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {info.category === "bot-check" && (
+          <button
+            type="button"
+            onClick={scrollToHelpGuide}
+            className="mt-2.5 flex items-start gap-2 rounded-md border border-amber-300/50 dark:border-amber-700/40 bg-amber-50 dark:bg-amber-950/30 px-2.5 py-1.5 text-left text-[11px] leading-relaxed text-amber-700 dark:text-amber-300 transition-colors hover:bg-amber-100 dark:hover:bg-amber-950/50 cursor-pointer"
+          >
+            <ChevronDown className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+            <span>
+              {lang === "tr"
+                ? "Bu bir YouTube bot kontrolü hatası. Aşağıdaki yardım rehberinde çözüm adım adım anlatılıyor — dokun ve rehbere git."
+                : "This looks like a YouTube bot check. The help guide below walks you through the fix — tap to jump to it."}
+            </span>
+          </button>
+        )}
+        {info.technical && (
+          <details className="mt-2">
+            <summary className="cursor-pointer text-[10px] font-medium text-red-500/60 hover:text-red-500 transition-colors select-none">
+              {lang === "tr" ? "Teknik detay" : "Technical detail"}
+            </summary>
+            <p className="mt-1 rounded-md border border-red-200/40 bg-red-50/60 dark:bg-red-950/20 px-2 py-1.5 font-mono text-[10px] leading-relaxed break-words text-red-500/60">
+              {info.technical}
+            </p>
+          </details>
+        )}
+      </div>
     </div>
   );
 });
@@ -807,6 +1206,9 @@ export default function DownloaderCard({
   const [poProviderInput, setPoProviderInput] = useState("");
   const [pickingCookies, setPickingCookies] = useState(false);
   const [helpLang, setHelpLang] = useState<HelpLang>("tr");
+  // Whether the visible error came from analyzing the URL or starting the
+  // download — used to pick the error box's kicker label.
+  const [errorPhase, setErrorPhase] = useState<"analyze" | "download">("analyze");
   const nativeAvailable = isNativeAvailable();
   // Desktop (EXE) only: browser-cookies and PO-token-provider settings are
   // not available on Android, so the UI shows them just on Windows.
@@ -927,6 +1329,7 @@ export default function DownloaderCard({
 
     if (!result.success) {
       setErrorMsg(result.error);
+      setErrorPhase("analyze");
       updateState("error");
       return;
     }
@@ -993,6 +1396,7 @@ export default function DownloaderCard({
       },
       onError: (error) => {
         setErrorMsg(error);
+        setErrorPhase("download");
         updateState("error");
       },
     });
@@ -1003,6 +1407,7 @@ export default function DownloaderCard({
       setErrorMsg(
         "This preview runs in a browser, where there is no download engine. Install the Android APK or the Windows EXE — the engine runs right on your device. No server, no API key, unlimited."
       );
+      setErrorPhase("download");
       updateState("error");
       return;
     }
@@ -1096,6 +1501,7 @@ export default function DownloaderCard({
       },
       onError: (error) => {
         setErrorMsg(error);
+        setErrorPhase("download");
         updateState("error");
       },
     });
@@ -1104,6 +1510,7 @@ export default function DownloaderCard({
       setErrorMsg(
         "This preview runs in a browser, where there is no download engine. Install the Android APK or the Windows EXE — the engine runs right on your device. No server, no API key, unlimited."
       );
+      setErrorPhase("download");
       updateState("error");
       return;
     }
@@ -1334,32 +1741,17 @@ export default function DownloaderCard({
                 transition={{ type: "spring", stiffness: 300, damping: 25 }}
                 className="space-y-3"
               >
-                <div className="flex items-start gap-3 p-4 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200/50 dark:border-red-800/30">
-                  <AlertCircle className="h-5 w-5 text-red-500 mt-0.5 shrink-0" />
-                  <div className="text-left text-sm">
-                    <p className="font-medium text-red-800 dark:text-red-300">
-                      Failed to analyze video
-                    </p>
-                    <p className="text-red-600 dark:text-red-400/80 mt-1 text-xs leading-relaxed">
-                      {errorMsg}
-                    </p>
-                    {isBotCheckError(errorMsg) && (
-                      <p className="mt-2 text-[11px] leading-relaxed rounded-md border border-amber-300/50 dark:border-amber-700/40 bg-amber-50 dark:bg-amber-950/30 px-2.5 py-1.5 text-amber-700 dark:text-amber-300">
-                        {helpLang === "tr"
-                          ? "Bu bir YouTube bot kontrolü hatasına benziyor. Aşağıdaki rehbere bak."
-                          : "This looks like a YouTube bot check — see the help guide below."}
-                      </p>
-                    )}
-                  </div>
-                </div>
+                {errorMsg && (
+                  <ErrorBox message={errorMsg} phase={errorPhase} lang={helpLang} />
+                )}
                 <div className="flex gap-2">
                   <Button onClick={handleAnalyze} variant="default" className="flex-1 gap-2 active:scale-[0.97]">
                     <RefreshCw className="h-4 w-4" />
-                    Retry
+                    {helpLang === "tr" ? "Tekrar dene" : "Retry"}
                   </Button>
                   <Button onClick={resetAll} variant="outline" className="gap-2 active:scale-[0.97]">
                     <X className="h-4 w-4" />
-                    Clear
+                    {helpLang === "tr" ? "Temizle" : "Clear"}
                   </Button>
                 </div>
               </motion.div>
