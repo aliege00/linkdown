@@ -1,74 +1,64 @@
-name: Build APK (Android)
+name: Build Debug APK
 
-# Runs automatically on every push to main, and manually via the
-# "Run workflow" button in the Actions tab.
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
-jobs:
-  build-apk:
-    name: Build Android APK
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+# actions:write lets the Prune step delete old artifacts so the repo never
+# hits the Actions storage quota again.
+permissions:
+  contents: read
+  actions: write
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
 
-      # npm install (not npm ci): the committed package-lock.json is out of
-      # date with package.json (electron was added later), and npm ci refuses
-      # to work with a mismatched lockfile. npm install reconciles it on the fly.
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
-
-      - name: Build web app
-        run: npm run build
-
-      # Capacitor 8 + the app's generated gradle config compile for Java 21
-      # (see android/app/capacitor.build.gradle), so the runner must provide
-      # JDK 21 — JDK 17 fails with "invalid source release: 21".
-      - name: Setup Java 21
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
 
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web app
+        run: npm run build
+
       - name: Sync Capacitor Android
         run: npx cap sync android
 
-      # Required — without this the build fails with:
-      #   ./gradlew: Permission denied
-      - name: Make gradlew executable
-        run: chmod +x android/gradlew
-
       - name: Build debug APK
-        working-directory: android
-        run: ./gradlew assembleDebug
+        run: cd android && ./gradlew assembleDebug
 
-      # Copy the APK to a clear, versioned filename so the downloaded
-      # artifact is self-explanatory (e.g. VidFetch-v1.0.0-android.apk).
-      - name: Stage APK with clear name
-        id: stage
+      # ── Quota guard ──────────────────────────────────────────────
+      # Deletes artifacts from previous runs right before uploading, so a
+      # full storage quota can never block the upload again. Placed AFTER
+      # the build on purpose: if the build fails, nothing gets deleted.
+      - name: Prune old artifacts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION=$(node -p "require('./package.json').version")
-          APK=$(find android/app/build/outputs/apk -name "*.apk" | head -1)
-          if [ -z "$APK" ]; then
-            echo "::error::No APK file was produced by the build"
-            exit 1
-          fi
-          mkdir -p staged-apk
-          cp "$APK" "staged-apk/VidFetch-v${VERSION}-android.apk"
-          echo "apk_file=staged-apk/VidFetch-v${VERSION}-android.apk" >> "$GITHUB_OUTPUT"
+          gh api "repos/${{ github.repository }}/actions/artifacts?per_page=100" \
+            --paginate --jq '.artifacts[] | select(.expired == false) | .id' |
+            while read -r id; do
+              echo "Deleting artifact $id"
+              gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/$id" || true
+            done
 
-      - name: Upload APK artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: VidFetch-Android-APK
-          path: ${{ steps.stage.outputs.apk_file }}
-          if-no-files-found: error
+          name: vidfetch-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 3
