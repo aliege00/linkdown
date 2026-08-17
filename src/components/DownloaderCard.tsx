@@ -94,6 +94,7 @@ const HELP_CONTENT = {
     title: "VidFetch yardım merkezi",
     copyLabel: "Kopyala",
     copiedLabel: "Kopyalandı",
+    goToSettings: "Sorun giderme ayarlarını aç",
     tabs: {
       bot: "YouTube bot kontrolü",
       errors: "Sık hatalar",
@@ -116,17 +117,20 @@ const HELP_CONTENT = {
           badge: "Windows",
           title: "Tarayıcı cookies — en kolay yol",
           body: "Chrome, Edge veya Firefox'ta YouTube'a giriş yap. Uygulamada Gelişmiş → YouTube sorun giderme → Tarayıcı cookies bölümünden tarayıcını seç. İndirme sırasında tarayıcının kapalı veya kilidi açık olması gerekir.",
+          settingsKey: "cookies",
         },
         {
           badge: "Android + Windows",
           title: "cookies.txt dosyası",
           body: "Tarayıcına \"Get cookies.txt LOCALLY\" eklentisini kur, YouTube'a giriş yap ve cookies dosyasını dışa aktar. Ardından uygulamada Gelişmiş → YouTube sorun giderme bölümünden bu dosyayı seç.",
+          settingsKey: "cookies",
         },
         {
           badge: "Windows • İleri düzey",
           title: "PO token sağlayıcı",
           body: "Bilgisayarında token sunucusunu çalıştır, ardından uygulamaya http://127.0.0.1:4416 yaz ve Kaydet'e bas:",
           command: "docker run -d --init -p 4416:4416 brainicism/bgutil-ytdlp-pot-provider",
+          settingsKey: "po",
         },
       ],
       note: "Bu ayarlar yalnızca YouTube isteklerini etkiler ve Gelişmiş → YouTube sorun giderme bölümündedir. En güvenilir çözüm, giriş yaptığın bir tarayıcıdan cookies almaktır. VPN'i kapatmak da çoğu zaman yeterlidir.",
@@ -217,6 +221,7 @@ const HELP_CONTENT = {
     title: "VidFetch help center",
     copyLabel: "Copy",
     copiedLabel: "Copied",
+    goToSettings: "Open troubleshooting settings",
     tabs: {
       bot: "YouTube bot check",
       errors: "Common errors",
@@ -239,17 +244,20 @@ const HELP_CONTENT = {
           badge: "Windows",
           title: "Browser cookies — easiest way",
           body: "Log into YouTube in Chrome, Edge or Firefox. In the app open Advanced → YouTube troubleshooting → Browser cookies and pick your browser. The browser must be closed or unlocked while downloading.",
+          settingsKey: "cookies",
         },
         {
           badge: "Android + Windows",
           title: "cookies.txt file",
           body: "Install the \"Get cookies.txt LOCALLY\" browser extension, log into YouTube and export the cookies file. Then choose that file under Advanced → YouTube troubleshooting in the app.",
+          settingsKey: "cookies",
         },
         {
           badge: "Windows • Advanced",
           title: "PO token provider",
           body: "Run a token server on this PC, then enter http://127.0.0.1:4416 in the app and press Save:",
           command: "docker run -d --init -p 4416:4416 brainicism/bgutil-ytdlp-pot-provider",
+          settingsKey: "po",
         },
       ],
       note: "These settings only affect YouTube requests and live under Advanced → YouTube troubleshooting. The most reliable fix is importing cookies from a browser where you are logged in. Turning your VPN off also fixes most cases.",
@@ -442,12 +450,18 @@ const CopyCommand = memo(function CopyCommand({
 const HelpGuideCard = memo(function HelpGuideCard({
   lang,
   onLangChange,
+  showSettings,
 }: {
   lang: HelpLang;
   onLangChange: (lang: HelpLang) => void;
+  /** True when the native YouTube troubleshooting panel exists (APK/EXE). */
+  showSettings?: boolean;
 }) {
   const help = HELP_CONTENT[lang];
   const [tab, setTab] = useState("bot");
+  // The native troubleshooting panel only exists inside the APK/EXE builds.
+  // (showSettings is optional — fall back to the environment check.)
+  const canOpenSettings = showSettings ?? isNativeAvailable();
 
   return (
     <div className="mt-6 mx-auto max-w-2xl" id="youtube-help-guide">
@@ -578,6 +592,16 @@ const HelpGuideCard = memo(function HelpGuideCard({
                           />
                         </div>
                       )}
+                      {"settingsKey" in fix && canOpenSettings && (
+                        <button
+                          type="button"
+                          onClick={scrollToTroubleshooting}
+                          className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-primary/20 bg-primary/5 px-2 py-1 text-[10px] font-medium text-primary transition-colors hover:bg-primary/10 cursor-pointer"
+                        >
+                          <Settings2 className="h-3 w-3" />
+                          {help.goToSettings}
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -662,16 +686,30 @@ const HelpGuideCard = memo(function HelpGuideCard({
 // Converts raw engine errors into a friendly, localized explanation with
 // actionable steps. Memoized so it only re-renders when the error changes.
 
+/** Scroll to the native YouTube troubleshooting panel (APK/EXE only). */
+function scrollToTroubleshooting() {
+  document.getElementById("youtube-troubleshooting")?.scrollIntoView({
+    behavior: "smooth",
+    block: "start",
+  });
+}
+
 const ErrorBox = memo(function ErrorBox({
   message,
   phase,
   lang,
+  showSettings,
 }: {
   message: string;
   phase: "analyze" | "download";
   lang: HelpLang;
+  /** True when the native YouTube troubleshooting panel exists (APK/EXE). */
+  showSettings?: boolean;
 }) {
   const info = explainError(message, lang);
+  // The native troubleshooting panel only exists inside the APK/EXE builds.
+  // (showSettings is optional — fall back to the environment check.)
+  const canOpenSettings = showSettings ?? isNativeAvailable();
 
   const scrollToHelpGuide = () => {
     document.getElementById("youtube-help-guide")?.scrollIntoView({
@@ -685,7 +723,7 @@ const ErrorBox = memo(function ErrorBox({
       <AlertCircle className="h-5 w-5 text-red-500 mt-0.5 shrink-0" />
       <div className="text-left text-sm flex-1 min-w-0">
         <p className="text-[10px] uppercase tracking-wider text-red-500/70 font-medium">
-          {phase === "download"
+          {phase=== "download"
             ? lang === "tr"
               ? "İndirme hatası"
               : "Download error"
@@ -713,18 +751,30 @@ const ErrorBox = memo(function ErrorBox({
           </ul>
         )}
         {info.category === "bot-check" && (
-          <button
-            type="button"
-            onClick={scrollToHelpGuide}
-            className="mt-2.5 flex items-start gap-2 rounded-md border border-amber-300/50 dark:border-amber-700/40 bg-amber-50 dark:bg-amber-950/30 px-2.5 py-1.5 text-left text-[11px] leading-relaxed text-amber-700 dark:text-amber-300 transition-colors hover:bg-amber-100 dark:hover:bg-amber-950/50 cursor-pointer"
-          >
-            <ChevronDown className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-            <span>
-              {lang === "tr"
-                ? "Bu bir YouTube bot kontrolü hatası. Aşağıdaki yardım rehberinde çözüm adım adım anlatılıyor — dokun ve rehbere git."
-                : "This looks like a YouTube bot check. The help guide below walks you through the fix — tap to jump to it."}
-            </span>
-          </button>
+          <div className="mt-2.5 flex flex-col sm:flex-row items-stretch gap-1.5">
+            <button
+              type="button"
+              onClick={scrollToHelpGuide}
+              className="flex-1 flex items-start gap-2 rounded-md border border-amber-300/50 dark:border-amber-700/40 bg-amber-50 dark:bg-amber-950/30 px-2.5 py-1.5 text-left text-[11px] leading-relaxed text-amber-700 dark:text-amber-300 transition-colors hover:bg-amber-100 dark:hover:bg-amber-950/50 cursor-pointer"
+            >
+              <ChevronDown className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+              <span>
+                {lang === "tr"
+                  ? "Bu bir YouTube bot kontrolü hatası — rehbere git"
+                  : "This looks like a YouTube bot check — open the guide"}
+              </span>
+            </button>
+            {canOpenSettings && (
+              <button
+                type="button"
+                onClick={scrollToTroubleshooting}
+                className="flex items-center justify-center gap-1.5 rounded-md border border-amber-300/50 dark:border-amber-700/40 bg-amber-50 dark:bg-amber-950/30 px-2.5 py-1.5 text-[11px] font-medium text-amber-700 dark:text-amber-300 transition-colors hover:bg-amber-100 dark:hover:bg-amber-950/50 cursor-pointer"
+              >
+                <Settings2 className="h-3.5 w-3.5 shrink-0" />
+                {lang === "tr" ? "Ayarları aç" : "Open settings"}
+              </button>
+            )}
+          </div>
         )}
         {info.technical && (
           <details className="mt-2">
@@ -1031,7 +1081,10 @@ const NativeToolsPanel = memo(function NativeToolsPanel({
       </Card>
 
       {/* YouTube anti-bot troubleshooting (optional, advanced) */}
-      <Card className="mt-4 border-border/50 shadow-sm bg-card/95 backdrop-blur-sm">
+      <Card
+        id="youtube-troubleshooting"
+        className="mt-4 scroll-mt-24 border-border/50 shadow-sm bg-card/95 backdrop-blur-sm"
+      >
         <CardContent className="p-4 sm:p-5 text-left">
           <div className="flex items-center gap-3 pb-3 mb-3 border-b border-border/30">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
