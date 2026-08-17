@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+
+  <!-- Primary Meta Tags -->
+  <meta name="title" content="VidFetch - Free Video Downloader" />
+  <meta name="description" content="Free video downloader. Paste any video link and download instantly. No sign-ups, no limits." />
+
+  <!-- PWA / Android -->
+  <meta name="theme-color" content="#4a7aff" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="application-name" content="VidFetch" />
+
+  <!-- iOS / Safari -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="VidFetch" />
+  <link rel="apple-touch-icon" href="/icon-192.png" />
+  <link rel="apple-touch-startup-image" href="/icon-512.png" />
+
+  <!-- Windows / IE -->
+  <meta name="msapplication-TileColor" content="#4a7aff" />
+  <meta name="msapplication-TileImage" content="/icon-192.png" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>VidFetch - Free Video Downloader</title>
+
+  <script>
+    // ── Build fingerprint ─────────────────────────────────────────────
+    // Lets us identify exactly which APK/EXE is installed from a screenshot.
+    window.__VIDFETCH_BUILD__ = "fix14";
+
+    // ── Crash reporter ──────────────────────────────────────────────────
+    // If the JS bundle fails to load or crashes during startup, paint a
+    // readable error instead of a silent white/black screen. This makes
+    // packaged-app failures visible and debuggable. Unlike before, this also
+    // catches script/RESOURCE load failures (capture phase — they don't
+    // bubble) and includes a watchdog: if nothing renders within 10s it
+    // explains why, so a blank screen is impossible to miss.
+    (function () {
+      var errors = [];
+      var shown = false;
+      function showFatal(message, detail) {
+        if (shown) return;
+        shown = true;
+        try {
+          var el = document.createElement('pre');
+          el.style.cssText =
+            'position:fixed;inset:0;z-index:999999;margin:0;padding:24px;' +
+            'background:#0b0b0f;color:#ffb4b4;font:12px/1.6 monospace;' +
+            'white-space:pre-wrap;word-break:break-word;overflow:auto';
+          var build = window.__VIDFETCH_BUILD__ || 'unknown';
+          var extra = errors.slice(0, 8).map(function (e) { return '· ' + e; }).join('\n');
+          el.textContent = 'VidFetch (build ' + build + ') failed to start:\n\n' +
+            message +
+            (detail ? '\n\n' + detail : '') +
+            (extra ? '\n\nCaptured errors:\n' + extra : '') +
+            '\n\nScreenshot this and send it to the developer.';
+          document.body.appendChild(el);
+        } catch (e) {
+          // ignore
+        }
+      }
+      window.addEventListener('error', function (e) {
+        var loc = (e.filename || '') + (e.lineno ? ':' + e.lineno : '');
+        errors.push((e.message || 'Unknown error') + (loc ? ' @ ' + loc : ''));
+        showFatal(e.message || 'Unknown error', loc);
+      });
+      // Script/resource LOAD failures — capture phase, they don't bubble.
+      document.addEventListener('error', function (e) {
+        var t = e.target;
+        var src = t && (t.src || t.href);
+        if (src) {
+          errors.push('Failed to load: ' + src);
+          showFatal('A required file failed to load', src);
+        }
+      }, true);
+      window.addEventListener('unhandledrejection', function (e) {
+        var reason = e && e.reason;
+        var msg = (reason && (reason.message || reason.stack)) || String(reason);
+        errors.push('Unhandled promise rejection: ' + msg);
+        showFatal('Unhandled promise rejection', msg);
+      });
+      // Watchdog — if nothing rendered after 10s, explain the silence.
+      setTimeout(function () {
+        if (shown || window.__vidfetchReadyCalled) return;
+        var root = document.getElementById('root');
+        if (root && root.children.length === 0) {
+          showFatal(
+            'The app did not start',
+            errors.length
+              ? errors.slice(0, 8).join('\n')
+              : 'No JavaScript errors were captured. The bundle likely never loaded ' +
+                '(check that the assets exist inside this package).'
+          );
+        }
+      }, 10000);
+    })();
+    // Called by the app once React has mounted — cancels the watchdog.
+    window.__VIDFETCH_READY__ = function () { window.__vidfetchReadyCalled = true; };
+
+    // ── Service worker ─────────────────────────────────────────────────
+    // Only register the SW on a real hosted web origin. Inside the packaged
+    // apps (app:// in the EXE, https://localhost in the APK) a service worker
+    // is useless and a STALE one from a previous install keeps serving old
+    // cached assets — which causes a white screen. So in shells we actively
+    // unregister any existing SW and clear its caches.
+    if ('serviceWorker' in navigator) {
+      var isShell =
+        location.protocol === 'app:' ||
+        location.protocol === 'file:' ||
+        location.hostname === 'localhost' ||
+        location.hostname === '127.0.0.1';
+      if (isShell) {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.getRegistrations().then(function (regs) {
+            return Promise.all(regs.map(function (r) { return r.unregister(); }));
+          }).then(function () {
+            if ('caches' in window) {
+              caches.keys().then(function (keys) {
+                return Promise.all(keys.map(function (k) { return caches.delete(k); }));
+              });
+            }
+          }).catch(function () {
+            // non-critical
+          });
+        });
+      } else {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('/sw.js').catch(function () {
+            // Service worker registration failed — non-critical
+          });
+        });
+      }
+    }
+  </script>
+  <script type="module" crossorigin src="/assets/index-BXmY306k.js"></script>
+  <link rel="modulepreload" crossorigin href="/assets/react-vendor-DkVKXxwe.js">
+  <link rel="modulepreload" crossorigin href="/assets/radix-ui-B9GdZHPn.js">
+  <link rel="stylesheet" crossorigin href="/assets/index-BPpM9fXa.css">
+</head>
+
+
+<body>
+  <div id="root"></div>
+</body>
+
+</html>
