@@ -68,7 +68,7 @@ class DownloadBridge : Plugin() {
             call.reject("URL is required")
             return
         }
-        val isPlaylist = call.getBoolean("isPlaylist", false)
+        val isPlaylist = call.getBoolean("isPlaylist", false) ?: false
 
         // The engine must be initialized before any yt-dlp call. Retry
         // lazily here — a failed startup init often succeeds on retry.
@@ -246,7 +246,7 @@ class DownloadBridge : Plugin() {
         val url = call.getString("url")
         var formatId = call.getString("formatId") ?: "best"
         if (formatId.isEmpty()) formatId = "best"
-        val isPlaylist = call.getBoolean("isPlaylist", false)
+        val isPlaylist = call.getBoolean("isPlaylist", false) ?: false
 
         if (url.isNullOrEmpty()) {
             call.reject("URL is required")
@@ -530,7 +530,11 @@ class DownloadBridge : Plugin() {
         // registers a new observerForever that is never cleaned up — observers
         // accumulate across downloads and leak the plugin/activity references.
         val liveData = WorkManager.getInstance(context).getWorkInfoByIdLiveData(workId)
-        val observer = androidx.lifecycle.Observer<WorkInfo?> { workInfo ->
+        // `lateinit var` so the observer can remove itself from the LiveData
+        // on terminal states — a plain `val` cannot reference itself inside
+        // its own initializer ("Unresolved reference").
+        lateinit var observer: androidx.lifecycle.Observer<WorkInfo?>
+        observer = androidx.lifecycle.Observer<WorkInfo?> { workInfo ->
             if (workInfo == null) return@Observer
 
             when (workInfo.state) {
