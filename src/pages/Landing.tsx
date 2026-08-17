@@ -29,7 +29,7 @@ import {
   type DownloadLocation,
   type YouTubeSettings,
 } from "@/lib/ytdlp-native";
-import { motion, useScroll, useTransform, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowDownToLine,
   ArrowRight,
@@ -65,7 +65,7 @@ import {
   FolderCog,
   FolderOpen,
 } from "lucide-react";
-import { useEffect, useRef, useState, useCallback, memo } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo, memo } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -230,6 +230,125 @@ const PLAYLIST_PRESETS = [
   { id: "audio", label: "Audio", desc: "MP3 / M4A", spec: "bestaudio" },
 ] as const;
 
+// ─── Help Guide Card (bilingual YouTube bot-check help) ──────────────
+// Memoized so typing in the URL input and progress updates never
+// re-render this large text-heavy card.
+
+const HelpGuideCard = memo(function HelpGuideCard({
+  lang,
+  onLangChange,
+}: {
+  lang: HelpLang;
+  onLangChange: (lang: HelpLang) => void;
+}) {
+  const help = HELP_CONTENT[lang];
+  return (
+    <div className="mt-6 mx-auto max-w-2xl" id="youtube-help-guide">
+      <Card className="border-amber-500/25 bg-gradient-to-b from-amber-50/70 to-card dark:from-amber-500/5 dark:to-card shadow-sm">
+        <CardContent className="p-4 sm:p-5 text-left">
+          {/* Header + language toggle */}
+          <div className="flex items-center gap-3 pb-3 mb-4 border-b border-border/30">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-500">
+              <AlertCircle className="h-4 w-4" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">
+                {help.kicker}
+              </p>
+              <p className="text-sm font-semibold leading-snug">
+                {help.title}
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-0.5 rounded-full border border-border/50 bg-background p-0.5">
+              <button
+                type="button"
+                onClick={() => onLangChange("tr")}
+                className={cn(
+                  "rounded-full px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer",
+                  lang === "tr"
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                Türkçe
+              </button>
+              <button
+                type="button"
+                onClick={() => onLangChange("en")}
+                className={cn(
+                  "rounded-full px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer",
+                  lang === "en"
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                English
+              </button>
+            </div>
+          </div>
+
+          {/* What is happening */}
+          <div className="mb-4">
+            <p className="text-sm font-semibold flex items-center gap-1.5">
+              <Globe className="h-3.5 w-3.5 text-primary" />
+              {help.introTitle}
+            </p>
+            <p className="text-xs text-muted-foreground leading-relaxed mt-1.5">
+              {help.intro}
+            </p>
+          </div>
+
+          {/* Common causes */}
+          <div className="mb-4">
+            <p className="text-sm font-semibold">{help.causesTitle}</p>
+            <ul className="mt-1.5 space-y-1.5">
+              {help.causes.map((cause, i) => (
+                <li
+                  key={i}
+                  className="flex items-start gap-2 text-xs text-muted-foreground leading-relaxed"
+                >
+                  <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-amber-500/70" />
+                  {cause}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* Fixes */}
+          <div className="mb-4">
+            <p className="text-sm font-semibold mb-2">{help.fixesTitle}</p>
+            <div className="space-y-2.5">
+              {help.fixes.map((fix, i) => (
+                <div
+                  key={i}
+                  className="rounded-lg border border-border/40 bg-background/60 p-3"
+                >
+                  <div className="flex flex-wrap items-center gap-2 mb-1">
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-bold text-primary">
+                      {i + 1}
+                    </span>
+                    <p className="text-sm font-medium">{fix.title}</p>
+                    <span className="rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[10px] font-medium text-primary">
+                      {fix.badge}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    {fix.body}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <p className="text-[11px] text-muted-foreground/70 leading-relaxed border-t border-border/30 pt-3">
+            {help.note}
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+});
+
 // ─── Component ────────────────────────────────────────────────────────
 
 export default function Landing() {
@@ -274,9 +393,6 @@ export default function Landing() {
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
   const featuresRef = useRef<HTMLDivElement>(null);
-
-  const { scrollYProgress } = useScroll();
-  const heroOpacity = useTransform(scrollYProgress, [0, 0.15], [1, 0.85]);
 
   // Load the list of files already saved (APK only) + the chosen location
   useEffect(() => {
@@ -394,6 +510,8 @@ export default function Landing() {
     setState("downloading");
     setErrorMsg("");
     setDownloadProgress({ percent: 0, speed: "0", eta: "--:--" });
+    // Throttle window for progress re-renders (see onProgress below).
+    let lastTick = 0;
 
     // Video-only formats (common above 1080p on YouTube) carry no audio
     // track. When ffmpeg is available (bundled in both the APK and the EXE),
@@ -411,17 +529,26 @@ export default function Landing() {
       url: url.trim(),
       formatId: formatSpec,
       onProgress: (progress) => {
-        // Real-time progress updates from the native foreground service
-        setDownloadProgress({
-          percent: progress.percent,
-          speed: progress.speed,
-          eta: progress.eta,
-        });
-
         // Auto-complete when we hit 100%
         if (progress.percent >= 100) {
           setState("complete");
         }
+        // Throttled progress: skip ticks that don't move the visible
+        // percentage and cap updates to ~5/sec. Each progress event
+        // otherwise re-renders this entire page.
+        setDownloadProgress((prev) => {
+          const now = Date.now();
+          if (now - lastTick < 200) return prev;
+          if (Math.round(progress.percent) === Math.round(prev.percent)) {
+            return prev;
+          }
+          lastTick = now;
+          return {
+            percent: progress.percent,
+            speed: progress.speed,
+            eta: progress.eta,
+          };
+        });
       },
       onComplete: async (completed) => {
         // Foreground service finished — remember the file & refresh the list
@@ -482,21 +609,14 @@ export default function Landing() {
       item: 0,
       itemCount: total || undefined,
     });
+    // Throttle window for progress re-renders (see onProgress below).
+    let lastTick = 0;
 
     const workId = await startDownload({
       url: url.trim(),
       formatId: preset.spec,
       isPlaylist: true,
       onProgress: (progress) => {
-        setDownloadProgress((prev) => ({
-          percent: progress.percent,
-          speed: progress.speed,
-          eta: progress.eta,
-          item: progress.item ?? prev.item,
-          itemCount: progress.itemCount ?? prev.itemCount,
-          fileName: progress.fileName ?? prev.fileName,
-        }));
-
         // The last item reaching 100% means the whole playlist finished.
         if (
           progress.item &&
@@ -506,6 +626,28 @@ export default function Landing() {
         ) {
           setState("complete");
         }
+        // Throttled progress — same reasoning as handleDownload.
+        setDownloadProgress((prev) => {
+          const now = Date.now();
+          if (now - lastTick < 200) return prev;
+          if (
+            Math.round(progress.percent) === Math.round(prev.percent) &&
+            progress.item === prev.item &&
+            progress.itemCount === prev.itemCount &&
+            progress.fileName === prev.fileName
+          ) {
+            return prev;
+          }
+          lastTick = now;
+          return {
+            percent: progress.percent,
+            speed: progress.speed,
+            eta: progress.eta,
+            item: progress.item ?? prev.item,
+            itemCount: progress.itemCount ?? prev.itemCount,
+            fileName: progress.fileName ?? prev.fileName,
+          };
+        });
       },
       onComplete: async (completed) => {
         setLastCompleted(completed);
@@ -574,7 +716,10 @@ export default function Landing() {
   };
 
   // ─── Video info ────────────────────────────────────────────────────
-  const grouped = videoInfo ? groupFormats(videoInfo.formats) : null;
+  const grouped = useMemo(
+    () => (videoInfo ? groupFormats(videoInfo.formats) : null),
+    [videoInfo],
+  );
 
   // Overall progress across a whole playlist: ((item-1) + item%) / total.
   const overallPercent =
@@ -673,7 +818,6 @@ export default function Landing() {
 
       {/* ═══ Hero ═══ */}
       <motion.section
-        style={{ opacity: heroOpacity }}
         className="relative min-h-[90vh] flex flex-col items-center justify-center px-6 pt-24 pb-16"
       >
         {/* Subtle background grid */}
@@ -1287,115 +1431,7 @@ export default function Landing() {
             </Card>
           </motion.div>
 
-          {/* ═══ Bilingual help: YouTube bot check (always visible) ═══ */}
-          {(() => {
-            const help = HELP_CONTENT[helpLang];
-            return (
-              <div className="mt-6 mx-auto max-w-2xl" id="youtube-help-guide">
-                <Card className="border-amber-500/25 bg-gradient-to-b from-amber-50/70 to-card dark:from-amber-500/5 dark:to-card shadow-sm">
-                  <CardContent className="p-4 sm:p-5 text-left">
-                    {/* Header + language toggle */}
-                    <div className="flex items-center gap-3 pb-3 mb-4 border-b border-border/30">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-500">
-                        <AlertCircle className="h-4 w-4" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">
-                          {help.kicker}
-                        </p>
-                        <p className="text-sm font-semibold leading-snug">
-                          {help.title}
-                        </p>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-0.5 rounded-full border border-border/50 bg-background p-0.5">
-                        <button
-                          type="button"
-                          onClick={() => setHelpLang("tr")}
-                          className={cn(
-                            "rounded-full px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer",
-                            helpLang === "tr"
-                              ? "bg-primary text-primary-foreground"
-                              : "text-muted-foreground hover:text-foreground"
-                          )}
-                        >
-                          Türkçe
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setHelpLang("en")}
-                          className={cn(
-                            "rounded-full px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer",
-                            helpLang === "en"
-                              ? "bg-primary text-primary-foreground"
-                              : "text-muted-foreground hover:text-foreground"
-                          )}
-                        >
-                          English
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* What is happening */}
-                    <div className="mb-4">
-                      <p className="text-sm font-semibold flex items-center gap-1.5">
-                        <Globe className="h-3.5 w-3.5 text-primary" />
-                        {help.introTitle}
-                      </p>
-                      <p className="text-xs text-muted-foreground leading-relaxed mt-1.5">
-                        {help.intro}
-                      </p>
-                    </div>
-
-                    {/* Common causes */}
-                    <div className="mb-4">
-                      <p className="text-sm font-semibold">{help.causesTitle}</p>
-                      <ul className="mt-1.5 space-y-1.5">
-                        {help.causes.map((cause, i) => (
-                          <li
-                            key={i}
-                            className="flex items-start gap-2 text-xs text-muted-foreground leading-relaxed"
-                          >
-                            <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-amber-500/70" />
-                            {cause}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-
-                    {/* Fixes */}
-                    <div className="mb-4">
-                      <p className="text-sm font-semibold mb-2">{help.fixesTitle}</p>
-                      <div className="space-y-2.5">
-                        {help.fixes.map((fix, i) => (
-                          <div
-                            key={i}
-                            className="rounded-lg border border-border/40 bg-background/60 p-3"
-                          >
-                            <div className="flex flex-wrap items-center gap-2 mb-1">
-                              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-bold text-primary">
-                                {i + 1}
-                              </span>
-                              <p className="text-sm font-medium">{fix.title}</p>
-                              <span className="rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[10px] font-medium text-primary">
-                                {fix.badge}
-                              </span>
-                            </div>
-                            <p className="text-xs text-muted-foreground leading-relaxed">
-                              {fix.body}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <p className="text-[11px] text-muted-foreground/70 leading-relaxed border-t border-border/30 pt-3">
-                      {help.note}
-                    </p>
-                  </CardContent>
-                </Card>
-              </div>
-            );
-          })()}
+          <HelpGuideCard lang={helpLang} onLangChange={setHelpLang} />
 
           {/* Recent downloads (APK only) */}
           {nativeAvailable && (
@@ -1621,9 +1657,7 @@ export default function Landing() {
               </Card>
             </div>
           )}
-        </div>
-
-        {/* Scroll indicator */}
+        </div>          {/* Scroll indicator */}
         {state === "idle" && (
           <motion.button
             initial={{ opacity: 0 }}
