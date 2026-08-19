@@ -556,15 +556,122 @@ export default function Landing() {
       </section>
 
       {/* ═══ Footer ═══ */}
-      <footer className="border-t border-border/30 bg-background">
-        <div className="mx-auto max-w-7xl px-6 py-10">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                <Download className="h-4 w-4" />
+      <footer className="border-t border-border/30 bg-muted/20">
+        <div className="mx-auto max-w-7xl px-6 py-12 sm:py-16">
+          {/* Main footer grid */}
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-8 sm:gap-10">
+            {/* Brand column */}
+            <div className="sm:col-span-2 lg:col-span-1">
+              <div className="flex items-center gap-2.5 mb-4">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
+                  <Download className="h-4 w-4" />
+                </div>
+                <span className="text-base font-semibold tracking-tight">VidFetch</span>
               </div>
-              <span className="text-sm font-semibold">VidFetch</span>
+              <p className="text-sm text-muted-foreground leading-relaxed max-w-xs">
+                On-device video downloader. Paste any link, pick a quality,
+                and download — no server, no limits, completely free.
+              </p>
+              <div className="mt-4 flex items-center gap-2">
+                <a
+                  href="https://github.com/yt-dlp/yt-dlp"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-border/40 text-muted-foreground hover:text-foreground hover:border-border/70 transition-colors"
+                  title="yt-dlp on GitHub"
+                >
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+                </a>
+              </div>
             </div>
+
+            {/* Product */}
+            <div>
+              <p className="text-sm font-semibold mb-3">Product</p>
+              <ul className="space-y-2">
+                {[
+                  { label: "Downloader", href: "/" },
+                  { label: "Dashboard", href: "/dashboard" },
+                  { label: "Features", onClick: () => featuresRef.current?.scrollIntoView({ behavior: "smooth" }) },
+                  { label: "yt-dlp docs", href: "https://github.com/yt-dlp/yt-dlp", external: true },
+                ].map((link) => (
+                  <li key={link.label}>
+                    {link.href ? (
+                      link.external ? (
+                        <a
+                          href={link.href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          {link.label}
+                        </a>
+                      ) : (
+                        <a
+                          href={link.href}
+                          onClick={(e) => { e.preventDefault(); navigate(link.href!); }}
+                          className="text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                        >
+                          {link.label}
+                        </a>
+                      )
+                    ) : (
+                      <button
+                        onClick={(link as any).onClick}
+                        className="text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                      >
+                        {link.label}
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Supported sites */}
+            <div>
+              <p className="text-sm font-semibold mb-3">Supported sites</p>
+              <ul className="space-y-2">
+                {[
+                  "YouTube",
+                  "TikTok",
+                  "Twitter/X",
+                  "Instagram",
+                  "Vimeo",
+                  "Facebook",
+                  "Twitch",
+                  "SoundCloud",
+                  "1000+ more",
+                ].map((site) => (
+                  <li key={site}>
+                    <span className="text-sm text-muted-foreground">
+                      {site}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Info */}
+            <div>
+              <p className="text-sm font-semibold mb-3">Info</p>
+              <ul className="space-y-2">
+                {[
+                  { label: "Privacy by design", desc: "No tracking, no logs" },
+                  { label: "100% free", desc: "No limits, no API keys" },
+                  { label: "Open source engine", desc: "Powered by yt-dlp" },
+                ].map((item) => (
+                  <li key={item.label}>
+                    <p className="text-sm text-muted-foreground">{item.label}</p>
+                    <p className="text-xs text-muted-foreground/60 mt-0.5">{item.desc}</p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
+          {/* Bottom bar */}
+          <div className="mt-10 pt-6 border-t border-border/30 flex flex-col sm:flex-row items-center justify-between gap-3">
             <p className="text-xs text-muted-foreground">
               On-device video downloader. Powered by yt-dlp.
               {BUILD_TAG && (
@@ -573,6 +680,25 @@ export default function Landing() {
                 </span>
               )}
             </p>
+            <div className="flex items-center gap-4">
+              <a
+                href="https://github.com/yt-dlp/yt-dlp"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                yt-dlp
+              </a>
+              <span className="text-xs text-muted-foreground/30">·</span>
+              <a
+                href="https://freebuff.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Freebuff
+              </a>
+            </div>
           </div>
         </div>
       </footer>
