@@ -3,6 +3,11 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { useAuth } from "@/hooks/use-auth";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import {
+  getDownloadHistory,
+  clearDownloadHistory,
+  type DownloadRecord,
+} from "@/lib/history";
+import {
   Download,
   LogOut,
   CheckCircle2,
@@ -15,12 +20,27 @@ import {
   Monitor,
   Infinity as InfinityIcon,
   FileVideo,
+  Clock,
+  Trash2,
+  ListVideo,
 } from "lucide-react";
+import { useState } from "react";
 import { useNavigate } from "react-router";
 
 export default function Dashboard() {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
+  const [history, setHistory] = useState<DownloadRecord[]>(
+    () => getDownloadHistory(),
+  );
+
+  const videoCount = history.filter((h) => h.kind === "video").length;
+  const playlistCount = history.length - videoCount;
+
+  const handleClearHistory = () => {
+    clearDownloadHistory();
+    setHistory([]);
+  };
 
   const handleSignOut = async () => {
     await signOut();
@@ -156,6 +176,98 @@ export default function Dashboard() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Recent downloads — recorded on this device, works in every build */}
+        <Card className="border-border/40 shadow-sm">
+          <CardHeader>
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-4">
+                <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <Clock className="size-5" />
+                </div>
+                <div>
+                  <CardTitle>Recent downloads</CardTitle>
+                  <CardDescription>
+                    Your latest downloads, stored privately on this device
+                  </CardDescription>
+                </div>
+              </div>
+              {history.length > 0 && (
+                <div className="flex items-center gap-3">
+                  <div className="hidden sm:flex items-center gap-3 text-xs text-muted-foreground">
+                    <span>
+                      <strong className="text-foreground">{history.length}</strong>{" "}
+                      total
+                    </span>
+                    <span>
+                      <strong className="text-foreground">{videoCount}</strong>{" "}
+                      videos
+                    </span>
+                    <span>
+                      <strong className="text-foreground">{playlistCount}</strong>{" "}
+                      playlists
+                    </span>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 cursor-pointer"
+                    onClick={handleClearHistory}
+                  >
+                    <Trash2 className="size-3.5" />
+                    Clear
+                  </Button>
+                </div>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            {history.length === 0 ? (
+              <p className="text-sm text-muted-foreground/80 text-center py-6">
+                Nothing downloaded yet. Paste a link on the downloader page and
+                your finished downloads will show up here.
+              </p>
+            ) : (
+              <ul className="divide-y divide-border/40">
+                {history.slice(0, 8).map((record) => (
+                  <li
+                    key={record.id}
+                    className="flex items-center gap-3 py-3 group"
+                  >
+                    <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                      {record.kind === "playlist" ? (
+                        <ListVideo className="size-4" />
+                      ) : (
+                        <FileVideo className="size-4" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">
+                        {record.title}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {record.kind === "playlist"
+                          ? `${record.count ?? ""} videos · playlist`
+                          : record.formatLabel || "video"}
+                        {" · "}
+                        {new Date(record.time).toLocaleString()}
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5 shrink-0 cursor-pointer sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
+                      onClick={() => navigate(`/?url=${encodeURIComponent(record.url)}`)}
+                    >
+                      <Download className="size-3.5" />
+                      Again
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Runs everywhere */}
         <Card className="border-border/40 shadow-sm">

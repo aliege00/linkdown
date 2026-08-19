@@ -24,7 +24,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { useAuth } from "@/hooks/use-auth";
 import DownloaderCard, { type PageState } from "@/components/DownloaderCard";
 
@@ -42,6 +42,9 @@ const BUILD_TAG =
 export default function Landing() {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
+  // Supports re-downloading from the dashboard: /?url=<video link>
+  const [searchParams] = useSearchParams();
+  const initialUrl = searchParams.get("url") ?? undefined;
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
   const featuresRef = useRef<HTMLDivElement>(null);
@@ -195,6 +198,7 @@ export default function Landing() {
               inputRef={inputRef}
               resultsRef={resultsRef}
               onStateChange={setHeroState}
+              initialUrl={initialUrl}
             />
           </motion.div>
         </div>

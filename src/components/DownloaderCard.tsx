@@ -18,6 +18,7 @@ import {
   pickCookieFile,
   clearCookieFile,
   setPoTokenProvider,
+  cancelDownload,
   isNativeAvailable,
   formatDuration,
   formatSize,
@@ -31,6 +32,12 @@ import {
 } from "@/lib/ytdlp-native";
 import { explainError } from "@/lib/error-help";
 import { normalizeVideoUrl } from "@/lib/url";
+import {
+  getDownloadHistory,
+  addDownloadRecord,
+  clearDownloadHistory,
+  type DownloadRecord,
+} from "@/lib/history";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowDownToLine,
@@ -62,6 +69,7 @@ import {
   Video,
   X,
   Youtube,
+  Trash2,
 } from "lucide-react";
 import {
   useEffect,
@@ -84,267 +92,8 @@ export type PageState =
   | "complete"
   | "error";
 
-// ─── Bilingual YouTube bot-check help guide ───────────────────────────
-// Shown prominently below the download card. The same content is written
-// in plain language for end users (TR + EN), with a toggle in the card.
-type HelpLang = "tr" | "en";
+import { HELP_CONTENT, type HelpLang } from "@/lib/help-content";
 
-const HELP_CONTENT = {
-  tr: {
-    kicker: "Yardım merkezi",
-    title: "VidFetch yardım merkezi",
-    copyLabel: "Kopyala",
-    copiedLabel: "Kopyalandı",
-    goToSettings: "Sorun giderme ayarlarını aç",
-    tabs: {
-      bot: "YouTube bot kontrolü",
-      errors: "Sık hatalar",
-      tips: "İpuçları",
-    },
-    bot: {
-      introTitle: "Neden 'bot kontrolü' hatası alıyorum?",
-      intro:
-        "Bazen YouTube, bir videoyu indirmeye çalışırken \"Sign in to confirm you're not a bot\" (Devam etmek için giriş yapın) uyarısını gösterir ve erişimi engeller. Bu, uygulamanın hatası değildir. YouTube; VPN, veri merkezi veya ortak ağlardan gelen istekleri otomatik olarak şüpheli görür ve geçici olarak kısıtlar. Diğer siteler (Vimeo, TikTok, Instagram vb.) bu kontrolden etkilenmez — sorun yalnızca YouTube'a özeldir.",
-      causesTitle: "En sık nedenler",
-      causes: [
-        "VPN, kurumsal veya veri merkezi ağına bağlı olman",
-        "Tarayıcıda YouTube'a giriş yapılmamış olması",
-        "Kısa sürede çok fazla indirme yapılması",
-        "YouTube'un yeni bir altyapı değişikliği yayınlaması (birkaç gün sürebilir)",
-      ],
-      fixesTitle: "Nasıl çözülür?",
-      fixes: [
-        {
-          badge: "Windows",
-          title: "Tarayıcı cookies — en kolay yol",
-          body: "Chrome, Edge veya Firefox'ta YouTube'a giriş yap. Uygulamada Gelişmiş → YouTube sorun giderme → Tarayıcı cookies bölümünden tarayıcını seç. İndirme sırasında tarayıcının kapalı veya kilidi açık olması gerekir.",
-          settingsKey: "cookies",
-        },
-        {
-          badge: "Android + Windows",
-          title: "cookies.txt dosyası",
-          body: "Tarayıcına \"Get cookies.txt LOCALLY\" eklentisini kur, YouTube'a giriş yap ve cookies dosyasını dışa aktar. Ardından uygulamada Gelişmiş → YouTube sorun giderme bölümünden bu dosyayı seç.",
-          settingsKey: "cookies",
-        },
-        {
-          badge: "Windows • İleri düzey",
-          title: "PO token sağlayıcı",
-          body: "Bilgisayarında token sunucusunu çalıştır, ardından uygulamaya http://127.0.0.1:4416 yaz ve Kaydet'e bas:",
-          command: "docker run -d --init -p 4416:4416 brainicism/bgutil-ytdlp-pot-provider",
-          settingsKey: "po",
-        },
-      ],
-      note: "Bu ayarlar yalnızca YouTube isteklerini etkiler ve Gelişmiş → YouTube sorun giderme bölümündedir. En güvenilir çözüm, giriş yaptığın bir tarayıcıdan cookies almaktır. VPN'i kapatmak da çoğu zaman yeterlidir.",
-    },
-    errors: {
-      title: "Sık karşılaşılan hatalar",
-      intro:
-        "Aşağıdaki hatalardan birini görürsen panik yapma — çoğu birkaç saniyede çözülür. Her hata için ne anlama geldiği ve ne yapman gerektiği aşağıda.",
-      items: [
-        {
-          title: "Geçersiz veya tanınmayan bağlantı",
-          what: "Bağlantı bir video sayfasına ait değil ya da site desteklenmiyor.",
-          fix: "Bağlantıyı tarayıcının adres çubuğundan kopyala; YouTube, TikTok, Twitter/X gibi desteklenen bir siteden video kullan.",
-        },
-        {
-          title: "Video gizli veya kaldırılmış",
-          what: "Video özel (private), kaldırılmış ya da artık kullanılamıyor.",
-          fix: "Videonun tarayıcıda açılıp açılmadığını kontrol et; başka bir video dene.",
-        },
-        {
-          title: "Yaş sınırı olan video",
-          what: "YouTube, yaş sınırı olan videolara doğrulama istemeden erişimi engelleyebiliyor.",
-          fix: "YouTube hesabınla tarayıcıda oturum aç ve tarayıcı cookies'ini içe aktar.",
-        },
-        {
-          title: "Bölge kısıtlaması",
-          what: "Video, bulunduğun ülkede/bölgede yayınlanmadığı için erişilemiyor.",
-          fix: "Bölgende yayınlanan bir video dene; VPN kullanıyorsan kapat veya sunucu değiştir.",
-        },
-        {
-          title: "İnternet bağlantısı",
-          what: "Uygulama video sunucusuna ulaşamadı; bağlantı kesik, yavaş veya engellenmiş olabilir.",
-          fix: "İnterneti kontrol et, VPN'i kapat, birkaç saniye bekleyip tekrar dene.",
-        },
-        {
-          title: "Giriş gerekiyor",
-          what: "Site, içeriği indirmek için hesaba giriş yapılmasını istiyor.",
-          fix: "Sitede hesabına giriş yap; tarayıcı cookies'ini içe aktar ve tekrar dene.",
-        },
-        {
-          title: "Ses birleştirme hatası (ffmpeg)",
-          what: "Video ve ses ayrı indirildi ama birleştirilemedi.",
-          fix: "Daha düşük bir kalite seç (ör. 1080p) veya uygulamayı güncelle.",
-        },
-        {
-          title: "Diğer hatalar",
-          what: "Yukarıdakilere benzemeyen bir sorun oluştu.",
-          fix: "Birkaç dakika sonra tekrar dene; uygulamayı kapatıp yeniden aç. Sorun sürerse hatanın altındaki teknik ayrıntıyı not al.",
-        },
-      ],
-    },
-    tips: {
-      title: "Genel ipuçları",
-      items: [
-        {
-          title: "Tarayıcı cookies en güvenilir çözümdür",
-          body: "YouTube'a giriş yaptığın tarayıcıdan cookies içe aktarmak bot kontrolünü aşmanın en etkili yoludur. Gelişmiş → YouTube sorun giderme bölümünden yapabilirsin.",
-        },
-        {
-          title: "VPN'ini kapat",
-          body: "VPN, kurumsal veya veri merkezi ağları YouTube tarafından şüpheli görülür. Kapatmak çoğu YouTube sorununu çözer.",
-        },
-        {
-          title: "Bağlantıyı adres çubuğundan kopyala",
-          body: "Kısa veya paylaşım bağlantıları yerine tarayıcının adres çubuğundaki tam URL'yi kullan; bu, analiz hatalarını azaltır.",
-        },
-        {
-          title: "İnternetini kontrol et",
-          body: "Yavaş veya kesintili bağlantı hem analiz hem indirme hatalarına yol açar. Wi-Fi yerine mobil veriyi de deneyebilirsin.",
-        },
-        {
-          title: "Uygulamayı güncel tut",
-          body: "Her güncelleme yeni site desteği ve hata düzeltmeleri getirir. Güncel sürüm kullandığından emin ol.",
-        },
-        {
-          title: "Depolama alanını kontrol et",
-          body: "Yetersiz depolama alanı indirmenin sessizce başarısız olmasına neden olabilir. Cihazında yeterli boş alan olduğundan emin ol.",
-        },
-      ],
-    },
-    stuck: {
-      title: "Hâlâ çözülmedi mi?",
-      body: "Yukarıdaki adımları denediysen ve hâlâ indiremiyorsan: uygulamanın güncel olduğundan emin ol, cihazı yeniden başlat ve başka bir video ile test et. Sorun yalnızca YouTube'da görünüyorsa birkaç saat sonra tekrar dene — YouTube zaman zaman geçici kısıtlamalar uygular.",
-    },
-  },
-  en: {
-    kicker: "Help center",
-    title: "VidFetch help center",
-    copyLabel: "Copy",
-    copiedLabel: "Copied",
-    goToSettings: "Open troubleshooting settings",
-    tabs: {
-      bot: "YouTube bot check",
-      errors: "Common errors",
-      tips: "Tips",
-    },
-    bot: {
-      introTitle: "Why am I getting a 'bot check' error?",
-      intro:
-        "Sometimes YouTube shows \"Sign in to confirm you're not a bot\" and blocks access while you try to download a video. This is not a bug in the app. YouTube automatically treats requests coming from VPNs, datacenter or shared networks as suspicious and temporarily restricts them. Other sites (Vimeo, TikTok, Instagram, etc.) are not affected by this check — it only applies to YouTube.",
-      causesTitle: "Most common causes",
-      causes: [
-        "You are on a VPN, corporate or datacenter network",
-        "You are not logged into YouTube in your browser",
-        "Too many downloads in a short period of time",
-        "YouTube just rolled out an infrastructure change (may last a few days)",
-      ],
-      fixesTitle: "How to fix it",
-      fixes: [
-        {
-          badge: "Windows",
-          title: "Browser cookies — easiest way",
-          body: "Log into YouTube in Chrome, Edge or Firefox. In the app open Advanced → YouTube troubleshooting → Browser cookies and pick your browser. The browser must be closed or unlocked while downloading.",
-          settingsKey: "cookies",
-        },
-        {
-          badge: "Android + Windows",
-          title: "cookies.txt file",
-          body: "Install the \"Get cookies.txt LOCALLY\" browser extension, log into YouTube and export the cookies file. Then choose that file under Advanced → YouTube troubleshooting in the app.",
-          settingsKey: "cookies",
-        },
-        {
-          badge: "Windows • Advanced",
-          title: "PO token provider",
-          body: "Run a token server on this PC, then enter http://127.0.0.1:4416 in the app and press Save:",
-          command: "docker run -d --init -p 4416:4416 brainicism/bgutil-ytdlp-pot-provider",
-          settingsKey: "po",
-        },
-      ],
-      note: "These settings only affect YouTube requests and live under Advanced → YouTube troubleshooting. The most reliable fix is importing cookies from a browser where you are logged in. Turning your VPN off also fixes most cases.",
-    },
-    errors: {
-      title: "Common errors",
-      intro:
-        "If you see one of these errors, don't panic — most are fixed in seconds. Here's what each one means and what to do.",
-      items: [
-        {
-          title: "Invalid or unrecognized link",
-          what: "The link isn't a video page, or the site isn't supported.",
-          fix: "Copy the link from your browser's address bar; use a video from a supported site like YouTube or TikTok.",
-        },
-        {
-          title: "Video is private or removed",
-          what: "The video is private, has been removed, or is no longer available.",
-          fix: "Check whether the video opens in your browser; try a different video.",
-        },
-        {
-          title: "Age-restricted video",
-          what: "YouTube can block age-restricted videos without a verification step.",
-          fix: "Log into YouTube in your browser and import browser cookies.",
-        },
-        {
-          title: "Region restriction",
-          what: "The video isn't published in your country or region.",
-          fix: "Try a video published in your region; if you use a VPN, turn it off or switch servers.",
-        },
-        {
-          title: "Internet connection",
-          what: "The app couldn't reach the video server; the connection may be down, slow or blocked.",
-          fix: "Check your internet, turn your VPN off, wait a few seconds and try again.",
-        },
-        {
-          title: "Login required",
-          what: "The site requires you to be logged into an account before downloading.",
-          fix: "Log into your account on the site; import browser cookies and try again.",
-        },
-        {
-          title: "Audio merge error (ffmpeg)",
-          what: "Video and audio downloaded separately but couldn't be merged.",
-          fix: "Pick a lower quality (e.g. 1080p) or update the app.",
-        },
-        {
-          title: "Other errors",
-          what: "Something that doesn't match the cases above happened.",
-          fix: "Wait a few minutes and retry; restart the app. If it persists, note the technical detail shown under the error.",
-        },
-      ],
-    },
-    tips: {
-      title: "General tips",
-      items: [
-        {
-          title: "Browser cookies are the most reliable fix",
-          body: "Importing cookies from a browser where you're logged into YouTube is the most effective way to get past the bot check. It lives under Advanced → YouTube troubleshooting.",
-        },
-        {
-          title: "Turn your VPN off",
-          body: "VPNs, corporate and datacenter networks look suspicious to YouTube. Turning it off fixes most YouTube issues.",
-        },
-        {
-          title: "Copy the link from the address bar",
-          body: "Use the full URL from your browser's address bar instead of short or share links; this avoids analysis errors.",
-        },
-        {
-          title: "Check your internet",
-          body: "Slow or flaky connections cause both analysis and download errors. You can also try mobile data instead of Wi-Fi.",
-        },
-        {
-          title: "Keep the app updated",
-          body: "Every update brings new site support and bug fixes. Make sure you're on the latest version.",
-        },
-        {
-          title: "Check your storage",
-          body: "Not enough free storage can make downloads fail silently. Make sure your device has free space.",
-        },
-      ],
-    },
-    stuck: {
-      title: "Still stuck?",
-      body: "If you tried the steps above and still can't download: make sure the app is up to date, restart the device, and test with another video. If the issue only shows on YouTube, try again in a few hours — YouTube occasionally applies temporary restrictions.",
-    },
-  },
-} as const;
 
 function groupFormats(formats: YtDlpFormat[]) {
   const video: YtDlpFormat[] = [];
@@ -1219,12 +968,140 @@ const NativeToolsPanel = memo(function NativeToolsPanel({
   );
 });
 
+// ─── Download History (on-device, every build) ───────────────────────
+// Records what the user downloaded (title, URL, kind) in localStorage so
+// the list survives reloads and works even in the plain browser preview
+// where there is no native downloads list.
+
+const DownloadHistoryCard = memo(function DownloadHistoryCard({
+  history,
+  onUse,
+  onClear,
+  lang,
+}: {
+  history: DownloadRecord[];
+  onUse: (record: DownloadRecord) => void;
+  onClear: () => void;
+  lang: HelpLang;
+}) {
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const copyLink = async (record: DownloadRecord) => {
+    try {
+      await navigator.clipboard.writeText(record.url);
+      setCopiedId(record.id);
+      setTimeout(() => setCopiedId(null), 1500);
+    } catch {
+      // Clipboard unavailable — nothing to do.
+    }
+  };
+
+  return (
+    <div className="mt-6 mx-auto max-w-2xl">
+      <Card className="border-border/50 shadow-sm bg-card/95 backdrop-blur-sm">
+        <CardContent className="p-4 sm:p-5 text-left">
+          <div className="flex items-center gap-3 pb-3 mb-3 border-b border-border/30">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+              <Clock className="h-4 w-4" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">
+                {lang === "tr" ? "Geçmiş" : "History"}
+              </p>
+              <p className="text-sm font-semibold">
+                {lang === "tr" ? "Son indirmeler" : "Recent downloads"}
+              </p>
+            </div>
+            {history.length > 0 && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="gap-1.5 shrink-0 cursor-pointer"
+                onClick={onClear}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {lang === "tr" ? "Temizle" : "Clear"}
+              </Button>
+            )}
+          </div>
+
+          {history.length === 0 ? (
+            <p className="text-sm text-muted-foreground/80 text-center py-4">
+              {lang === "tr"
+                ? "İndirdiğin videolar burada görünecek."
+                : "Videos you download will appear here."}
+            </p>
+          ) : (
+            <ul className="divide-y divide-border/40">
+              {history.slice(0, 8).map((record) => (
+                <li
+                  key={record.id}
+                  className="flex items-center gap-3 py-2.5 group"
+                >
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                    {record.kind === "playlist" ? (
+                      <ListVideo className="h-4 w-4" />
+                    ) : (
+                      <FileVideo className="h-4 w-4" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">
+                      {record.title}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {record.kind === "playlist"
+                        ? lang === "tr"
+                          ? `${record.count ?? ""} video · liste`
+                          : `${record.count ?? ""} videos · playlist`
+                        : record.formatLabel || "video"}
+                      {" · "}
+                      {new Date(record.time).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="gap-1 cursor-pointer sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
+                      onClick={() => copyLink(record)}
+                      title={
+                        lang === "tr" ? "Bağlantıyı kopyala" : "Copy link"
+                      }
+                    >
+                      {copiedId === record.id ? (
+                        <Check className="h-3.5 w-3.5 text-emerald-500" />
+                      ) : (
+                        <Copy className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5 cursor-pointer sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
+                      onClick={() => onUse(record)}
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      {lang === "tr" ? "İndir" : "Again"}
+                    </Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+});
+
 // ─── Component ────────────────────────────────────────────────────────
 
 export default function DownloaderCard({
   inputRef,
   resultsRef,
   onStateChange,
+  initialUrl,
 }: {
   /** Focus target for the URL input (driven from the page nav / CTA). */
   inputRef: RefObject<HTMLInputElement | null>;
@@ -1232,8 +1109,10 @@ export default function DownloaderCard({
   resultsRef: RefObject<HTMLDivElement | null>;
   /** Lets the page hide the hero scroll hint while the card is busy. */
   onStateChange?: (state: PageState) => void;
+  /** Prefill the URL input (e.g. re-download from the dashboard via ?url=). */
+  initialUrl?: string;
 }) {
-  const [url, setUrl] = useState("");
+  const [url, setUrl] = useState(initialUrl ?? "");
   const [state, setState] = useState<PageState>("idle");
   const [errorMsg, setErrorMsg] = useState("");
   const [videoInfo, setVideoInfo] = useState<YtDlpInfo | null>(null);
@@ -1259,11 +1138,25 @@ export default function DownloaderCard({
   const [ytSettings, setYtSettings] = useState<YouTubeSettings | null>(null);
   const [poProviderInput, setPoProviderInput] = useState("");
   const [pickingCookies, setPickingCookies] = useState(false);
-  const [helpLang, setHelpLang] = useState<HelpLang>("tr");
+  // Help-guide language is remembered across sessions (defaults to Turkish).
+  const [helpLang, setHelpLang] = useState<HelpLang>(() => {
+    try {
+      const saved = localStorage.getItem("vidfetch.helpLang");
+      return saved === "en" || saved === "tr" ? saved : "tr";
+    } catch {
+      return "tr";
+    }
+  });
   // Whether the visible error came from analyzing the URL or starting the
   // download — used to pick the error box's kicker label.
   const [errorPhase, setErrorPhase] = useState<"analyze" | "download">("analyze");
   const nativeAvailable = isNativeAvailable();
+  // Show the right paste shortcut on the button badge (⌘V on Mac, Ctrl+V
+  // everywhere else).
+  const pasteShortcut =
+    typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform)
+      ? "⌘V"
+      : "Ctrl+V";
   // Desktop (EXE) only: browser-cookies and PO-token-provider settings are
   // not available on Android, so the UI shows them just on Windows.
   const desktopBridge = window.vidfetch;
@@ -1271,6 +1164,26 @@ export default function DownloaderCard({
     !!desktopBridge &&
     typeof desktopBridge.isDesktop === "boolean" &&
     desktopBridge.isDesktop;
+
+  // Download history (localStorage) — works in every build, including the
+  // plain browser preview where there is no native downloads list.
+  const [history, setHistory] = useState<DownloadRecord[]>(
+    () => getDownloadHistory(),
+  );
+  const refreshHistory = useCallback(() => setHistory(getDownloadHistory()), []);
+
+  // Tracks the active native download so "Cancel" really stops it instead of
+  // only resetting the UI.
+  const workIdRef = useRef<string | null>(null);
+
+  // Persist the help-guide language choice.
+  useEffect(() => {
+    try {
+      localStorage.setItem("vidfetch.helpLang", helpLang);
+    } catch {
+      // Storage unavailable — best-effort only.
+    }
+  }, [helpLang]);
 
   // Current page state, mirrored in a ref so the long safety-net timers can
   // decide whether to advance the UI without stale closures.
@@ -1369,38 +1282,47 @@ export default function DownloaderCard({
   };
 
   // ─── Fetch video info ──────────────────────────────────────────────
-  const handleAnalyze = useCallback(async () => {
-    // Clean the pasted text first — links often arrive with extra
-    // whitespace, quotes or surrounding words from chat apps / notes.
-    const cleanUrl = normalizeVideoUrl(url);
-    if (!cleanUrl) {
-      setErrorMsg(url.trim());
-      setErrorPhase("analyze");
-      updateState("error");
-      return;
-    }
+  // Core analyze routine, split out so both the input's button and the
+  // recent-downloads list ("download again") can trigger it with their
+  // own URL.
+  const runAnalyze = useCallback(
+    async (targetUrl: string) => {
+      // Clean the pasted text first — links often arrive with extra
+      // whitespace, quotes or surrounding words from chat apps / notes.
+      const cleanUrl = normalizeVideoUrl(targetUrl);
+      if (!cleanUrl) {
+        setErrorMsg(targetUrl.trim());
+        setErrorPhase("analyze");
+        updateState("error");
+        return;
+      }
 
-    updateState("loading");
-    setErrorMsg("");
-    setVideoInfo(null);
-    setSelectedFormat("");
-    setPlaylistSummary(null);
-    setPlaylistQuality("best");
+      setUrl(cleanUrl);
+      updateState("loading");
+      setErrorMsg("");
+      setVideoInfo(null);
+      setSelectedFormat("");
+      setPlaylistSummary(null);
+      setPlaylistQuality("best");
 
-    const result = await getVideoInfo(cleanUrl, looksLikePlaylist(cleanUrl));
+      const result = await getVideoInfo(cleanUrl, looksLikePlaylist(cleanUrl));
 
-    if (!result.success) {
-      setErrorMsg(result.error);
-      setErrorPhase("analyze");
-      updateState("error");
-      return;
-    }
+      if (!result.success) {
+        setErrorMsg(result.error);
+        setErrorPhase("analyze");
+        updateState("error");
+        return;
+      }
 
-    setVideoInfo(result);
-    setSelectedFormat(result.best_format_id);
-    updateState("loaded");
-    scrollToResults();
-  }, [url, updateState]);
+      setVideoInfo(result);
+      setSelectedFormat(result.best_format_id);
+      updateState("loaded");
+      scrollToResults();
+    },
+    [updateState],
+  );
+
+  const handleAnalyze = useCallback(() => runAnalyze(url), [url, runAnalyze]);
 
   // ─── Download ──────────────────────────────────────────────────────
   const handleDownload = useCallback(async () => {
@@ -1452,17 +1374,30 @@ export default function DownloaderCard({
       },
       onComplete: async (completed) => {
         // Foreground service finished — remember the file & refresh the list
+        workIdRef.current = null;
         setLastCompleted(completed);
         updateState("complete");
         const list = await getDownloads();
         if (list.length > 0) setSavedDownloads(list);
+        // Record in on-device history (title, url, format) — works in every
+        // build, including the browser preview.
+        addDownloadRecord({
+          title: videoInfo?.title || cleanUrl,
+          url: cleanUrl,
+          kind: "video",
+          formatLabel: picked ? getQualityLabel(picked.resolution) : undefined,
+          time: Date.now(),
+        });
+        refreshHistory();
       },
       onError: (error) => {
+        workIdRef.current = null;
         setErrorMsg(error);
         setErrorPhase("download");
         updateState("error");
       },
     });
+    workIdRef.current = workId;
 
     if (!workId) {
       // The on-device engine only exists inside the APK / EXE build.
@@ -1490,7 +1425,7 @@ export default function DownloaderCard({
     setTimeout(() => {
       if (stateRef.current === "complete") updateState("loaded");
     }, 5000);
-  }, [url, selectedFormat, videoInfo, updateState]);
+  }, [url, selectedFormat, videoInfo, updateState, refreshHistory]);
 
   // ─── Playlist download (all videos at once) ───────────────────────
   const handleDownloadPlaylist = useCallback(async () => {
@@ -1553,6 +1488,7 @@ export default function DownloaderCard({
         });
       },
       onComplete: async (completed) => {
+        workIdRef.current = null;
         setLastCompleted(completed);
         setPlaylistSummary({
           saved: completed.fileCount ?? total,
@@ -1562,13 +1498,24 @@ export default function DownloaderCard({
         updateState("complete");
         const list = await getDownloads();
         if (list.length > 0) setSavedDownloads(list);
+        // Record the playlist in on-device history.
+        addDownloadRecord({
+          title: videoInfo?.title || cleanUrl,
+          url: cleanUrl,
+          kind: "playlist",
+          count: completed.fileCount ?? total,
+          time: Date.now(),
+        });
+        refreshHistory();
       },
       onError: (error) => {
+        workIdRef.current = null;
         setErrorMsg(error);
         setErrorPhase("download");
         updateState("error");
       },
     });
+    workIdRef.current = workId;
 
     if (!workId) {
       setErrorMsg(
@@ -1589,7 +1536,7 @@ export default function DownloaderCard({
     setTimeout(() => {
       if (stateRef.current === "complete") updateState("loaded");
     }, 10000);
-  }, [url, videoInfo, playlistQuality, updateState]);
+  }, [url, videoInfo, playlistQuality, updateState, refreshHistory]);
 
   // ─── Paste ─────────────────────────────────────────────────────────
   const handlePaste = async () => {
@@ -1617,8 +1564,27 @@ export default function DownloaderCard({
   };
 
   const handleNewDownload = () => {
+    // If a native download is still running, actually stop it instead of
+    // only hiding the progress screen.
+    if (workIdRef.current) {
+      cancelDownload(workIdRef.current);
+      workIdRef.current = null;
+    }
     resetAll();
   };
+
+  // ─── On-device download history ───────────────────────────────────
+  const handleUseHistory = useCallback(
+    (record: DownloadRecord) => {
+      runAnalyze(record.url);
+    },
+    [runAnalyze],
+  );
+
+  const handleClearHistory = useCallback(() => {
+    clearDownloadHistory();
+    refreshHistory();
+  }, [refreshHistory]);
 
   // ─── Video info ────────────────────────────────────────────────────
   const grouped = useMemo(
@@ -1642,6 +1608,16 @@ export default function DownloaderCard({
   // ─── Page render ───────────────────────────────────────────────────
   return (
     <>
+      {/* On-device download history — works in every build */}
+      {history.length > 0 && (
+        <DownloadHistoryCard
+          history={history}
+          lang={helpLang}
+          onUse={handleUseHistory}
+          onClear={handleClearHistory}
+        />
+      )}
+
       <Card className="border-border/50 shadow-lg shadow-primary/5 bg-card/95 backdrop-blur-sm">
         <CardContent className="p-4 sm:p-6 space-y-4">
           {/* On-device engine note */}
@@ -1695,7 +1671,7 @@ export default function DownloaderCard({
             >
               <ClipboardPaste className="h-4.5 w-4.5" />
               <kbd className="absolute -top-1.5 -right-1.5 hidden sm:inline-flex items-center justify-center h-4 min-w-[1.25rem] px-1 rounded-[3px] text-[9px] font-mono font-semibold bg-muted text-muted-foreground/60 border border-border/40 shadow-sm">
-                ⌘V
+                {pasteShortcut}
               </kbd>
             </Button>
           </div>
