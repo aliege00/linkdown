@@ -9,8 +9,8 @@ import { useConvexAuth, useQuery } from "convex/react";
 // below never changes hook order at runtime.
 const HAS_CONVEX = !!import.meta.env.VITE_CONVEX_URL;
 
-type SignInFn = (provider: string, options?: any) => Promise<unknown>;
-type SignOutFn = () => Promise<unknown>;
+type SignInFn = ReturnType<typeof useAuthActions>["signIn"];
+type SignOutFn = ReturnType<typeof useAuthActions>["signOut"];
 
 export type AuthState = {
   isLoading: boolean;
@@ -31,8 +31,8 @@ const GUEST_AUTH: AuthState = {
   isLoading: false,
   isAuthenticated: false,
   user: null,
-  signIn: async () => {},
-  signOut: async () => {},
+  signIn: (async () => ({ signingIn: false })) as unknown as SignInFn,
+  signOut: (async () => {}) as unknown as SignOutFn,
 };
 
 export function useAuth(): AuthState {
@@ -40,8 +40,11 @@ export function useAuth(): AuthState {
     return GUEST_AUTH;
   }
 
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   const { isLoading: isAuthLoading, isAuthenticated } = useConvexAuth();
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   const user = useQuery(api.users.currentUser);
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   const { signIn, signOut } = useAuthActions();
 
   // Derive isLoading directly from the dependencies instead of managing separate state

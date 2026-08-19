@@ -59,7 +59,7 @@ export interface YtDlpError {
 export type YtDlpResult = YtDlpInfo | YtDlpError;
 
 export function getServerUrl(): string {
-  return (import.meta as any).env.VITE_YTDLP_SERVER_URL || "";
+  return (import.meta as { env: Record<string, string> }).env.VITE_YTDLP_SERVER_URL || "";
 }
 
 /** True when a self-hosted yt-dlp server URL is configured. */

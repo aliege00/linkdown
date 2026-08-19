@@ -589,42 +589,26 @@ export default function Landing() {
             <div>
               <p className="text-sm font-semibold mb-3">Product</p>
               <ul className="space-y-2">
-                {[
-                  { label: "Downloader", href: "/" },
-                  { label: "Dashboard", href: "/dashboard" },
-                  { label: "Features", onClick: () => featuresRef.current?.scrollIntoView({ behavior: "smooth" }) },
-                  { label: "yt-dlp docs", href: "https://github.com/yt-dlp/yt-dlp", external: true },
-                ].map((link) => (
-                  <li key={link.label}>
-                    {link.href ? (
-                      link.external ? (
-                        <a
-                          href={link.href}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          {link.label}
-                        </a>
-                      ) : (
-                        <a
-                          href={link.href}
-                          onClick={(e) => { e.preventDefault(); navigate(link.href!); }}
-                          className="text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                        >
-                          {link.label}
-                        </a>
-                      )
-                    ) : (
-                      <button
-                        onClick={(link as any).onClick}
-                        className="text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                      >
-                        {link.label}
-                      </button>
-                    )}
-                  </li>
-                ))}
+                <li>
+                  <a href="/" onClick={(e) => { e.preventDefault(); navigate("/"); }} className="text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+                    Downloader
+                  </a>
+                </li>
+                <li>
+                  <a href="/dashboard" onClick={(e) => { e.preventDefault(); navigate("/dashboard"); }} className="text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+                    Dashboard
+                  </a>
+                </li>
+                <li>
+                  <button onClick={() => featuresRef.current?.scrollIntoView({ behavior: "smooth" })} className="text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+                    Features
+                  </button>
+                </li>
+                <li>
+                  <a href="https://github.com/yt-dlp/yt-dlp" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+                    yt-dlp docs
+                  </a>
+                </li>
               </ul>
             </div>
 
