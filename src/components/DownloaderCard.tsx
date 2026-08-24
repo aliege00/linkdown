@@ -33,6 +33,11 @@ import {
 import { explainError } from "@/lib/error-help";
 import { normalizeVideoUrl } from "@/lib/url";
 import {
+  QUALITY_PRESETS,
+  pickFormatForPreset,
+  type QualityPresetId,
+} from "@/lib/format-pick";
+import {
   getDownloadHistory,
   addDownloadRecord,
   clearDownloadHistory,
@@ -1117,6 +1122,9 @@ export default function DownloaderCard({
   const [errorMsg, setErrorMsg] = useState("");
   const [videoInfo, setVideoInfo] = useState<YtDlpInfo | null>(null);
   const [selectedFormat, setSelectedFormat] = useState<string>("");
+  // Preferred quality picked BEFORE analysis — the analyze step maps it onto
+  // the closest real format once details arrive (see pickFormatForPreset).
+  const [videoQuality, setVideoQuality] = useState<QualityPresetId>("best");
   const [playlistQuality, setPlaylistQuality] = useState<string>("best");
   const [playlistSummary, setPlaylistSummary] = useState<{
     saved: number;
@@ -1175,6 +1183,19 @@ export default function DownloaderCard({
   // Tracks the active native download so "Cancel" really stops it instead of
   // only resetting the UI.
   const workIdRef = useRef<string | null>(null);
+
+  // Safety-net timeout refs — cleaned up on unmount and before each new
+  // download to prevent stale state updates and timer leaks.
+  const safetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const completeResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear any lingering safety-net timers when the component unmounts.
+  useEffect(() => {
+    return () => {
+      if (safetyTimerRef.current !== null) clearTimeout(safetyTimerRef.current);
+      if (completeResetTimerRef.current !== null) clearTimeout(completeResetTimerRef.current);
+    };
+  }, []);
 
   // Persist the help-guide language choice.
   useEffect(() => {
@@ -1315,11 +1336,13 @@ export default function DownloaderCard({
       }
 
       setVideoInfo(result);
-      setSelectedFormat(result.best_format_id);
+      // Auto-select the format matching the user's pre-analysis quality
+      // choice; they can still override via the format cards below.
+      setSelectedFormat(pickFormatForPreset(result, videoQuality));
       updateState("loaded");
       scrollToResults();
     },
-    [updateState],
+    [updateState, videoQuality],
   );
 
   const handleAnalyze = useCallback(() => runAnalyze(url), [url, runAnalyze]);
@@ -1417,12 +1440,14 @@ export default function DownloaderCard({
     // (e.g. an old build without the complete event). It must NOT fire
     // while the download is still running — a real video download takes
     // far longer than a few seconds.
-    setTimeout(() => {
+    if (safetyTimerRef.current !== null) clearTimeout(safetyTimerRef.current);
+    if (completeResetTimerRef.current !== null) clearTimeout(completeResetTimerRef.current);
+    safetyTimerRef.current = setTimeout(() => {
       if (stateRef.current === "downloading") updateState("complete");
     }, 120000);
 
     // Reset "complete" state after a delay
-    setTimeout(() => {
+    completeResetTimerRef.current = setTimeout(() => {
       if (stateRef.current === "complete") updateState("loaded");
     }, 5000);
   }, [url, selectedFormat, videoInfo, updateState, refreshHistory]);
@@ -1530,10 +1555,12 @@ export default function DownloaderCard({
     // real completion is driven by progress events (last item at 100%)
     // and the downloadComplete event; this long fallback just prevents a
     // permanently stuck "downloading" screen if an event is ever lost.
-    setTimeout(() => {
+    if (safetyTimerRef.current !== null) clearTimeout(safetyTimerRef.current);
+    if (completeResetTimerRef.current !== null) clearTimeout(completeResetTimerRef.current);
+    safetyTimerRef.current = setTimeout(() => {
       if (stateRef.current === "downloading") updateState("complete");
     }, 10 * 60 * 1000);
-    setTimeout(() => {
+    completeResetTimerRef.current = setTimeout(() => {
       if (stateRef.current === "complete") updateState("loaded");
     }, 10000);
   }, [url, videoInfo, playlistQuality, updateState, refreshHistory]);
@@ -1698,6 +1725,33 @@ export default function DownloaderCard({
                   <Search className="h-5 w-5" />
                   Analyze & Download
                 </Button>
+
+                {/* Quality selector: visible immediately, even before analysis.
+                    The choice maps onto the closest real format at analyze time. */}
+                <div className="mt-4 pt-3 border-t border-border/20">
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-medium text-center mb-2.5">
+                    {helpLang === "tr"
+                      ? "Tercih edilen kalite"
+                      : "Preferred quality"}
+                  </p>
+                  <div className="flex flex-wrap justify-center gap-1.5">
+                    {QUALITY_PRESETS.map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => setVideoQuality(p.id)}
+                        title={p.desc}
+                        className={cn(
+                          "px-3 py-1.5 rounded-md text-xs font-medium border transition-all duration-150 cursor-pointer active:scale-[0.97]",
+                          videoQuality === p.id
+                            ? "bg-primary/10 border-primary/40 text-primary"
+                            : "text-muted-foreground/70 hover:text-foreground hover:bg-muted/80 border-border/20 hover:border-border/50",
+                        )}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <p className="text-xs text-center text-muted-foreground/70 mt-3">
                   Supports YouTube, TikTok, Twitter/X, Instagram, Vimeo, and 1000+ more
                 </p>
@@ -2144,7 +2198,7 @@ export default function DownloaderCard({
                     <Download className="h-4 w-4" />
                     Download another
                   </Button>
-                  <Button onClick={handleDownload} variant="outline" className="flex-1 gap-2 active:scale-[0.97]">
+                  <Button onClick={videoInfo?.is_playlist ? handleDownloadPlaylist : handleDownload} variant="outline" className="flex-1 gap-2 active:scale-[0.97]">
                     <RefreshCw className="h-4 w-4" />
                     Try again
                   </Button>

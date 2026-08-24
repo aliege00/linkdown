@@ -8,7 +8,7 @@
  * so the analyze/download calls always receive a clean URL.
  */
 
-/** First http(s) URL inside the pasted text (quotes excluded, parens kept). */
+/** First http(s) URL inside the pasted text (quotes and angle brackets excluded). */
 const URL_TOKEN = /https?:\/\/[^\s<>"']+/i;
 
 /** Looks like a bare domain path, e.g. "youtu.be/abc" or "www.example.com/v". */

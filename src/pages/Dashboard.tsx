@@ -163,7 +163,7 @@ export default function Dashboard() {
                   <stat.icon className={`size-5 ${stat.color}`} />
                 </div>
                 <div className="min-w-0">
-                  <p className={`font-bold text-xl leading-none ${stat.isText ? "text-sm font-semibold mt-0.5" : ""}`}>
+                  <p className={stat.isText ? "text-sm font-semibold text-muted-foreground leading-none mt-0.5" : "font-bold text-xl leading-none"}>
                     {stat.value}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">

@@ -673,7 +673,7 @@ export default function Landing() {
           {/* Bottom bar */}
           <div className="mt-10 pt-6 border-t border-border/30 flex flex-col sm:flex-row items-center justify-between gap-3">
             <p className="text-xs text-muted-foreground">
-              On-device video downloader. Powered by yt-dlp.
+              On-device video downloader. egebey.
               {BUILD_TAG && (
                 <span className="ml-2 font-mono text-[10px] text-muted-foreground/50">
                   build {BUILD_TAG}
@@ -688,15 +688,6 @@ export default function Landing() {
                 className="text-xs text-muted-foreground hover:text-foreground transition-colors"
               >
                 yt-dlp
-              </a>
-              <span className="text-xs text-muted-foreground/30">·</span>
-              <a
-                href="https://freebuff.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-              >
-                Freebuff
               </a>
             </div>
           </div>

@@ -95,12 +95,24 @@ export async function getVideoInfo(
       { signal: AbortSignal.timeout(30000) },
     );
 
-    const data = await response.json();
+    // Reverse proxies / error pages can return HTML — parse defensively so the
+    // user sees a clear message instead of a cryptic JSON parse error.
+    const data = (await response.json().catch(() => null)) as
+      | (YtDlpInfo & { detail?: string })
+      | { detail?: string }
+      | null;
 
     if (!response.ok) {
       return {
         success: false,
-        error: data.detail || `Server responded with ${response.status}`,
+        error: data?.detail || `Server responded with ${response.status}`,
+      };
+    }
+
+    if (!data || typeof data !== "object") {
+      return {
+        success: false,
+        error: `yt-dlp server returned an invalid (non-JSON) response (${response.status})`,
       };
     }
 

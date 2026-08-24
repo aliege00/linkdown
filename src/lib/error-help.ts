@@ -58,6 +58,9 @@ export function sanitizeRawError(raw: string): string {
   let text = (lines[0] ?? raw).trim();
   // "ERROR: [generic] " → "" (yt-dlp tags may or may not end with a colon)
   text = text.replace(/^(ERROR:\s*)?(\[[^\]]+\]:?\s*)+/i, "").trim();
+  // yt-dlp often keeps the video id after the tag: "[youtube] dQw4…: msg"
+  // → strip a short word/ID + colon prefix so users see just the message.
+  text = text.replace(/^[\w-]{1,64}:\s+/, "").trim();
   // Trailing "See https://github.com/yt-dlp/yt-dlp#... for more info"
   text = text.replace(/\s*See https:\/\/github\.com\/yt-dlp\/yt-dlp.*$/i, "").trim();
   // Trim long stack-ish tails
