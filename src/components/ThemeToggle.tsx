@@ -4,13 +4,13 @@ import { Moon, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export function ThemeToggle() {
-  const { theme, setTheme, resolvedTheme } = useTheme();
+  const { setTheme, resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   const [pulsing, setPulsing] = useState(false);
 
-  // Prevent hydration mismatch by rendering only after mount
+  // Prevent hydration mismatch — set to true only after first render.
   useEffect(() => {
-    setMounted(true);
+    setMounted(true); // eslint-disable-line react-hooks/set-state-in-effect
   }, []);
 
   const handleToggle = () => {

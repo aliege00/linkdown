@@ -169,4 +169,4 @@ createRoot(document.getElementById("root")!).render(
 
 // Tell the inline watchdog in index.html that React mounted successfully,
 // so it never paints a false "did not start" screen in the packaged apps.
-(window as any).__VIDFETCH_READY__?.();
+((window as unknown as Record<string, unknown>)["__VIDFETCH_READY__"] as (() => void) | undefined)?.();

@@ -19,8 +19,11 @@ import {
   hasServer as serverConfigured,
 } from "./ytdlp";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type PluginData = Record<string, any>;
+
 interface YtDlpPluginInterface {
-  extractInfo(options: { url: string; isPlaylist?: boolean }): Promise<any>;
+  extractInfo(options: { url: string; isPlaylist?: boolean }): Promise<YtDlpResult>;
   startDownload(options: { url: string; formatId: string; isPlaylist?: boolean }): Promise<{ workId: string }>;
   cancelDownload(options: { workId: string }): Promise<void>;
   openFile(options: { uri: string }): Promise<{ success: boolean }>;
@@ -33,7 +36,7 @@ interface YtDlpPluginInterface {
   pickCookieFile(): Promise<{ cookiesFileName: string }>;
   clearCookieFile(): Promise<void>;
   setPoTokenProvider(url: string): Promise<void>;
-  addListener(eventName: string, callback: (data: any) => void): Promise<PluginListenerHandle>;
+  addListener(eventName: string, callback: (data: PluginData) => void): Promise<PluginListenerHandle>;
 }
 
 /**
@@ -156,12 +159,12 @@ export interface DesktopBridge {
   pickCookieFile(): Promise<YouTubeSettings | null>;
   clearCookieFile(): Promise<YouTubeSettings>;
   setPoTokenProvider(url: string): Promise<YouTubeSettings>;
-  onProgress(cb: (data: any) => void): () => void;
-  onComplete(cb: (data: any) => void): () => void;
-  onError(cb: (data: any) => void): () => void;
+  onProgress(cb: (data: PluginData) => void): () => void;
+  onComplete(cb: (data: PluginData) => void): () => void;
+  onError(cb: (data: PluginData) => void): () => void;
 }
 
-const Desktop = (window as any).vidfetch as DesktopBridge | undefined;
+const Desktop = (window as unknown as Record<string, unknown>)["vidfetch"] as DesktopBridge | undefined;
 
 let nativeAvailable: boolean | null = null;
 
@@ -179,8 +182,8 @@ export function isNativeAvailable(): boolean {
   }
 
   try {
-    const capacitor = (window as any).Capacitor;
-    nativeAvailable = !!(capacitor && capacitor.isNativePlatform());
+    const capacitor = (window as unknown as Record<string, unknown>)["Capacitor"] as { isNativePlatform?: () => boolean } | undefined;
+    nativeAvailable = !!(capacitor?.isNativePlatform?.());
   } catch {
     nativeAvailable = false;
   }
@@ -310,34 +313,34 @@ export async function startDownload(
       if (onProgress) {
         let lastEmit = 0;
         offs.push(
-          Desktop.onProgress((data: any) => {
+          Desktop.onProgress((data) => {
             const now = Date.now();
             if (now - lastEmit < 100) return;
             lastEmit = now;
             onProgress({
-              percent: data.percent ?? 0,
-              speed: data.speed ?? "0",
-              eta: data.eta ?? "--:--",
-              item: data.item,
-              itemCount: data.itemCount,
-              fileName: data.fileName,
+              percent: (data.percent as number) ?? 0,
+              speed: (data.speed as string) ?? "0",
+              eta: (data.eta as string) ?? "--:--",
+              item: data.item as number | undefined,
+              itemCount: data.itemCount as number | undefined,
+              fileName: data.fileName as string | undefined,
             });
           }),
         );
       }
       if (onComplete) {
         offs.push(
-          Desktop.onComplete((data: any) => {
+          Desktop.onComplete((data) => {
             offs.forEach((off) => off());
-            onComplete({ uri: data.uri ?? "", fileName: data.fileName ?? "" });
+            onComplete({ uri: (data.uri as string) ?? "", fileName: (data.fileName as string) ?? "" });
           }),
         );
       }
       if (onError) {
         offs.push(
-          Desktop.onError((data: any) => {
+          Desktop.onError((data) => {
             offs.forEach((off) => off());
-            onError(data.error ?? "Download failed");
+            onError((data.error as string) ?? "Download failed");
           }),
         );
       }
@@ -360,17 +363,17 @@ export async function startDownload(
     // Register progress listener if callback provided
     if (onProgress) {
       let lastEmit = 0;
-      const handle = await YtDlp.addListener("downloadProgress", (data: any) => {
+      const handle = await YtDlp.addListener("downloadProgress", (data) => {
         const now = Date.now();
         if (now - lastEmit < 100) return; // max ~10 updates/sec
         lastEmit = now;
         onProgress({
-          percent: data.percent ?? 0,
-          speed: data.speed ?? "0",
-          eta: data.eta ?? "--:--",
-          item: data.item,
-          itemCount: data.itemCount,
-          fileName: data.fileName,
+          percent: (data.percent as number) ?? 0,
+          speed: (data.speed as string) ?? "0",
+          eta: (data.eta as string) ?? "--:--",
+          item: data.item as number | undefined,
+          itemCount: data.itemCount as number | undefined,
+          fileName: data.fileName as string | undefined,
         });
       });
       handles.push(handle);
@@ -378,10 +381,10 @@ export async function startDownload(
 
     // Register completion listener — carries the saved file URI
     if (onComplete) {
-      const handle = await YtDlp.addListener("downloadComplete", (data: any) => {
+      const handle = await YtDlp.addListener("downloadComplete", (data) => {
         onComplete({
-          uri: data.uri ?? "",
-          fileName: data.fileName ?? "",
+          uri: (data.uri as string) ?? "",
+          fileName: (data.fileName as string) ?? "",
         });
         handles.forEach((h) => h.remove());
       });
@@ -390,8 +393,8 @@ export async function startDownload(
 
     // Register error listener
     if (onError) {
-      const handle = await YtDlp.addListener("downloadError", (data: any) => {
-        onError(data.error ?? "Download failed");
+      const handle = await YtDlp.addListener("downloadError", (data) => {
+        onError((data.error as string) ?? "Download failed");
         handles.forEach((h) => h.remove());
       });
       handles.push(handle);
