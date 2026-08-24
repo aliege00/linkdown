@@ -24,9 +24,12 @@ The server also auto-detects a `cookies/youtube.txt` file next to main.py
 and uses it when YTDLP_COOKIES_FILE is not set.
 """
 
+import json
 import os
 import re
 import shutil
+import subprocess
+import sys
 import tempfile
 import time
 import zipfile
@@ -47,6 +50,10 @@ APP_NAME = "VidFetch"
 DOWNLOAD_DIR = Path(os.environ.get("DOWNLOAD_DIR", "/tmp/vidfetch-downloads"))
 CLEANUP_AGE_SECONDS = int(os.environ.get("CLEANUP_AGE_SECONDS", "1800"))
 MAX_FILE_SIZE = int(os.environ.get("MAX_FILE_SIZE", str(2 * 1024 ** 3)))
+# Secondary open-source engine (https://github.com/mikf/gallery-dl) — used as
+# an automatic FALLBACK for sites yt-dlp cannot parse (Instagram, Pinterest,
+# some Twitter/X media…). Installed via requirements.txt.
+GALLERYDL_TIMEOUT = int(os.environ.get("GALLERYDL_TIMEOUT", "300"))
 
 # Cheap URL heuristic for playlists (yt-dlp's own response is authoritative).
 PLAYLIST_URL_RE = re.compile(r"(?:[?&]list=|/playlist(?:[/?]|$))")
@@ -89,6 +96,9 @@ def _base_opts() -> dict:
         "quiet": True,
         "no_warnings": True,
         "noplaylist": False,
+        # Never hang forever on stalled/slow upstream connections (the
+        # default lets sockets block indefinitely on some platforms).
+        "socket_timeout": int(os.environ.get("YTDLP_SOCKET_TIMEOUT", "30")),
     }
     cookies = _cookiefile()
     if cookies:
@@ -105,6 +115,15 @@ def _ffmpeg_available() -> bool:
     return shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
 
 
+def _gallerydl_available() -> bool:
+    if shutil.which("gallery-dl") is not None:
+        return True
+    # venv installs: the binary sits next to the interpreter, which may not
+    # be on PATH (e.g. `venv/bin/python -m uvicorn` without activating).
+    sibling = Path(sys.executable).with_name("gallery-dl")
+    return sibling.is_file() and os.access(sibling, os.X_OK)
+
+
 def _absolutize(raw: str, base_url: str) -> str:
     """Flat playlist entries often carry relative URLs (e.g. /watch?v=...)."""
     if not raw:
@@ -119,11 +138,20 @@ def _absolutize(raw: str, base_url: str) -> str:
 
 
 def _friendly_error(exc: Exception) -> str:
-    """Strip yt-dlp's noisy ERROR: prefix and cap the length."""
+    """Strip yt-dlp's noisy ERROR:/[extractor] prefixes and cap the length."""
     msg = str(exc)
-    m = re.search(r"ERROR:\s*(.+)", msg)
+    # yt-dlp formats most failures as
+    #   "ERROR: [youtube] <video_id>: actual message"
+    # Strip the ERROR:/[extractor]/<id> shell in one pass; fall back to
+    # bare "ERROR:" then to a leading bracketed tag without ERROR:.
+    m = (
+        re.search(r"ERROR:\s*\[[^\]]+\]\s*[\w-]{1,64}:\s*(.+)", msg)
+        or re.search(r"ERROR:\s*(.+)", msg)
+    )
     if m:
         msg = m.group(1).strip()
+    else:
+        msg = re.sub(r"^\[[^\]]+\]\s*:??\s*", "", msg).strip()
     if len(msg) > 500:
         msg = msg[:500] + "..."
     return msg or exc.__class__.__name__
@@ -137,6 +165,11 @@ def _cleanup_old_files() -> None:
         try:
             if p.is_file() and p.stat().st_mtime < cutoff:
                 p.unlink(missing_ok=True)
+            elif p.is_dir() and p.stat().st_mtime < cutoff:
+                # Playlist downloads create subdirs (e.g. videos/). Remove
+                # stale ones to prevent disk-space leakage from failed/interrupted
+                # downloads that left behind temp directories.
+                shutil.rmtree(p, ignore_errors=True)
         except OSError:
             pass
 
@@ -234,7 +267,9 @@ def _best_format_id(info: dict) -> tuple[str, Optional[str]]:
 
 def _entry_payload(entry: dict, base_url: str) -> dict:
     thumbs = entry.get("thumbnails") or []
-    thumb = entry.get("thumbnail") or (thumbs[0].get("url") if thumbs else None)
+    thumb = entry.get("thumbnail") or (
+        thumbs[0].get("url") if thumbs and isinstance(thumbs[0], dict) else None
+    )
     return {
         "id": entry.get("id"),
         "title": entry.get("title") or "",
@@ -254,8 +289,14 @@ def _info_payload(info: dict, base_url: str) -> dict:
         "id": info.get("id") or "",
         "title": info.get("title") or "Untitled",
         "duration": info.get("duration"),
+        # Same guard as _entry_payload: flat/malformed extractors can put
+        # non-dict items into `thumbnails`, which would raise TypeError.
         "thumbnail": info.get("thumbnail")
-        or (thumbnails[0].get("url") if thumbnails else None),
+        or (
+            thumbnails[0].get("url")
+            if thumbnails and isinstance(thumbnails[0], dict)
+            else None
+        ),
         "uploader": info.get("uploader") or info.get("channel") or "",
         "uploader_url": info.get("uploader_url") or info.get("channel_url"),
         "webpage_url": info.get("webpage_url") or base_url,
@@ -283,6 +324,122 @@ def _extract_single(url: str) -> dict:
         return ydl.extract_info(url, download=False)
 
 
+# ── gallery-dl fallback (second open-source engine) ─────────────────
+
+def _gallerydl_metadata(url: str) -> Optional[dict]:
+    """First metadata record from `gallery-dl --dump-json` (NDJSON), or None."""
+    try:
+        proc = subprocess.run(
+            ["gallery-dl", "--dump-json", url],
+            capture_output=True,
+            text=True,
+            timeout=GALLERYDL_TIMEOUT,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return None
+    for line in proc.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            data = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(data, dict):
+            return data
+    return None
+
+
+def _info_payload_from_gallerydl(meta: dict, url: str) -> dict:
+    """Build an /api/info payload from a gallery-dl metadata record.
+
+    gallery-dl does not expose a format ladder — it fetches the original
+    file — so a single pseudo-format advertises the source quality.
+    """
+    thumbs = meta.get("thumbnails") or []
+    thumb = meta.get("thumbnail") or meta.get("image") or (
+        thumbs[0].get("url") if thumbs and isinstance(thumbs[0], dict) else None
+    )
+    return {
+        "success": True,
+        "id": str(meta.get("id") or ""),
+        "title": meta.get("title") or meta.get("description") or "Media",
+        "duration": meta.get("duration"),
+        "thumbnail": thumb,
+        "uploader": meta.get("uploader") or meta.get("user") or "",
+        "uploader_url": meta.get("uploader_url"),
+        "webpage_url": meta.get("url") or url,
+        "formats": [
+            {
+                "format_id": "best",
+                "ext": meta.get("extension") or "auto",
+                "resolution": "Original",
+                "filesize": None,
+                "vcodec": "unknown",
+                "acodec": "unknown",
+                "fps": None,
+                "tbr": None,
+            }
+        ],
+        "best_format_id": "best",
+        "best_audio_format_id": None,
+        "ffmpeg_available": _ffmpeg_available(),
+        "is_playlist": False,
+        "engine": "gallery-dl",
+    }
+
+
+def _download_gallerydl(
+    url: str, workdir: Path, background_tasks: BackgroundTasks
+):
+    """Download via gallery-dl; serves a ZIP when multiple files come back."""
+    dest = workdir / "gdl"
+    dest.mkdir(parents=True, exist_ok=True)
+    try:
+        proc = subprocess.run(
+            ["gallery-dl", "--dest-dir", str(dest), url],
+            capture_output=True,
+            text=True,
+            timeout=GALLERYDL_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(504, "gallery-dl timed out")
+    files: list = []
+    if proc.returncode == 0:
+        files = [p for p in dest.rglob("*") if p.is_file() and p.stat().st_size > 0]
+        files.sort()
+    if not files:
+        shutil.rmtree(workdir, ignore_errors=True)
+        detail = [l for l in (proc.stderr or "").strip().splitlines() if l.strip()]
+        raise HTTPException(
+            422,
+            detail[-1][:300]
+            if detail
+            else "gallery-dl finished without producing a file",
+        )
+    total = sum(f.stat().st_size for f in files)
+    if total > MAX_FILE_SIZE:
+        shutil.rmtree(workdir, ignore_errors=True)
+        raise HTTPException(
+            413,
+            f"Files are {total / 1024 / 1024:.0f} MB total — over the "
+            f"{MAX_FILE_SIZE / 1024 / 1024:.0f} MB server limit",
+        )
+    background_tasks.add_task(shutil.rmtree, workdir, ignore_errors=True)
+    if len(files) == 1:
+        target = files[0]
+        return FileResponse(
+            str(target), media_type="application/octet-stream", filename=target.name
+        )
+    zip_path = workdir / "media.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in files:
+            zf.write(f, f.relative_to(dest))
+    return FileResponse(str(zip_path), media_type="application/zip", filename="media.zip")
+
+
 # ── API routes ────────────────────────────────────────────────────────
 
 @app.get("/")
@@ -295,7 +452,10 @@ def health() -> dict:
     return {
         "status": "ok",
         "service": APP_NAME,
-        "yt_dlp_installed": yt_dlp is not None,
+        "engines": {
+            "yt-dlp": yt_dlp is not None,
+            "gallery-dl": _gallerydl_available(),
+        },
         "ffmpeg_available": _ffmpeg_available(),
     }
 
@@ -335,6 +495,12 @@ def api_info(
         info = _extract_single(url)
         return _info_payload(info, url)
     except Exception as exc:  # noqa: BLE001 - surface any extractor failure
+        # yt-dlp failed — try the gallery-dl engine before giving up (covers
+        # Instagram, Pinterest and other sites outside yt-dlp's extractors).
+        if _gallerydl_available():
+            meta = _gallerydl_metadata(url)
+            if meta is not None:
+                return _info_payload_from_gallerydl(meta, url)
         raise HTTPException(422, _friendly_error(exc))
 
 
@@ -363,10 +529,14 @@ def _run_ytdlp(
 
 
 def _finished_files(folder: Path) -> list:
+    # Zero-byte leftovers (killed mid-write, exhausted disk) are NOT valid
+    # outputs — serving one would look like a successful empty download.
     return [
         p
         for p in folder.iterdir()
-        if p.is_file() and not p.name.endswith((".part", ".ytdl", ".temp"))
+        if p.is_file()
+        and not p.name.endswith((".part", ".ytdl", ".temp"))
+        and p.stat().st_size > 0
     ]
 
 
@@ -376,7 +546,10 @@ def _download_single(url: str, format_id: str, workdir: Path, background_tasks: 
     if not files:
         shutil.rmtree(workdir, ignore_errors=True)
         raise HTTPException(422, "yt-dlp finished without producing a file")
-    target = files[0]
+    # Pick the LARGEST finished file, not an arbitrary first entry: without
+    # ffmpeg a video+audio combo leaves two files (.f137.mp4 + .f140.m4a),
+    # and files[0] could serve the audio-only stream as "the download".
+    target = max(files, key=lambda p: p.stat().st_size)
     size = target.stat().st_size
     if size > MAX_FILE_SIZE:
         shutil.rmtree(workdir, ignore_errors=True)
@@ -434,7 +607,16 @@ def api_download(
     try:
         if playlist:
             return _download_playlist(url, format_id, limit, workdir, background_tasks)
-        return _download_single(url, format_id, workdir, background_tasks)
+        try:
+            return _download_single(url, format_id, workdir, background_tasks)
+        except HTTPException as exc:
+            # yt-dlp could not handle this URL — fall back to gallery-dl so
+            # sites like Instagram/Pinterest still download.
+            if exc.status_code == 422 and _gallerydl_available():
+                shutil.rmtree(workdir, ignore_errors=True)
+                workdir.mkdir(parents=True, exist_ok=True)
+                return _download_gallerydl(url, workdir, background_tasks)
+            raise
     except HTTPException:
         shutil.rmtree(workdir, ignore_errors=True)
         raise

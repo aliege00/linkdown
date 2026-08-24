@@ -1,5 +1,8 @@
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
-yt-dlp>=2024.12.0
-pydantic>=2.10.0
+# Secondary open-source engine — automatic fallback for sites yt-dlp
+# cannot parse (Instagram, Pinterest, some X/Twitter media).
+gallery-dl>=1.28.0
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+yt-dlp>=2025.12.0
+pydantic>=2.12.0
 python-multipart>=0.0.18

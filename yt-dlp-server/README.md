@@ -153,6 +153,18 @@ Downloads the video file as a streaming attachment.
 
 Health check endpoint.
 
+## Engines
+
+The server uses **two open-source download engines**:
+
+| Engine | Role |
+|--------|------|
+| [yt-dlp](https://github.com/yt-dlp/yt-dlp) | Primary — 1000+ sites, full format ladder, quality selection |
+| [gallery-dl](https://github.com/mikf/gallery-dl) | Automatic **fallback** — sites yt-dlp can't parse (Instagram, Pinterest, some X/Twitter media). Used transparently when yt-dlp fails on `/api/info` and `/api/download`; multi-file results come back as a ZIP |
+
+Both install via `pip install -r requirements.txt`. `GALLERYDL_TIMEOUT`
+(seconds, default 300) caps gallery-dl runs.
+
 ## Connecting to VidFetch
 
 Once deployed, set the server URL in VidFetch's frontend:
