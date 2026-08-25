@@ -11,6 +11,13 @@ permissions:
   contents: read
   actions: write
 
+# Private repo: every runner minute is billed to the owner's monthly
+# allowance (~12 min per full build set). Rapid successive pushes would
+# stack up redundant runs - cancel superseded ones and save the minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
