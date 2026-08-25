@@ -67,8 +67,11 @@ jobs:
         run: |
           gh release view ci-latest >/dev/null 2>&1 || \
             gh release create ci-latest --prerelease --title "Latest CI build" \
-              --notes "Rolling automated build from main (${{ github.sha }})."
-          exe=$(ls dist/*.exe | head -1)
+              --notes "Rolling automated build from main (${{ github.sha }})." || \
+            echo "release created concurrently - continuing"
+          # electron-builder outputs to pwabuild-output (see electron-builder.yml),
+          # NOT dist/ which holds the Vite web bundle.
+          exe=$(ls pwabuild-output/*.exe | head -1)
           cp "$exe" vidfetch-windows-portable.exe
           gh release upload ci-latest vidfetch-windows-portable.exe --clobber
 
@@ -76,7 +79,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: vidfetch-windows-exe
-          path: dist/*.exe
+          path: pwabuild-output/*.exe
           retention-days: 3
           # Replace the previous artifact instead of accumulating one copy
           # per push — keeps account-level artifact storage usage flat.
