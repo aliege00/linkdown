@@ -1420,8 +1420,6 @@ export default function DownloaderCard({
         updateState("error");
       },
     });
-    workIdRef.current = workId;
-
     if (!workId) {
       // The on-device engine only exists inside the APK / EXE build.
       // In a plain browser there is nothing to do the download — be honest.
@@ -1432,6 +1430,10 @@ export default function DownloaderCard({
       updateState("error");
       return;
     }
+    // Only set workIdRef AFTER the null check — the server path calls
+    // onComplete synchronously (which sets workIdRef to null), so setting
+    // it before the check would overwrite the null with a stale value.
+    workIdRef.current = workId;
 
     // Safety net ONLY: the native foreground service reliably emits
     // downloadComplete/downloadError, and progress events keep the
@@ -1446,7 +1448,8 @@ export default function DownloaderCard({
       if (stateRef.current === "downloading") updateState("complete");
     }, 120000);
 
-    // Reset "complete" state after a delay
+    // Reset "complete" state after a short delay so the success animation
+    // is visible but the user can quickly start a new download.
     completeResetTimerRef.current = setTimeout(() => {
       if (stateRef.current === "complete") updateState("loaded");
     }, 5000);
@@ -1540,8 +1543,6 @@ export default function DownloaderCard({
         updateState("error");
       },
     });
-    workIdRef.current = workId;
-
     if (!workId) {
       setErrorMsg(
         "This preview runs in a browser, where there is no download engine. Install the Android APK or the Windows EXE — the engine runs right on your device. No server, no API key, unlimited."
@@ -1550,6 +1551,7 @@ export default function DownloaderCard({
       updateState("error");
       return;
     }
+    workIdRef.current = workId;
 
     // Safety net ONLY — same reasoning as single-video downloads. The
     // real completion is driven by progress events (last item at 100%)
@@ -1586,6 +1588,7 @@ export default function DownloaderCard({
     setErrorMsg("");
     setVideoInfo(null);
     setSelectedFormat("");
+    setPlaylistSummary(null);
     setUrl("");
     inputRef.current?.focus();
   };
