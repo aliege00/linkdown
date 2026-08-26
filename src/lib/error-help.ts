@@ -7,7 +7,8 @@
  * don't have to decode technical messages.
  */
 
-export type HelpLang = "tr" | "en";
+import type { HelpLang } from "./help-content";
+export type { HelpLang } from "./help-content";
 
 export type ErrorCategory =
   | "no-engine"
