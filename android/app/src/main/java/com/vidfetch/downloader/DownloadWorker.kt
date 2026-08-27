@@ -15,6 +15,7 @@ import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
+import android.media.MediaMetadataRetriever
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -60,6 +61,15 @@ class DownloadWorker(
 
         // Matches playlist item counters, e.g. "[youtube] PLxxx: Downloading item 3 of 10"
         private val ITEM_PATTERN = Regex("Downloading item (\\d+) of (\\d+)")
+
+        // Matches the destination path from yt-dlp's progress output:
+        //   [download] Destination: /path/to/file.mp4
+        //   [download] /path/to/file.mp4 has already been downloaded
+        // Used to know exactly which file yt-dlp produced.
+        private val OUTPUT_FILENAME_PATTERN =
+            Regex("\\[download\\]\s+Destination:\s+(.+?)\s*$")
+        private val ALREADY_DOWNLOADED_PATTERN =
+            Regex("\\[download\\]\s+(.+?)\s+has already been downloaded")
 
         // Tracks the live yt-dlp process so cancelDownload() can kill it.
         @Volatile
@@ -112,7 +122,12 @@ class DownloadWorker(
                 if (!isPlaylist) addOption("--no-playlist")
                 addOption("--no-warnings")
                 addOption("--no-cache-dir")
-                addOption("--merge-output-format", "mp4")
+                // NOTE: --merge-output-format intentionally omitted.
+                // Forcing MP4 when the source uses VP9/AV1 codecs produces
+                // a container Android's MediaCodec cannot decode.  yt-dlp
+                // picks the best native container automatically (mp4 for
+                // H.264, webm for VP9/AV1).  The MIME type is resolved
+                // from the real extension in MediaStoreHelper.mimeTypeFor().
                 addOption("-o", outputTemplate)
 
                 // Authenticated YouTube requests (cookies.txt imported by the
@@ -130,10 +145,23 @@ class DownloadWorker(
             // raw progress line String?).
             var currentItem = 0
             var totalItems = 0
+            var outputFilePath: String? = null
             YoutubeDL.execute(request, processId, true) { percent, etaSeconds, line ->
                 val pct = if (percent >= 0f) percent.toInt().coerceIn(0, 100) else 0
                 val speed = SPEED_PATTERN.find(line ?: "")?.groupValues?.getOrNull(1) ?: "0 B/s"
                 val eta = formatEta(etaSeconds)
+
+                // Capture the exact output filename yt-dlp reports.
+                if (line != null) {
+                    val dest = OUTPUT_FILENAME_PATTERN.find(line)
+                        ?.groupValues?.getOrNull(1)?.trim()
+                    val already = ALREADY_DOWNLOADED_PATTERN.find(line)
+                        ?.groupValues?.getOrNull(1)?.trim()
+                    val path = dest ?: already
+                    if (!path.isNullOrEmpty()) {
+                        outputFilePath = path
+                    }
+                }
 
                 // Track the playlist item counter, e.g. "Downloading item 3 of 10"
                 val im = ITEM_PATTERN.find(line ?: "")
@@ -167,15 +195,39 @@ class DownloadWorker(
             }
 
             // ── Step 5: Find the downloaded output ────────────────
-            // Single videos: the newest file. Playlists: the newest folder
-            // yt-dlp created (named after the playlist).
+            // Use the exact filename captured from yt-dlp output (Step 4).
+            // Fallback: newest file/dir for playlists or if parsing failed.
             val downloaded = if (isPlaylist) {
                 downloadDir.listFiles()
                     ?.filter { it.isDirectory() }
                     ?.maxByOrNull { it.lastModified() }
             } else {
-                downloadDir.listFiles()
-                    ?.maxByOrNull { it.lastModified() }
+                // 1) Prefer the exact file yt-dlp reported writing to
+                val fromParse = outputFilePath?.let { path ->
+                    val f = File(path)
+                    if (f.exists() && f.isFile && f.length() > 0) f else null
+                }
+                fromParse ?: run {
+                    // 2) Fallback: scan for video files, preferring the final
+                    //    merged output over intermediate DASH parts.
+                    //    yt-dlp temp parts use the pattern "title.fNNN.ext"
+                    //    while the merged result is "title.ext".
+                    val videoExts = setOf("mp4", "webm", "mkv", "m4v", "mov")
+                    downloadDir.listFiles()
+                        ?.filter { f ->
+                            f.isFile && f.length() > 1024 &&
+                            f.extension.lowercase() in videoExts &&
+                            // Skip DASH temp parts (title.f137.webm etc.)
+                            !Regex("\\.f\\d+\\.").containsMatchIn(f.name)
+                        }
+                        ?.maxByOrNull { it.lastModified() }
+                        ?: run {
+                            // 3) Last resort: any file >1KB
+                            downloadDir.listFiles()
+                                ?.filter { it.isFile && it.length() > 1024 }
+                                ?.maxByOrNull { it.lastModified() }
+                        }
+                }
             }
 
             // ── Step 5.5: Validate the downloaded file ─────────────
@@ -408,42 +460,32 @@ class DownloadWorker(
             )
         }
 
-        // Check for a valid MP4/ISOBMFF container by looking for the
-        // "ftyp" box in the first 12 bytes.  Every valid .mp4 / .m4v / .mov
-        // starts with: <4-byte size> ftyp <brand> …
+        // Check for a valid container header (MP4 ftyp, MKV/WebM EBML).
         val ext = file.extension.lowercase()
         if (ext in listOf("mp4", "m4v", "mov", "mkv", "webm")) {
             val header = ByteArray(12)
             try {
                 file.inputStream().use { it.read(header) }
             } catch (_: Exception) {
-                // If we can't even read the header, the file is corrupt.
                 throw IllegalStateException(
                     "Cannot read the downloaded file — it may be corrupt. " +
                     "Try a different quality or restart the download."
                 )
             }
 
-            // MP4 ftyp box: bytes 4-7 should be "ftyp"
             val isFtyp = header.size >= 8 &&
                 header[4] == 'f'.code.toByte() &&
                 header[5] == 't'.code.toByte() &&
                 header[6] == 'y'.code.toByte() &&
                 header[7] == 'p'.code.toByte()
 
-            // MKV: starts with 0x1A 0x45 0xDF 0xA3 (EBML header)
             val isMkv = header.size >= 4 &&
                 header[0] == 0x1A.toByte() &&
                 header[1] == 0x45.toByte() &&
                 header[2] == 0xDF.toByte() &&
                 header[3] == 0xA3.toByte()
 
-            // WebM: EBML header magic (same as MKV)
-            val isWebm = isMkv
-
-            if (!isFtyp && !isMkv && !isWebm) {
-                // Not a valid container — likely a raw stream that
-                // yt-dlp downloaded but ffmpeg failed to merge.
+            if (!isFtyp && !isMkv) {
                 val looksLikeText = String(header.sliceArray(0 until minOf(32, header.size)), Charsets.UTF_8)
                 val isErrorPage = looksLikeText.contains("<html") || looksLikeText.contains("<!DOCTYPE") || looksLikeText.startsWith("{")
                 if (isErrorPage) {
@@ -458,6 +500,55 @@ class DownloadWorker(
                     "Try a lower quality (e.g. 720p) or update the app."
                 )
             }
+        }
+
+        // ── Playability probe ──────────────────────────────────────
+        // Even with correct magic bytes, the file can be unplayable:
+        //   - audio-only (ffmpeg merged audio but not video)
+        //   - corrupt moov atom (download interrupted during merge)
+        //   - wrong codec not supported by Android's MediaCodec
+        // MediaMetadataRetriever is the fastest way to verify: if it
+        // cannot extract a video track, the file won't play.
+        try {
+            val retriever = MediaMetadataRetriever()
+            retriever.setDataSource(file.absolutePath)
+            val hasVideo = retriever.extractMetadata(
+                MediaMetadataRetriever.METADATA_KEY_HAS_VIDEO
+            )
+            val hasAudio = retriever.extractMetadata(
+                MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO
+            )
+            val durationMs = retriever.extractMetadata(
+                MediaMetadataRetriever.METADATA_KEY_DURATION
+            )?.toLongOrNull() ?: 0L
+            retriever.release()
+
+            if (hasVideo != "yes") {
+                throw IllegalStateException(
+                    "The downloaded file has no video track — it may be audio-only. " +
+                    "Try selecting a format that includes video (e.g. 'best')."
+                )
+            }
+            if (hasAudio != "yes") {
+                throw IllegalStateException(
+                    "The downloaded file has no audio track — the video is muted. " +
+                    "Try a format that includes both audio and video (e.g. 'best')."
+                )
+            }
+            if (durationMs <= 0) {
+                throw IllegalStateException(
+                    "The video file appears to have zero duration. " +
+                    "The file may be corrupt — try a different quality."
+                )
+            }
+        } catch (e: IllegalStateException) {
+            throw e  // re-throw our own validation errors
+        } catch (_: Exception) {
+            // MediaMetadataRetriever failed to parse — file is likely corrupt
+            throw IllegalStateException(
+                "Cannot read the video file — it may be corrupt or in an unsupported format. " +
+                "Try a different quality or update the app."
+            )
         }
     }
 }
