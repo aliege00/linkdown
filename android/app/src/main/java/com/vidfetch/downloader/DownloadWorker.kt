@@ -444,10 +444,9 @@ class DownloadWorker(
             if (!isFtyp && !isMkv && !isWebm) {
                 // Not a valid container — likely a raw stream that
                 // yt-dlp downloaded but ffmpeg failed to merge.
-                val looksLikeText = header.sliceArray(0, minOf(32, size.toInt()))
-                    .let { String(it, Charsets.UTF_8) }
-                    .let { txt -> txt.contains("<html") || txt.contains("<!DOCTYPE") || txt.startsWith("{") }
-                if (looksLikeText) {
+                val looksLikeText = String(header.sliceArray(0 until minOf(32, header.size)), Charsets.UTF_8)
+                val isErrorPage = looksLikeText.contains("<html") || looksLikeText.contains("<!DOCTYPE") || looksLikeText.startsWith("{")
+                if (isErrorPage) {
                     throw IllegalStateException(
                         "The downloaded file is not a video — it looks like a web page or error response. " +
                         "The site may have blocked the download."
