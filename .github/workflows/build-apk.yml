@@ -70,20 +70,36 @@ jobs:
             done
 
       # ── Release distribution ───────────────────────────────────
-      # Release assets count toward Actions storage.  To stay under the
-      # 500 MB GitHub Free limit, only the EXE is published via Release
-      # (see build-exe.yml).  The APK is available as an artifact with
-      # a 3-day retention.
-      - name: Upload APK
+      # Publish APK to the rolling ci-latest release.  Both APK and EXE
+      # workflows race to create it, so we retry on 422 (already exists)
+      # and then upload with --clobber.
+      - name: Publish APK to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in 1 2 3; do
+            gh release create ci-latest \
+              --repo "${{ github.repository }}" \
+              --title "Latest CI build" \
+              --prerelease \
+              --target "${{ github.sha }}" \
+              "android/app/build/outputs/apk/debug/app-debug.apk#vidfetch-debug.apk" && break
+            echo "Release exists or race condition, uploading to existing..."
+            sleep 2
+          done
+          gh release upload ci-latest \
+            --repo "${{ github.repository }}" \
+            "android/app/build/outputs/apk/debug/app-debug.apk#vidfetch-debug.apk" \
+            --clobber || true
+
+      # ── Artifact upload (backup) ──────────────────────────────
+      # Kept as a fallback in case Release upload fails.
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v7
         with:
           name: vidfetch-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 1
-          # Replace the previous artifact instead of accumulating one copy
-          # per push — keeps account-level artifact storage usage flat.
           overwrite: true
           compression-level: 9
-        # A full artifact-storage quota (recalculated every 6-12h) should not
-        # fail an otherwise successful build; the next run will retry.
         continue-on-error: true
