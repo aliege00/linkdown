@@ -77,19 +77,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk vidfetch-debug.apk
           for i in 1 2 3; do
             gh release create ci-latest \
               --repo "${{ github.repository }}" \
               --title "Latest CI build" \
               --prerelease \
               --target "${{ github.sha }}" \
-              "android/app/build/outputs/apk/debug/app-debug.apk#vidfetch-debug.apk" && break
+              vidfetch-debug.apk && break
             echo "Release exists or race condition, uploading to existing..."
             sleep 2
           done
           gh release upload ci-latest \
             --repo "${{ github.repository }}" \
-            "android/app/build/outputs/apk/debug/app-debug.apk#vidfetch-debug.apk" \
+            vidfetch-debug.apk \
             --clobber || true
 
       # ── Artifact upload (backup) ──────────────────────────────
