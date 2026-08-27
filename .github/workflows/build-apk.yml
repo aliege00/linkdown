@@ -5,10 +5,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# actions:write lets the Prune step delete old artifacts so the repo never
-# hits the Actions storage quota again. contents:write lets the rolling
-# "ci-latest" release carry the actual downloads - release assets do NOT
-# count against the Actions artifact-storage quota.
+# contents:write lets the Prune step delete old artifacts and the rolling
+# "ci-latest" release carry the actual downloads.
+# NOTE: Release assets DO count toward the Actions storage quota on private
+# repos.  The 500 MB GitHub Free limit covers artifacts + packages + release
+# assets combined.  See GitHub Docs: about-billing-for-github-actions
 permissions:
   contents: write
   actions: write
@@ -30,7 +31,10 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-          cache: npm
+          # Cache disabled: npm cache consumes Actions storage (separate 10GB
+          # pool) but on GitHub Free the shared artifact+packages pool is only
+          # 500 MB.  Keeping cache off saves ~70 MB per run.
+          cache: ''
 
       - uses: actions/setup-java@v6
         with:
@@ -65,30 +69,21 @@ jobs:
               gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/$id" || true
             done
 
-      # ── Quota-proof distribution ────────────────────────────────
-      # Release assets are not metered against the Actions storage quota,
-      # so the APK stays downloadable even while artifact uploads are
-      # blocked by a stale/recalculating account-level quota.
-      - name: Publish to rolling "ci-latest" release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view ci-latest >/dev/null 2>&1 || \
-            gh release create ci-latest --prerelease --title "Latest CI build" \
-              --notes "Rolling automated build from main (${{ github.sha }})."
-          cp android/app/build/outputs/apk/debug/app-debug.apk vidfetch-debug.apk
-          gh release upload ci-latest vidfetch-debug.apk --clobber
-
+      # ── Release distribution ───────────────────────────────────
+      # Release assets count toward Actions storage.  To stay under the
+      # 500 MB GitHub Free limit, only the EXE is published via Release
+      # (see build-exe.yml).  The APK is available as an artifact with
+      # a 3-day retention.
       - name: Upload APK
         uses: actions/upload-artifact@v7
         with:
           name: vidfetch-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 3
+          retention-days: 1
           # Replace the previous artifact instead of accumulating one copy
           # per push — keeps account-level artifact storage usage flat.
           overwrite: true
+          compression-level: 9
         # A full artifact-storage quota (recalculated every 6-12h) should not
         # fail an otherwise successful build; the next run will retry.
         continue-on-error: true
