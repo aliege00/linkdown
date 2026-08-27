@@ -47,6 +47,7 @@ class DownloadWorker(
         const val KEY_ITEM_COUNT = "itemCount"
         const val KEY_OUTPUT_URI = "outputUri"
         const val KEY_OUTPUT_NAME = "outputName"
+        const val KEY_OUTPUT_ERROR = "outputError"
         const val KEY_FILE_COUNT = "fileCount"
         const val UNIQUE_WORK_NAME = "vidfetch_download"
         const val TAG = "vidfetch_download"
@@ -177,6 +178,16 @@ class DownloadWorker(
                     ?.maxByOrNull { it.lastModified() }
             }
 
+            // ── Step 5.5: Validate the downloaded file ─────────────
+            // yt-dlp may produce a valid exit code but leave behind a
+            // corrupt, 0-byte, or audio/video-only file (especially when
+            // ffmpeg fails to merge separate streams).  Detect this early
+            // so the user gets an actionable error instead of a .mp4 that
+            // won't open.
+            if (!isPlaylist && downloaded != null && downloaded.isFile) {
+                validateDownloadedFile(downloaded)
+            }
+
             // ── Step 6: Save to public Downloads folder ────────────
             var savedUri: String? = null
             var savedName: String? = null
@@ -249,11 +260,19 @@ class DownloadWorker(
 
         } catch (e: Exception) {
             e.printStackTrace()
+            // Build an actionable error message that survives the
+            // WorkManager → observer → frontend pipeline.
             val errorMsg = e.message ?: "Download failed"
             updateNotification(errorMsg, 0, true)
 
+            // Pass the real error message to the UI via outputData so
+            // DownloadBridge can forward it instead of a generic string.
+            val errorData = Data.Builder()
+                .putString(KEY_OUTPUT_ERROR, errorMsg)
+                .build()
+
             // Retry up to 3 times for transient errors
-            if (runAttemptCount < 3) Result.retry() else Result.failure()
+            if (runAttemptCount < 3) Result.retry() else Result.failure(errorData)
         } finally {
             activeProcessId = null
             progressScope.cancel()
@@ -356,5 +375,90 @@ class DownloadWorker(
         val minutes = etaSeconds / 60
         val seconds = etaSeconds % 60
         return "%02d:%02d".format(minutes, seconds)
+    }
+
+    // ── Post-download file validation ──────────────────────────
+
+    /**
+     * Validates a single downloaded file before saving it to public storage.
+     * Throws an actionable exception when the file is:
+     *   - 0 bytes (download silently failed)
+     *   - Too small to be a valid video (< 1 KB)
+     *   - Missing MP4/ISOBMFF ftyp box (corrupt or wrong container)
+     *   - An audio-only or video-only stream (ffmpeg merge failed)
+     *
+     * This prevents the user from ending up with a .mp4 file that
+     * Android's video player cannot open.
+     */
+    private fun validateDownloadedFile(file: File) {
+        val size = file.length()
+
+        if (size == 0L) {
+            throw IllegalStateException(
+                "The downloaded file is empty (0 bytes). " +
+                "This usually means the download was blocked or the network dropped."
+            )
+        }
+
+        // Extremely small files are never valid videos.
+        if (size < 1024) {
+            throw IllegalStateException(
+                "The downloaded file is suspiciously small ($size bytes). " +
+                "The download may have been interrupted or the content is not a video."
+            )
+        }
+
+        // Check for a valid MP4/ISOBMFF container by looking for the
+        // "ftyp" box in the first 12 bytes.  Every valid .mp4 / .m4v / .mov
+        // starts with: <4-byte size> ftyp <brand> …
+        val ext = file.extension.lowercase()
+        if (ext in listOf("mp4", "m4v", "mov", "mkv", "webm")) {
+            val header = ByteArray(12)
+            try {
+                file.inputStream().use { it.read(header) }
+            } catch (_: Exception) {
+                // If we can't even read the header, the file is corrupt.
+                throw IllegalStateException(
+                    "Cannot read the downloaded file — it may be corrupt. " +
+                    "Try a different quality or restart the download."
+                )
+            }
+
+            // MP4 ftyp box: bytes 4-7 should be "ftyp"
+            val isFtyp = header.size >= 8 &&
+                header[4] == 'f'.code.toByte() &&
+                header[5] == 't'.code.toByte() &&
+                header[6] == 'y'.code.toByte() &&
+                header[7] == 'p'.code.toByte()
+
+            // MKV: starts with 0x1A 0x45 0xDF 0xA3 (EBML header)
+            val isMkv = header.size >= 4 &&
+                header[0] == 0x1A.toByte() &&
+                header[1] == 0x45.toByte() &&
+                header[2] == 0xDF.toByte() &&
+                header[3] == 0xA3.toByte()
+
+            // WebM: EBML header magic (same as MKV)
+            val isWebm = isMkv
+
+            if (!isFtyp && !isMkv && !isWebm) {
+                // Not a valid container — likely a raw stream that
+                // yt-dlp downloaded but ffmpeg failed to merge.
+                val looksLikeText = header.sliceArray(0, minOf(32, size.toInt()))
+                    .let { String(it, Charsets.UTF_8) }
+                    .let { txt -> txt.contains("<html") || txt.contains("<!DOCTYPE") || txt.startsWith("{") }
+                if (looksLikeText) {
+                    throw IllegalStateException(
+                        "The downloaded file is not a video — it looks like a web page or error response. " +
+                        "The site may have blocked the download."
+                    )
+                }
+                throw IllegalStateException(
+                    "The file does not contain a valid video format. " +
+                    "This usually happens when ffmpeg fails to merge video and audio streams. " +
+                    "Try a lower quality (e.g. 720p) or update the app."
+                )
+            }
+        }
     }
 }
