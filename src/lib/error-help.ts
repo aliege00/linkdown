@@ -21,6 +21,9 @@ export type ErrorCategory =
   | "paid"
   | "network"
   | "ffmpeg"
+  | "merge-failed"
+  | "corrupt-file"
+  | "blocked"
   | "playlist"
   | "generic";
 
@@ -285,6 +288,72 @@ const COPY: Record<
       ],
     },
   },
+  "merge-failed": {
+    tr: {
+      title: "Video birleştirme başarısız",
+      message:
+        "İndirme tamamlandı ancak video ve ses akışları düzgün birleştirilemedi. Dosya oynatılamıyor.",
+      steps: [
+        "Daha düşük bir kalite seç (ör. 720p) — birleştirme gerektirmez",
+        "Uygulamayı güncelle ve tekrar dene",
+        "Farklı bir video dene",
+      ],
+    },
+    en: {
+      title: "Video merge failed",
+      message:
+        "The download finished but video and audio streams couldn't be merged properly. The file won't play.",
+      steps: [
+        "Pick a lower quality (e.g. 720p) — often doesn't need merging",
+        "Update the app and try again",
+        "Try a different video",
+      ],
+    },
+  },
+  "corrupt-file": {
+    tr: {
+      title: "Dosya bozuk veya geçersiz",
+      message:
+        "İndirilen dosya bozuk, çok küçük ya da geçerli bir video formatı içermiyor.",
+      steps: [
+        "İndirmeyi tekrar dene",
+        "Farklı bir kalite seç",
+        "İnternet bağlantını kontrol et",
+      ],
+    },
+    en: {
+      title: "File is corrupt or invalid",
+      message:
+        "The downloaded file is corrupt, too small, or doesn't contain a valid video format.",
+      steps: [
+        "Try downloading again",
+        "Pick a different quality",
+        "Check your internet connection",
+      ],
+    },
+  },
+  blocked: {
+    tr: {
+      title: "İndirme engellendi",
+      message:
+        "Site, indirmeyi engelledi — muhtemelen bir web sayfası veya hata yanıtı indirildi.",
+      steps: [
+        "Bağlantıyı tarayıcıda açarak doğru olup olmadığını kontrol et",
+        "Farklı bir video dene",
+        "VPN kullanıyorsan kapat",
+      ],
+    },
+    en: {
+      title: "Download was blocked",
+      message:
+        "The site blocked the download — a web page or error response was saved instead of a video.",
+      steps: [
+        "Open the link in a browser to verify it works",
+        "Try a different video",
+        "Turn your VPN off if you're using one",
+      ],
+    },
+  },
   playlist: {
     tr: {
       title: "Video listesi işlenemedi",
@@ -379,6 +448,23 @@ const MATCHERS: Array<{ category: ErrorCategory; pattern: RegExp }> = [
   {
     category: "ffmpeg",
     pattern: /(ffmpeg|postprocess|merging|conversion failed|avconv)/i,
+  },
+  {
+    // New: merge failed (distinct from ffmpeg — covers the Android worker's
+    // post-download validation that detects incomplete merges)
+    category: "merge-failed",
+    pattern: /(merge failed|could.*merge|merging.*fail|video and audio.*separate|merge-output-format|streams couldn.*t be merged)/i,
+  },
+  {
+    // New: corrupt / invalid file (worker validation catches 0-byte,
+    // missing ftyp box, suspiciously small files)
+    category: "corrupt-file",
+    pattern: /(corrupt|invalid|empty|0 bytes|suspiciously small|not a valid video|does not contain a valid|cannot read the downloaded)/i,
+  },
+  {
+    // New: download blocked by the site (HTML/error page saved instead)
+    category: "blocked",
+    pattern: /(blocked|not a video|looks like a web page|error response|page or error response|not a video —)/i,
   },
   {
     category: "playlist",

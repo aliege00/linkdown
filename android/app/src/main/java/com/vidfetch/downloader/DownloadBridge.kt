@@ -563,8 +563,20 @@ class DownloadBridge : Plugin() {
                     liveData.removeObserver(observer)
                 }
                 WorkInfo.State.FAILED, WorkInfo.State.CANCELLED -> {
+                    // Surface the actual error message from the worker
+                    // (e.g. ffmpeg merge failure, corrupt file, blocked)
+                    // instead of a generic "Download failed" string.
+                    val workerError = workInfo.outputData
+                        .getString(DownloadWorker.KEY_OUTPUT_ERROR)
+                    val errorMsg = if (!workerError.isNullOrEmpty()) {
+                        workerError
+                    } else if (workInfo.state == WorkInfo.State.CANCELLED) {
+                        "Download cancelled"
+                    } else {
+                        "Download failed — check your connection and try again"
+                    }
                     notifyListeners(EVENT_ERROR, JSObject().apply {
-                        put("error", "Download ${workInfo.state.name.lowercase()}")
+                        put("error", errorMsg)
                     })
                     liveData.removeObserver(observer)
                 }
