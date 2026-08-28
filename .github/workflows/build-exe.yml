@@ -1,93 +1,80 @@
-name: Build Portable EXE
+# ──────────────────────────────────────────────────────────────────────
+# VidFetch — Windows EXE Build + Release
+#
+# Triggers:
+#   • Push to main / develop  → build + upload artifact
+#   • Push a version tag      → build + upload artifact + create GitHub Release
+# ──────────────────────────────────────────────────────────────────────
+
+name: Build EXE
 
 on:
   push:
+    branches: [main, develop]
+    tags: ["v*"]
+  pull_request:
     branches: [main]
-  workflow_dispatch:
 
-# contents:write lets the Prune step delete old artifacts and the rolling
-# "ci-latest" release carry the actual downloads.
-# NOTE: Release assets DO count toward the 500 MB Actions storage quota on
-# private repos.  See GitHub Docs: about-billing-for-github-actions
+concurrency:
+  group: build-exe-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
-  actions: write
-
-# Private repo: every runner minute is billed to the owner's monthly
-# allowance (~12 min per full build set). Rapid successive pushes would
-# stack up redundant runs - cancel superseded ones and save the minutes.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   build:
+    name: Build Windows EXE
     runs-on: windows-latest
+    timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v7
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v7
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: 22
-          # Cache disabled: npm cache consumes Actions storage.  On GitHub Free
-          # the shared limit is only 500 MB — skip cache to stay well under.
-          cache: ''
+          node-version: "22"
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Build web app + EXE
-        # Uses electron-builder with the repo's electron-builder.yml
-        # (see the "build:exe" script in package.json).
-        run: npm run build:exe
+      - name: Build frontend
+        run: npm run build
 
-      # ── Quota guard ──────────────────────────────────────────────
-      # Deletes artifacts from previous runs right before uploading, so a
-      # full storage quota can never block the upload again. Placed AFTER
-      # the build on purpose: if the build fails, nothing gets deleted.
-      - name: Prune old artifacts
-        shell: bash
+      - name: Build EXE
+        run: npx electron-builder --config electron-builder.yml
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api "repos/${{ github.repository }}/actions/artifacts?per_page=100" \
-            --paginate --jq '.artifacts[] | select(.expired == false) | .id' |
-            while read -r id; do
-              echo "Deleting artifact $id"
-              gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/$id" || true
-            done
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # ── Release distribution ───────────────────────────────────
-      # Only the EXE is published to Releases (106 MB) to stay under the
-      # 500 MB GitHub Free storage limit.  The APK is available as an
-      # artifact with 1-day retention.  If both must be on Releases,
-      # consider making the repo public (unlimited storage).
-      - name: Publish to rolling "ci-latest" release
+      - name: Locate EXE
+        id: exe
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view ci-latest >/dev/null 2>&1 || \
-            gh release create ci-latest --prerelease --title "Latest CI build" \
-              --notes "Rolling automated build from main (${{ github.sha }})." || \
-            echo "release created concurrently - continuing"
-          # electron-builder outputs to pwabuild-output (see electron-builder.yml),
-          # NOT dist/ which holds the Vite web bundle.
-          exe=$(ls pwabuild-output/*.exe | head -1)
-          cp "$exe" vidfetch-windows-portable.exe
-          gh release upload ci-latest vidfetch-windows-portable.exe --clobber
+          EXE_PATH=$(find dist_electron -name "*.exe" 2>/dev/null | head -1)
+          if [ -z "$EXE_PATH" ]; then
+            echo "❌ No EXE found!"
+            exit 1
+          fi
+          echo "path=$EXE_PATH" >> "$GITHUB_OUTPUT"
+          echo "filename=$(basename "$EXE_PATH")" >> "$GITHUB_OUTPUT"
+          echo "✅ EXE found: $EXE_PATH"
 
-      - name: Upload EXE
-        uses: actions/upload-artifact@v7
+      - name: Upload EXE artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: vidfetch-windows-exe
-          path: pwabuild-output/*.exe
-          retention-days: 1
-          # Replace the previous artifact instead of accumulating one copy
-          # per push — keeps account-level artifact storage usage flat.
-          overwrite: true
-          compression-level: 9
-        # A full artifact-storage quota (recalculated every 6-12h) should not
-        # fail an otherwise successful build; the next run will retry.
-        continue-on-error: true
+          name: vidfetch-exe-${{ github.ref_name || 'debug' }}
+          path: ${{ steps.exe.outputs.path }}
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload EXE to Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: ${{ steps.exe.outputs.path }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

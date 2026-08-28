@@ -1,106 +1,124 @@
-name: Build Debug APK
+# ──────────────────────────────────────────────────────────────────────
+# VidFetch — Android APK Build + Release
+#
+# Triggers:
+#   • Push to main / develop  → build + upload artifact
+#   • Push a version tag      → build + upload artifact + create GitHub Release
+#
+# The APK is ALWAYS uploaded as a build artifact so you can download it
+# from the Actions tab.  When the trigger is a version tag (v*), the same
+# APK is also attached as a release asset so users can find it on the
+# Releases page.
+# ──────────────────────────────────────────────────────────────────────
+
+name: Build APK
 
 on:
   push:
+    branches: [main, develop]
+    tags: ["v*"]
+  pull_request:
     branches: [main]
-  workflow_dispatch:
 
-# contents:write lets the Prune step delete old artifacts and the rolling
-# "ci-latest" release carry the actual downloads.
-# NOTE: Release assets DO count toward the Actions storage quota on private
-# repos.  The 500 MB GitHub Free limit covers artifacts + packages + release
-# assets combined.  See GitHub Docs: about-billing-for-github-actions
+# Cancel in-progress runs for the same branch/tag
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+# Required for creating releases and uploading assets
 permissions:
   contents: write
-  actions: write
-
-# Private repo: every runner minute is billed to the owner's monthly
-# allowance (~12 min per full build set). Rapid successive pushes would
-# stack up redundant runs - cancel superseded ones and save the minutes.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   build:
+    name: Build Android APK
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v7
+      # ── Checkout ────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v7
+      # ── Node.js ─────────────────────────────────────────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: 22
-          # Cache disabled: npm cache consumes Actions storage (separate 10GB
-          # pool) but on GitHub Free the shared artifact+packages pool is only
-          # 500 MB.  Keeping cache off saves ~70 MB per run.
-          cache: ''
+          node-version: "22"
+          cache: "npm"
 
-      - uses: actions/setup-java@v6
+      # ── Java (Gradle) ──────────────────────────────────────────────
+      - name: Setup Java
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
 
+      # ── Android SDK ────────────────────────────────────────────────
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      # ── Install dependencies ───────────────────────────────────────
       - name: Install dependencies
         run: npm ci
 
-      - name: Build web app
+      # ── Frontend build ─────────────────────────────────────────────
+      - name: Build frontend
         run: npm run build
 
-      - name: Sync Capacitor Android
+      # ── Capacitor sync ─────────────────────────────────────────────
+      - name: Sync Capacitor
         run: npx cap sync android
 
+      # ── Build APK ──────────────────────────────────────────────────
       - name: Build debug APK
-        run: cd android && ./gradlew assembleDebug
+        working-directory: android
+        run: ./gradlew assembleDebug
 
-      # ── Quota guard ──────────────────────────────────────────────
-      # Deletes artifacts from previous runs right before uploading, so a
-      # full storage quota can never block the upload again. Placed AFTER
-      # the build on purpose: if the build fails, nothing gets deleted.
-      - name: Prune old artifacts
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
+      # ── Find the APK ───────────────────────────────────────────────
+      - name: Locate APK file
+        id: apk
         run: |
-          gh api "repos/${{ github.repository }}/actions/artifacts?per_page=100" \
-            --paginate --jq '.artifacts[] | select(.expired == false) | .id' |
-            while read -r id; do
-              echo "Deleting artifact $id"
-              gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/$id" || true
-            done
+          APK_PATH=$(find android/app/build/outputs/apk/debug -name "*.apk" | head -1)
+          if [ -z "$APK_PATH" ]; then
+            echo "❌ No APK found!"
+            exit 1
+          fi
+          echo "path=$APK_PATH" >> "$GITHUB_OUTPUT"
+          echo "filename=$(basename "$APK_PATH")" >> "$GITHUB_OUTPUT"
+          echo "✅ APK found: $APK_PATH"
 
-      # ── Release distribution ───────────────────────────────────
-      # Publish APK to the rolling ci-latest release.  Both APK and EXE
-      # workflows race to create it, so we retry on 422 (already exists)
-      # and then upload with --clobber.
-      - name: Publish APK to release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          cp android/app/build/outputs/apk/debug/app-debug.apk vidfetch-debug.apk
-          for i in 1 2 3; do
-            gh release create ci-latest \
-              --repo "${{ github.repository }}" \
-              --title "Latest CI build" \
-              --prerelease \
-              --target "${{ github.sha }}" \
-              vidfetch-debug.apk && break
-            echo "Release exists or race condition, uploading to existing..."
-            sleep 2
-          done
-          gh release upload ci-latest \
-            --repo "${{ github.repository }}" \
-            vidfetch-debug.apk \
-            --clobber || true
-
-      # ── Artifact upload (backup) ──────────────────────────────
-      # Kept as a fallback in case Release upload fails.
+      # ── Upload artifact (always) ───────────────────────────────────
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
-          name: vidfetch-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 1
-          overwrite: true
-          compression-level: 9
-        continue-on-error: true
+          name: vidfetch-${{ github.ref_name || 'debug' }}
+          path: ${{ steps.apk.outputs.path }}
+          retention-days: 14
+          if-no-files-found: error
+
+      # ── Create Release + Upload asset (tags only) ──────────────────
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "VidFetch ${{ github.ref_name }}"
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: ${{ steps.apk.outputs.path }}
+          body: |
+            ## VidFetch ${{ github.ref_name }}
+
+            ### 📥 Download
+            Grab the APK below and install it on your Android device.
+
+            ### What's new
+            See the commit history for details.
+
+            ### Requirements
+            - Android 8.0 (API 26) or higher
+            - ~50 MB free storage
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
