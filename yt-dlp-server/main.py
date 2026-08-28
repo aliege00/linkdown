@@ -393,6 +393,190 @@ def _download_playlist(url: str, format_id: str, limit: int) -> FileResponse:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
 
+# ── Chunked Download (Multi-Threaded / Range Requests) ──────────────────────
+
+from chunked_downloader import ChunkedDownloader
+from resume_download import ResumeManager
+
+resume_manager = ResumeManager(str(DOWNLOAD_DIR))
+active_downloaders: dict[str, ChunkedDownloader] = {}
+
+
+class ChunkProgress(BaseModel):
+    downloaded: int
+    total: int
+    speed_bps: float
+    eta: str
+    percent: float
+    chunks_completed: int = 0
+    chunks_total: int = 0
+
+
+@app.get("/api/chunked/probe")
+def chunked_probe(url: str = Query(...)):
+    """
+    Probe a URL to check Range support and file metadata.
+    Use this to decide whether to use chunked download.
+    """
+    dl = ChunkedDownloader()
+    try:
+        info = dl.probe(url)
+        return {
+            "success": True,
+            "supports_range": info["supports_range"],
+            "content_length": info["content_length"],
+            "content_type": info["content_type"],
+            "filename": info["filename"],
+            "recommended_threads": min(
+                DEFAULT_THREADS,
+                max(1, info["content_length"] // (4 * 1024 * 1024))
+            ) if info["supports_range"] else 1,
+        }
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+@app.get("/api/chunked/download")
+def chunked_download_start(
+    url: str = Query(...),
+    output_name: str = Query("download"),
+    threads: int = Query(DEFAULT_THREADS),
+):
+    """
+    Start a chunked download. Returns a download_id for progress tracking.
+    The download runs in a background thread.
+    """
+    import uuid
+
+    download_id = str(uuid.uuid4())[:8]
+    output_path = str(DOWNLOAD_DIR / f"{download_id}_{output_name}")
+    dl = ChunkedDownloader(threads=threads)
+    active_downloaders[download_id] = dl
+
+    # Store state for resume
+    state = ResumeState(
+        url=url,
+        output_path=output_path,
+        threads=threads,
+    )
+    resume_manager.save_state(state)
+
+    # Start background download
+    def _run():
+        try:
+            def _progress(downloaded, total, speed, eta):
+                dl._last_progress = {
+                    "downloaded": downloaded,
+                    "total": total,
+                    "speed_bps": speed,
+                    "eta": eta,
+                    "percent": (downloaded / total * 100) if total > 0 else 0,
+                }
+
+            result = dl.download(url, output_path, on_progress=_progress)
+            dl._last_result = result
+        except Exception as exc:
+            dl._last_result = type("R", (), {"failed": True, "error": str(exc)})()
+        finally:
+            active_downloaders.pop(download_id, None)
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+
+    return {
+        "success": True,
+        "download_id": download_id,
+        "output_path": output_path,
+    }
+
+
+@app.get("/api/chunked/progress/{download_id}")
+def chunked_progress(download_id: str):
+    """Get progress of an active chunked download."""
+    dl = active_downloaders.get(download_id)
+    if not dl:
+        return {"success": False, "error": "Download not found or completed"}
+
+    progress = getattr(dl, "_last_progress", None)
+    result = getattr(dl, "_last_result", None)
+
+    if result:
+        return {
+            "success": not result.failed,
+            "finished": getattr(result, "finished", False),
+            "failed": getattr(result, "failed", False),
+            "error": getattr(result, "error", None),
+            "output_path": getattr(result, "output_path", ""),
+        }
+
+    if progress:
+        return {"success": True, **progress}
+
+    return {"success": True, "downloaded": 0, "total": 0, "percent": 0}
+
+
+@app.post("/api/chunked/pause/{download_id}")
+def chunked_pause(download_id: str):
+    """Pause an active chunked download."""
+    dl = active_downloaders.get(download_id)
+    if not dl:
+        return {"success": False, "error": "Download not found"}
+    dl.pause()
+    return {"success": True, "paused": True}
+
+
+@app.post("/api/chunked/resume/{download_id}")
+def chunked_resume(download_id: str):
+    """Resume a paused chunked download."""
+    dl = active_downloaders.get(download_id)
+    if not dl:
+        return {"success": False, "error": "Download not found"}
+    dl.resume()
+    return {"success": True, "resumed": True}
+
+
+@app.post("/api/chunked/cancel/{download_id}")
+def chunked_cancel(download_id: str):
+    """Cancel a chunked download."""
+    dl = active_downloaders.get(download_id)
+    if not dl:
+        return {"success": False, "error": "Download not found"}
+    dl.cancel()
+    return {"success": True, "cancelled": True}
+
+
+@app.get("/api/resumable/list")
+def resumable_list():
+    """List all downloads that can be resumed."""
+    states = resume_manager.list_resumable()
+    return {
+        "success": True,
+        "downloads": [
+            {
+                "url": s.url,
+                "output_path": s.output_path,
+                "total_size": s.total_size,
+                "downloaded": sum(c.get("downloaded", 0) for c in s.chunks),
+                "percent": (
+                    sum(c.get("downloaded", 0) for c in s.chunks) / s.total_size * 100
+                    if s.total_size > 0 else 0
+                ),
+                "updated_at": s.updated_at,
+            }
+            for s in states
+        ],
+    }
+
+
+@app.get("/api/resumable/info")
+def resumable_info(output_path: str = Query(...)):
+    """Get resume info for a specific download."""
+    info = resume_manager.get_resume_info(output_path)
+    if not info:
+        return {"success": False, "error": "No resumable state found"}
+    return {"success": True, **info}
+
+
 # ── Startup ──────────────────────────────────────────────────────────────────
 
 @app.on_event("startup")

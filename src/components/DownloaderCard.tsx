@@ -31,6 +31,9 @@ import {
   type YouTubeSettings,
 } from "@/lib/ytdlp-native";
 import { saveToGallery, type GallerySaveResult } from "@/lib/gallery-save";
+import { useClipboardMonitor } from "@/hooks/use-clipboard-monitor";
+import { ClipboardNotification } from "@/components/ClipboardNotification";
+import { useDownloadManager } from "@/hooks/use-download-manager";
 import { explainError } from "@/lib/error-help";
 import { normalizeVideoUrl } from "@/lib/url";
 import {
@@ -1144,6 +1147,20 @@ export default function DownloaderCard({
   const [lastCompleted, setLastCompleted] = useState<CompletedDownload | null>(null);
   const [gallerySaveState, setGallerySaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [gallerySaveResult, setGallerySaveResult] = useState<GallerySaveResult | null>(null);
+
+  // ── Clipboard Monitor ──
+  const { lastUrl: clipboardUrl, clearLastUrl } = useClipboardMonitor({
+    enabled: true,
+    interval: 2000,
+    cooldown: 30_000,
+    onUrlDetected: (url) => {
+      // Auto-fill the URL input when a video URL is detected
+      setUrl(url.url);
+    },
+  });
+
+  // ── Chunked Download Manager ──
+  const { task: downloadTask, formattedProgress, pause, resume, cancel } = useDownloadManager();
   const [downloadLocation, setDownloadLocation] = useState<DownloadLocation | null>(null);
   const [pickingFolder, setPickingFolder] = useState(false);
   const [ytSettings, setYtSettings] = useState<YouTubeSettings | null>(null);
@@ -2274,6 +2291,15 @@ export default function DownloaderCard({
           onClearCookieFile={handleClearCookieFile}
         />
       )}
+      {/* Clipboard Monitor Notification */}
+      <ClipboardNotification
+        url={clipboardUrl}
+        onDownload={(url) => {
+          setUrl(url);
+          clearLastUrl();
+        }}
+        onDismiss={clearLastUrl}
+      />
     </>
   );
 }

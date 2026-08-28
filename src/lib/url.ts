@@ -66,3 +66,36 @@ export function normalizeVideoUrl(raw: string): string {
 
   return text;
 }
+
+/**
+ * Check if a URL looks like a video URL from a supported site.
+ * Used by the clipboard monitor to filter clipboard content.
+ */
+export function isVideoUrl(url: string): boolean {
+  if (!url || typeof url !== "string") return false;
+
+  const lower = url.toLowerCase();
+
+  // Supported video platforms
+  const patterns = [
+    /youtube\.com\//i,
+    /youtu\.be\//i,
+    /youtube\.com\/shorts\//i,
+    /tiktok\.com\//i,
+    /instagram\.com\//i,
+    /twitter\.com\//i,
+    /x\.com\//i,
+    /vimeo\.com\//i,
+    /dailymotion\.com\//i,
+    /facebook\.com\//i,
+    /fb\.watch\//i,
+    /twitch\.tv\//i,
+    /reddit\.com\//i,
+    /redd\.it\//i,
+    /soundcloud\.com\//i,
+    /streamable\.com\//i,
+    /v.redd\.it\//i,
+  ];
+
+  return patterns.some((p) => p.test(lower));
+}
