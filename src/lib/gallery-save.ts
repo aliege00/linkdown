@@ -6,6 +6,12 @@
  * No runtime permissions are needed for MediaStore writes on Android 10+.
  *
  * On older Android or web/desktop, this is a no-op that returns gracefully.
+ *
+ * Edge-case handling:
+ *   - Disk-full detection with Turkish error message
+ *   - File-not-found detection
+ *   - Permission denied guidance
+ *   - Generic network / I/O error fallbacks
  */
 
 import { registerPlugin } from "@capacitor/core";
@@ -88,9 +94,71 @@ function extToMime(filePath: string): string {
     mp3: "audio/mpeg",
     ogg: "audio/ogg",
     wav: "audio/wav",
-   opus: "audio/opus",
+    opus: "audio/opus",
   };
   return map[ext] ?? "video/mp4";
+}
+
+/**
+ * Classify a native error into a user-friendly Turkish + English message.
+ */
+function classifyGalleryError(
+  nativeError: string,
+): { message: string; messageTr: string; code: string } {
+  const err = nativeError.toLowerCase();
+
+  if (
+    err.includes("disk full") ||
+    err.includes("no space") ||
+    err.includes("yetersiz") ||
+    err.includes("depolama alanı dolu")
+  ) {
+    return {
+      message: "Not enough storage space. Free up space and try again.",
+      messageTr: "Depolama alanı yetersiz. Yer açıp tekrar deneyin.",
+      code: "DISK_FULL",
+    };
+  }
+
+  if (err.includes("file not found") || err.includes("bulunamadı")) {
+    return {
+      message: "Downloaded file not found — it may have been deleted or moved.",
+      messageTr: "İndirilen dosya bulunamadı — silinmiş veya taşınmış olabilir.",
+      code: "FILE_NOT_FOUND",
+    };
+  }
+
+  if (err.includes("permission denied") || err.includes("izin")) {
+    return {
+      message: "Storage permission denied. Grant it in Settings → Apps → VidFetch → Permissions.",
+      messageTr:
+        "Depolama izni reddedildi. Ayarlar → Uygulamalar → VidFetch → İzinler bölümünden izin verin.",
+      code: "PERMISSION_DENIED",
+    };
+  }
+
+  if (err.includes("empty") || err.includes("0 byte") || err.includes("boş")) {
+    return {
+      message: "The downloaded file is empty — the download may have failed.",
+      messageTr: "İndirilen dosya boş — indirme başarısız olmuş olabilir.",
+      code: "FILE_EMPTY",
+    };
+  }
+
+  if (err.includes("not available") || err.includes("bulunamıyor")) {
+    return {
+      message: "Gallery save is not available on this device.",
+      messageTr: "Bu cihazda galeriye kaydetme özelliği kullanılamıyor.",
+      code: "NOT_AVAILABLE",
+    };
+  }
+
+  // Fallback
+  return {
+    message: nativeError || "Failed to save to gallery",
+    messageTr: "Galeriye kaydetme başarısız",
+    code: "UNKNOWN",
+  };
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -112,6 +180,10 @@ export interface GallerySaveResult {
   displayName?: string;
   /** Error message when success is false. */
   error?: string;
+  /** Turkish error message when success is false. */
+  errorTr?: string;
+  /** Programmatic error code. */
+  errorCode?: string;
 }
 
 /**
@@ -129,6 +201,8 @@ export interface GallerySaveResult {
  * });
  * if (result.success) {
  *   console.log("Saved to gallery:", result.mediaUri);
+ * } else {
+ *   console.error(result.errorTr);
  * }
  * ```
  */
@@ -138,31 +212,48 @@ export async function saveToGallery(
   const { filePath, displayName, mimeType } = options;
 
   if (!filePath) {
-    return { success: false, error: "filePath is required" };
+    return {
+      success: false,
+      error: "filePath is required",
+      errorTr: "Dosya yolu gerekli",
+      errorCode: "INVALID_ARGS",
+    };
   }
 
   if (!isNativeEnv()) {
     return {
       success: false,
       error: "Gallery save is only available in the Android APK or Windows EXE.",
+      errorTr: "Galeriye kaydetme yalnızca Android APK veya Windows EXE'de çalışır.",
+      errorCode: "NOT_NATIVE",
     };
   }
 
   const resolvedMime = mimeType ?? extToMime(filePath);
-  const resolvedName = displayName ?? filePath.split("/").pop() ?? "video.mp4";
+  const resolvedName =
+    displayName ?? filePath.split("/").pop() ?? "video.mp4";
 
   // Desktop (Electron) path
   if (Desktop?.isDesktop) {
     try {
-      return await Desktop.saveToGallery({
+      const result = await Desktop.saveToGallery({
         filePath,
         displayName: resolvedName,
         mimeType: resolvedMime,
       });
+      return {
+        success: result.success,
+        mediaUri: result.mediaUri,
+        displayName: result.displayName,
+      };
     } catch (error) {
+      const msg = error instanceof Error ? error.message : "Desktop save failed";
+      const classified = classifyGalleryError(msg);
       return {
         success: false,
-        error: error instanceof Error ? error.message : "Desktop save failed",
+        error: classified.message,
+        errorTr: classified.messageTr,
+        errorCode: classified.code,
       };
     }
   }
@@ -172,6 +263,8 @@ export async function saveToGallery(
     return {
       success: false,
       error: "MediaStore plugin not available",
+      errorTr: "MediaStore eklentisi kullanılamıyor",
+      errorCode: "PLUGIN_MISSING",
     };
   }
 
@@ -187,10 +280,14 @@ export async function saveToGallery(
       displayName: result.displayName,
     };
   } catch (error) {
+    const msg =
+      error instanceof Error ? error.message : "Failed to save to gallery";
+    const classified = classifyGalleryError(msg);
     return {
       success: false,
-      error:
-        error instanceof Error ? error.message : "Failed to save to gallery",
+      error: classified.message,
+      errorTr: classified.messageTr,
+      errorCode: classified.code,
     };
   }
 }

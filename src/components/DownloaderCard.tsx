@@ -2241,8 +2241,10 @@ export default function DownloaderCard({
                     Try again
                   </Button>
                 </div>
-                {gallerySaveState === "error" && gallerySaveResult?.error && (
-                  <p className="text-xs text-destructive mt-2 text-center">{gallerySaveResult.error}</p>
+                {gallerySaveState === "error" && gallerySaveResult && (
+                  <p className="text-xs text-destructive mt-2 text-center">
+                    {gallerySaveResult.errorTr || gallerySaveResult.error || "Galeriye kaydetme başarısız"}
+                  </p>
                 )}
               </motion.div>
             )}

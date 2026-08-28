@@ -139,7 +139,8 @@ class MediaStorePlugin : Plugin() {
             jsResult.put("displayName", result.displayName)
             call.resolve(jsResult)
         } else {
-            call.reject(result.error ?: "Save failed")
+            val errorMsg = result.errorTr ?: result.error ?: "Save failed"
+            call.reject(errorMsg, result.errorCode ?: "SAVE_FAILED", null)
         }
     }
 
