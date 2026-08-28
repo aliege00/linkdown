@@ -260,7 +260,7 @@ export function useDownloadManager() {
       } catch {
         // Polling error — don't crash, just skip this tick
       }
-    }, 500); // Poll every 500ms for smooth progress
+    }, 100); // Poll every 100ms for smooth progress (max ~10 updates/sec)
   }, []);
 
   const stopPolling = useCallback(() => {

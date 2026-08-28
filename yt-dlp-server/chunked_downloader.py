@@ -53,7 +53,7 @@ logger = logging.getLogger("vidfetch.chunked")
 # Configuration
 # ---------------------------------------------------------------------------
 
-DEFAULT_THREADS = int(os.environ.get("CHUNKED_DOWNLOAD_THREADS", "8"))
+DEFAULT_THREADS = int(os.environ.get("CHUNKED_DOWNLOAD_THREADS", "4"))  # 4 parallel channels for optimal throughput
 DEFAULT_CHUNK_SIZE = int(os.environ.get("CHUNKED_DOWNLOAD_CHUNK_SIZE", str(4 * 1024 * 1024)))  # 4 MB
 DEFAULT_TIMEOUT = int(os.environ.get("CHUNKED_DOWNLOAD_TIMEOUT", "120"))
 

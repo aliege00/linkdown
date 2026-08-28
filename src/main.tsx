@@ -6,6 +6,7 @@ import { ThemeProvider } from "next-themes";
 import React, { StrictMode, useEffect, lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router";
+import { startupCleanup } from "@/lib/auto-cleanup";
 import "./index.css";
 
 // Convex deployment URL baked in by Vite at build time. On CI/packaged builds
@@ -203,3 +204,6 @@ createRoot(document.getElementById("root")!).render(
 // Tell the inline watchdog in index.html that React mounted successfully,
 // so it never paints a false "did not start" screen in the packaged apps.
 ((window as unknown as Record<string, unknown>)["__VIDFETCH_READY__"] as (() => void) | undefined)?.();
+
+// Run auto-cleanup of orphan temp files on startup (non-blocking)
+startupCleanup().catch(() => {});

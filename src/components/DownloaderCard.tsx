@@ -36,6 +36,7 @@ import { ClipboardNotification } from "@/components/ClipboardNotification";
 import { useDownloadManager } from "@/hooks/use-download-manager";
 import { explainError } from "@/lib/error-help";
 import { normalizeVideoUrl } from "@/lib/url";
+import { postDownloadCleanup } from "@/lib/auto-cleanup";
 import EngineSwitcher, { type EngineId, getSavedEngine, saveEngine } from "@/components/EngineSwitcher";
 import { mp4FormatWithHeight, MP4_FORMAT_SELECTOR, MP3_FORMAT_SELECTOR, buildFormatSelector, getMimeType, filterFormats, type FormatLike } from "@/lib/format-enforce";
 import {
@@ -1444,7 +1445,7 @@ export default function DownloaderCard({
         // otherwise re-renders this entire card.
         setDownloadProgress((prev) => {
           const now = Date.now();
-          if (now - lastTick < 200) return prev;
+          if (now - lastTick < 100) return prev;  // 100ms throttle for smooth UI
           if (Math.round(progress.percent) === Math.round(prev.percent)) {
             return prev;
           }
@@ -1473,6 +1474,8 @@ export default function DownloaderCard({
           time: Date.now(),
         });
         refreshHistory();
+        // Clean up any orphan temp files from this download
+        postDownloadCleanup(completed.fileName).catch(() => {});
       },
       onError: (error) => {
         workIdRef.current = null;
@@ -1572,7 +1575,7 @@ export default function DownloaderCard({
         // Throttled progress — same reasoning as handleDownload.
         setDownloadProgress((prev) => {
           const now = Date.now();
-          if (now - lastTick < 200) return prev;
+          if (now - lastTick < 100) return prev;  // 100ms throttle for smooth UI
           if (
             Math.round(progress.percent) === Math.round(prev.percent) &&
             progress.item === prev.item &&
