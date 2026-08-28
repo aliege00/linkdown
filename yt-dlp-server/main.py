@@ -1,633 +1,411 @@
 """
 VidFetch yt-dlp Server
+======================
 
-Self-hosted video download API powered by yt-dlp. Supports 1000+ sites
-(YouTube, TikTok, Twitter/X, Instagram, Vimeo, Facebook, ...).
+FastAPI server that wraps yt-dlp (and gallery-dl as fallback) for video
+metadata extraction and download streaming.
 
-Endpoints
-    GET /api/health
-    GET /api/info?url=<url>[&is_playlist=true]
-    GET /api/download?url=<url>[&format_id=best][&is_playlist=true][&limit=N]
-
-Environment variables
-    HOST / PORT                Bind address and port (default 0.0.0.0:8080)
-    DOWNLOAD_DIR               Temp directory for downloads (default /tmp/vidfetch-downloads)
-    CLEANUP_AGE_SECONDS        Delete finished files older than this (default 1800)
-    MAX_FILE_SIZE              Max single file size in bytes (default 2 GiB)
-    YTDLP_COOKIES_FILE         Path to a Netscape-format cookies.txt (optional)
-    YTDLP_PO_TOKEN_PROVIDER    URL of a bgutil-ytdlp-pot-provider server (optional;
-                               requires the yt-dlp-get-pot plugin, which reads this
-                               variable itself)
-    YTDLP_PLAYER_CLIENT        YouTube player client override, e.g. "tv" (optional)
-
-The server also auto-detects a `cookies/youtube.txt` file next to main.py
-and uses it when YTDLP_COOKIES_FILE is not set.
+Usage:
+    python main.py
+    # or
+    uvicorn main:app --host 0.0.0.0 --port 8080
 """
 
-import json
+from __future__ import annotations
+
+import hashlib
+import logging
 import os
-import re
 import shutil
 import subprocess
-import sys
 import tempfile
+import threading
 import time
 import zipfile
-from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import BaseModel
 
-try:
-    import yt_dlp
-except ImportError:  # pragma: no cover
-    yt_dlp = None
+# ── Logging ──────────────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+)
+logger = logging.getLogger("vidfetch.server")
 
-APP_NAME = "VidFetch"
+# ── Auto-updater (runs in background on import/startup) ─────────────────────
+from auto_update import start_auto_updater, get_update_status  # noqa: E402
+
+update_stop_event = start_auto_updater()
+
+# ── Config ───────────────────────────────────────────────────────────────────
+HOST = os.environ.get("HOST", "0.0.0.0")
+PORT = int(os.environ.get("PORT", "8080"))
 DOWNLOAD_DIR = Path(os.environ.get("DOWNLOAD_DIR", "/tmp/vidfetch-downloads"))
-CLEANUP_AGE_SECONDS = int(os.environ.get("CLEANUP_AGE_SECONDS", "1800"))
-MAX_FILE_SIZE = int(os.environ.get("MAX_FILE_SIZE", str(2 * 1024 ** 3)))
-# Secondary open-source engine (https://github.com/mikf/gallery-dl) — used as
-# an automatic FALLBACK for sites yt-dlp cannot parse (Instagram, Pinterest,
-# some Twitter/X media…). Installed via requirements.txt.
+CLEANUP_AGE = int(os.environ.get("CLEANUP_AGE_SECONDS", "1800"))
+MAX_FILE_SIZE = int(os.environ.get("MAX_FILE_SIZE", "2147483648"))  # 2 GB
 GALLERYDL_TIMEOUT = int(os.environ.get("GALLERYDL_TIMEOUT", "300"))
 
-# Cheap URL heuristic for playlists (yt-dlp's own response is authoritative).
-PLAYLIST_URL_RE = re.compile(r"(?:[?&]list=|/playlist(?:[/?]|$))")
+# YouTube anti-bot (optional)
+YTDLP_COOKIES_FILE = os.environ.get("YTDLP_COOKIES_FILE", "")
+YTDLP_PO_TOKEN_PROVIDER = os.environ.get("YTDLP_PO_TOKEN_PROVIDER", "")
+YTDLP_PLAYER_CLIENT = os.environ.get("YTDLP_PLAYER_CLIENT", "")
 
+DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-@asynccontextmanager
-async def lifespan(_: FastAPI):
-    DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    _cleanup_old_files()
-    yield
+# ── FastAPI App ──────────────────────────────────────────────────────────────
+app = FastAPI(title="VidFetch yt-dlp Server", version="1.0.0")
 
-
-app = FastAPI(title=f"{APP_NAME} yt-dlp API", version="1.0.0", lifespan=lifespan)
-
-# The web app fetches /api/info cross-origin (the server is a separate
-# deployment). No credentials are used, so a permissive origin list is safe.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["GET"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# ── yt-dlp helpers ────────────────────────────────────────────────────
+# ── Helpers ──────────────────────────────────────────────────────────────────
 
-def _cookiefile() -> Optional[str]:
-    """Explicit YTDLP_COOKIES_FILE, or an auto-detected cookies/youtube.txt."""
-    path = (os.environ.get("YTDLP_COOKIES_FILE") or "").strip()
-    if path and os.path.isfile(path):
-        return path
-    auto = Path(__file__).resolve().parent / "cookies" / "youtube.txt"
-    if auto.is_file():
-        return str(auto)
-    return None
+def _run_cmd(args: list[str], timeout: int = 60) -> subprocess.CompletedProcess:
+    """Run a command and return the result."""
+    logger.info("Running: %s", " ".join(args))
+    return subprocess.run(args, capture_output=True, text=True, timeout=timeout)
 
 
-def _base_opts() -> dict:
-    opts: dict[str, Any] = {
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": False,
-        # Never hang forever on stalled/slow upstream connections (the
-        # default lets sockets block indefinitely on some platforms).
-        "socket_timeout": int(os.environ.get("YTDLP_SOCKET_TIMEOUT", "30")),
+def _build_ytdlp_args(url: str, extra: list[str] | None = None) -> list[str]:
+    """Build the base yt-dlp command with optional anti-bot flags."""
+    cmd = ["yt-dlp", "--no-playlist", "-o", "-"]
+    if YTDLP_COOKIES_FILE and os.path.exists(YTDLP_COOKIES_FILE):
+        cmd += ["--cookies", YTDLP_COOKIES_FILE]
+    if YTDLP_PO_TOKEN_PROVIDER:
+        cmd += ["--extractor-args", f"youtube:player_client=web"]
+    if YTDLP_PLAYER_CLIENT:
+        cmd += ["--extractor-args", f"youtube:player_client={YTDLP_PLAYER_CLIENT}"]
+    if extra:
+        cmd += extra
+    return cmd + [url]
+
+
+def _build_gallerydl_args(url: str) -> list[str]:
+    """Build gallery-dl command."""
+    return ["gallery-dl", "-g", url]
+
+
+def _parse_video_info(json_str: str) -> dict:
+    """Parse yt-dlp --dump-json output into a clean response."""
+    import json
+    data = json.loads(json_str)
+
+    formats = []
+    for f in data.get("formats", []):
+        formats.append({
+            "format_id": f.get("format_id", ""),
+            "ext": f.get("ext", ""),
+            "resolution": f.get("resolution", "audio only" if f.get("vcodec") == "none" else "unknown"),
+            "filesize": f.get("filesize") or f.get("filesize_approx"),
+            "vcodec": f.get("vcodec"),
+            "acodec": f.get("acodec"),
+            "fps": f.get("fps"),
+            "tbr": f.get("tbr"),
+        })
+
+    # Determine best combined format
+    best_id = "best"
+    best_fmts = [f for f in data.get("formats", []) if f.get("vcodec") != "none" and f.get("acodec") != "none"]
+    if best_fmts:
+        best_fmts.sort(key=lambda x: x.get("tbr") or 0, reverse=True)
+        best_id = best_fmts[0]["format_id"]
+
+    # Best audio-only
+    audio_fmts = [f for f in data.get("formats", []) if f.get("vcodec") == "none" and f.get("acodec") != "none"]
+    best_audio = audio_fmts[-1]["format_id"] if audio_fmts else None
+
+    return {
+        "success": True,
+        "id": data.get("id", ""),
+        "title": data.get("title", "Unknown"),
+        "duration": data.get("duration"),
+        "thumbnail": data.get("thumbnail"),
+        "uploader": data.get("uploader") or data.get("channel") or "Unknown",
+        "uploader_url": data.get("uploader_url") or data.get("channel_url"),
+        "webpage_url": data.get("webpage_url", ""),
+        "formats": formats,
+        "best_format_id": best_id,
+        "best_audio_format_id": best_audio,
+        "ffmpeg_available": shutil.which("ffmpeg") is not None,
     }
-    cookies = _cookiefile()
-    if cookies:
-        opts["cookiefile"] = cookies
-    player_client = (os.environ.get("YTDLP_PLAYER_CLIENT") or "").strip()
-    if player_client:
-        opts["extractor_args"] = {"youtube": {"player_client": [player_client]}}
-    # YTDLP_PO_TOKEN_PROVIDER is consumed by the bgutil-ytdlp-get-pot plugin
-    # (https://github.com/Brainicism/bgutil-ytdlp-pot-provider) automatically.
-    return opts
-
-
-def _ffmpeg_available() -> bool:
-    return shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
-
-
-def _gallerydl_available() -> bool:
-    if shutil.which("gallery-dl") is not None:
-        return True
-    # venv installs: the binary sits next to the interpreter, which may not
-    # be on PATH (e.g. `venv/bin/python -m uvicorn` without activating).
-    sibling = Path(sys.executable).with_name("gallery-dl")
-    return sibling.is_file() and os.access(sibling, os.X_OK)
-
-
-def _absolutize(raw: str, base_url: str) -> str:
-    """Flat playlist entries often carry relative URLs (e.g. /watch?v=...)."""
-    if not raw:
-        return raw
-    if raw.startswith("http://") or raw.startswith("https://"):
-        return raw
-    if raw.startswith("/"):
-        m = re.match(r"^(https?://[^/]+)", base_url)
-        if m:
-            return m.group(1) + raw
-    return raw
-
-
-def _friendly_error(exc: Exception) -> str:
-    """Strip yt-dlp's noisy ERROR:/[extractor] prefixes and cap the length."""
-    msg = str(exc)
-    # yt-dlp formats most failures as
-    #   "ERROR: [youtube] <video_id>: actual message"
-    # Strip the ERROR:/[extractor]/<id> shell in one pass; fall back to
-    # bare "ERROR:" then to a leading bracketed tag without ERROR:.
-    m = (
-        re.search(r"ERROR:\s*\[[^\]]+\]\s*[\w-]{1,64}:\s*(.+)", msg)
-        or re.search(r"ERROR:\s*(.+)", msg)
-    )
-    if m:
-        msg = m.group(1).strip()
-    else:
-        msg = re.sub(r"^\[[^\]]+\]\s*:??\s*", "", msg).strip()
-    if len(msg) > 500:
-        msg = msg[:500] + "..."
-    return msg or exc.__class__.__name__
 
 
 def _cleanup_old_files() -> None:
-    if not DOWNLOAD_DIR.is_dir():
-        return
-    cutoff = time.time() - CLEANUP_AGE_SECONDS
-    for p in DOWNLOAD_DIR.iterdir():
+    """Remove files older than CLEANUP_AGE seconds."""
+    now = time.time()
+    for f in DOWNLOAD_DIR.iterdir():
+        if f.is_file() and (now - f.stat().st_mtime) > CLEANUP_AGE:
+            try:
+                f.unlink()
+                logger.info("Cleaned up: %s", f.name)
+            except Exception:
+                pass
+
+
+# Periodic cleanup thread
+def _cleanup_loop() -> None:
+    while True:
+        time.sleep(300)  # every 5 min
         try:
-            if p.is_file() and p.stat().st_mtime < cutoff:
-                p.unlink(missing_ok=True)
-            elif p.is_dir() and p.stat().st_mtime < cutoff:
-                # Playlist downloads create subdirs (e.g. videos/). Remove
-                # stale ones to prevent disk-space leakage from failed/interrupted
-                # downloads that left behind temp directories.
-                shutil.rmtree(p, ignore_errors=True)
-        except OSError:
-            pass
+            _cleanup_old_files()
+        except Exception as exc:
+            logger.debug("Cleanup error: %s", exc)
 
 
-# ── Info payload builders ─────────────────────────────────────────────
-
-def _format_entry(f: dict) -> dict:
-    height = f.get("height")
-    width = f.get("width")
-    vcodec = f.get("vcodec")
-    acodec = f.get("acodec")
-    if vcodec == "none":
-        vcodec = None
-    if acodec == "none":
-        acodec = None
-    resolution = ""
-    if height:
-        resolution = f"{width or '?'}x{height}"
-    else:
-        note = f.get("format_note")
-        if note:
-            resolution = str(note)
-    return {
-        "format_id": str(f.get("format_id") or ""),
-        "ext": f.get("ext") or "",
-        "resolution": resolution,
-        "filesize": f.get("filesize") or f.get("filesize_approx"),
-        "vcodec": vcodec,
-        "acodec": acodec,
-        "fps": f.get("fps"),
-        "tbr": f.get("tbr"),
-    }
-
-
-def _curate_formats(formats: list) -> list:
-    """Drop unusable formats (storyboards, none/none) and cap the list."""
-    out: list = []
-    seen: set = set()
-    for f in formats or []:
-        fid = str(f.get("format_id") or "")
-        if not fid:
-            continue
-        if fid.startswith("sb"):
-            continue
-        note = str(f.get("format_note") or "").lower()
-        if note in {"storyboard", "mhtml", "jpeg", "none"}:
-            continue
-        if f.get("vcodec") in (None, "none") and f.get("acodec") in (None, "none"):
-            continue
-        key = (fid, f.get("ext"))
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(_format_entry(f))
-    return out[:60]
-
-
-def _best_format_id(info: dict) -> tuple[str, Optional[str]]:
-    """Best video+audio combo (e.g. '137+140'), or the best single format."""
-    formats = info.get("formats") or []
-
-    def is_video(f: dict) -> bool:
-        return f.get("vcodec") not in (None, "none")
-
-    def is_audio(f: dict) -> bool:
-        return f.get("acodec") not in (None, "none")
-
-    video_only = [f for f in formats if is_video(f) and not is_audio(f)]
-    audio_only = [f for f in formats if is_audio(f) and not is_video(f)]
-    combined = [f for f in formats if is_video(f) and is_audio(f)]
-
-    def top(items: list) -> dict:
-        return max(
-            items,
-            key=lambda f: (
-                f.get("height") or 0,
-                f.get("tbr") or 0,
-                f.get("abr") or 0,
-            ),
-        )
-
-    if video_only and audio_only:
-        best_video = top(video_only)
-        best_audio = top(audio_only)
-        return f"{best_video['format_id']}+{best_audio['format_id']}", str(best_audio["format_id"])
-    if combined:
-        best = top(combined)
-        return str(best["format_id"]), None
-    if video_only:
-        return str(top(video_only)["format_id"]), None
-    if audio_only:
-        return str(top(audio_only)["format_id"]), str(top(audio_only)["format_id"])
-    return "best", None
-
-
-def _entry_payload(entry: dict, base_url: str) -> dict:
-    thumbs = entry.get("thumbnails") or []
-    thumb = entry.get("thumbnail") or (
-        thumbs[0].get("url") if thumbs and isinstance(thumbs[0], dict) else None
-    )
-    return {
-        "id": entry.get("id"),
-        "title": entry.get("title") or "",
-        "url": _absolutize(
-            entry.get("webpage_url") or entry.get("url") or "", base_url
-        ),
-        "duration": entry.get("duration"),
-        "thumbnail": thumb,
-    }
-
-
-def _info_payload(info: dict, base_url: str) -> dict:
-    thumbnails = info.get("thumbnails") or []
-    best_id, best_audio_id = _best_format_id(info)
-    return {
-        "success": True,
-        "id": info.get("id") or "",
-        "title": info.get("title") or "Untitled",
-        "duration": info.get("duration"),
-        # Same guard as _entry_payload: flat/malformed extractors can put
-        # non-dict items into `thumbnails`, which would raise TypeError.
-        "thumbnail": info.get("thumbnail")
-        or (
-            thumbnails[0].get("url")
-            if thumbnails and isinstance(thumbnails[0], dict)
-            else None
-        ),
-        "uploader": info.get("uploader") or info.get("channel") or "",
-        "uploader_url": info.get("uploader_url") or info.get("channel_url"),
-        "webpage_url": info.get("webpage_url") or base_url,
-        "formats": _curate_formats(info.get("formats") or []),
-        "best_format_id": best_id,
-        "best_audio_format_id": best_audio_id,
-        "ffmpeg_available": _ffmpeg_available(),
-        "is_playlist": False,
-    }
-
-
-# ── Extraction ────────────────────────────────────────────────────────
-
-def _extract_flat(url: str) -> dict:
-    opts = _base_opts()
-    opts.update({"skip_download": True, "extract_flat": "in_playlist"})
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        return ydl.extract_info(url, download=False)
-
-
-def _extract_single(url: str) -> dict:
-    opts = _base_opts()
-    opts.update({"skip_download": True, "noplaylist": True})
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        return ydl.extract_info(url, download=False)
-
-
-# ── gallery-dl fallback (second open-source engine) ─────────────────
-
-def _gallerydl_metadata(url: str) -> Optional[dict]:
-    """First metadata record from `gallery-dl --dump-json` (NDJSON), or None."""
-    try:
-        proc = subprocess.run(
-            ["gallery-dl", "--dump-json", url],
-            capture_output=True,
-            text=True,
-            timeout=GALLERYDL_TIMEOUT,
-        )
-    except (subprocess.TimeoutExpired, OSError):
-        return None
-    if proc.returncode != 0 or not proc.stdout.strip():
-        return None
-    for line in proc.stdout.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            data = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(data, dict):
-            return data
-    return None
-
-
-def _info_payload_from_gallerydl(meta: dict, url: str) -> dict:
-    """Build an /api/info payload from a gallery-dl metadata record.
-
-    gallery-dl does not expose a format ladder — it fetches the original
-    file — so a single pseudo-format advertises the source quality.
-    """
-    thumbs = meta.get("thumbnails") or []
-    thumb = meta.get("thumbnail") or meta.get("image") or (
-        thumbs[0].get("url") if thumbs and isinstance(thumbs[0], dict) else None
-    )
-    return {
-        "success": True,
-        "id": str(meta.get("id") or ""),
-        "title": meta.get("title") or meta.get("description") or "Media",
-        "duration": meta.get("duration"),
-        "thumbnail": thumb,
-        "uploader": meta.get("uploader") or meta.get("user") or "",
-        "uploader_url": meta.get("uploader_url"),
-        "webpage_url": meta.get("url") or url,
-        "formats": [
-            {
-                "format_id": "best",
-                "ext": meta.get("extension") or "auto",
-                "resolution": "Original",
-                "filesize": None,
-                "vcodec": "unknown",
-                "acodec": "unknown",
-                "fps": None,
-                "tbr": None,
-            }
-        ],
-        "best_format_id": "best",
-        "best_audio_format_id": None,
-        "ffmpeg_available": _ffmpeg_available(),
-        "is_playlist": False,
-        "engine": "gallery-dl",
-    }
-
-
-def _download_gallerydl(
-    url: str, workdir: Path, background_tasks: BackgroundTasks
-):
-    """Download via gallery-dl; serves a ZIP when multiple files come back."""
-    dest = workdir / "gdl"
-    dest.mkdir(parents=True, exist_ok=True)
-    try:
-        proc = subprocess.run(
-            ["gallery-dl", "--dest-dir", str(dest), url],
-            capture_output=True,
-            text=True,
-            timeout=GALLERYDL_TIMEOUT,
-        )
-    except subprocess.TimeoutExpired:
-        raise HTTPException(504, "gallery-dl timed out")
-    files: list = []
-    if proc.returncode == 0:
-        files = [p for p in dest.rglob("*") if p.is_file() and p.stat().st_size > 0]
-        files.sort()
-    if not files:
-        shutil.rmtree(workdir, ignore_errors=True)
-        detail = [l for l in (proc.stderr or "").strip().splitlines() if l.strip()]
-        raise HTTPException(
-            422,
-            detail[-1][:300]
-            if detail
-            else "gallery-dl finished without producing a file",
-        )
-    total = sum(f.stat().st_size for f in files)
-    if total > MAX_FILE_SIZE:
-        shutil.rmtree(workdir, ignore_errors=True)
-        raise HTTPException(
-            413,
-            f"Files are {total / 1024 / 1024:.0f} MB total — over the "
-            f"{MAX_FILE_SIZE / 1024 / 1024:.0f} MB server limit",
-        )
-    background_tasks.add_task(shutil.rmtree, workdir, ignore_errors=True)
-    if len(files) == 1:
-        target = files[0]
-        return FileResponse(
-            str(target), media_type="application/octet-stream", filename=target.name
-        )
-    zip_path = workdir / "media.zip"
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for f in files:
-            zf.write(f, f.relative_to(dest))
-    return FileResponse(str(zip_path), media_type="application/zip", filename="media.zip")
-
-
-# ── API routes ────────────────────────────────────────────────────────
-
-@app.get("/")
-def root() -> dict:
-    return {"service": APP_NAME, "docs": "/docs", "health": "/api/health"}
-
+# ── API Routes ───────────────────────────────────────────────────────────────
 
 @app.get("/api/health")
-def health() -> dict:
+def health():
+    """Health check endpoint."""
+    status = get_update_status()
     return {
         "status": "ok",
-        "service": APP_NAME,
+        "version": status["installed"],
+        "latest_version": status["latest"],
+        "update_available": status["update_available"],
         "engines": {
-            "yt-dlp": yt_dlp is not None,
-            "gallery-dl": _gallerydl_available(),
+            "yt-dlp": status["installed"],
+            "gallery-dl": "available" if shutil.which("gallery-dl") else "not found",
         },
-        "ffmpeg_available": _ffmpeg_available(),
     }
+
+
+@app.get("/api/update-status")
+def update_status():
+    """Check if a yt-dlp update is available."""
+    return get_update_status()
 
 
 @app.get("/api/info")
-def api_info(
-    url: str = Query(...),
-    is_playlist: Optional[str] = Query(None),
-) -> dict:
-    if yt_dlp is None:
-        raise HTTPException(
-            500, "yt-dlp is not installed on this server. Run: pip install -r requirements.txt"
-        )
+def info(url: str = Query(...), is_playlist: bool = Query(False)):
+    """Extract video metadata and available formats."""
+    if not url.strip():
+        raise HTTPException(400, "URL is required")
 
-    playlist_hint = is_playlist is not None and is_playlist.lower() in {"1", "true", "yes", "on"}
+    _cleanup_old_files()
+
     try:
-        # Playlist mode: fetch the entry list fast (flat extraction), so the
-        # app can show every video and offer "Download all".
-        if playlist_hint or PLAYLIST_URL_RE.search(url):
-            info = _extract_flat(url)
-            entries = [e for e in (info.get("entries") or []) if e and e.get("id")]
-            if entries:
-                payload = _info_payload(info, url)
-                payload.update(
-                    {
-                        "is_playlist": True,
-                        "count": info.get("playlist_count") or len(entries),
-                        "entries": [_entry_payload(e, url) for e in entries],
-                        "formats": [],
-                        "best_format_id": "best",
-                        "best_audio_format_id": None,
+        cmd = _build_ytdlp_args(url, [
+            "--dump-json",
+            "--flat-playlist" if is_playlist else "--no-playlist",
+        ])
+        result = _run_cmd(cmd, timeout=60)
+
+        if result.returncode != 0:
+            # Try gallery-dl as fallback
+            try:
+                gcmd = _build_gallerydl_args(url)
+                gresult = _run_cmd(gcmd, timeout=GALLERYDL_TIMEOUT)
+                if gresult.returncode == 0:
+                    urls = [u.strip() for u in gresult.stdout.strip().split("\n") if u.strip()]
+                    return {
+                        "success": True,
+                        "id": hashlib.md5(url.encode()).hexdigest()[:12],
+                        "title": "Gallery download",
                         "duration": None,
+                        "thumbnail": None,
+                        "uploader": "gallery-dl",
+                        "uploader_url": None,
+                        "webpage_url": url,
+                        "formats": [{
+                            "format_id": "gallery",
+                            "ext": "zip" if len(urls) > 1 else "auto",
+                            "resolution": f"{len(urls)} file(s)" if len(urls) > 1 else "single file",
+                            "filesize": None,
+                            "vcodec": None,
+                            "acodec": None,
+                            "fps": None,
+                            "tbr": None,
+                        }],
+                        "best_format_id": "gallery",
+                        "best_audio_format_id": None,
+                        "ffmpeg_available": False,
+                        "engine": "gallery-dl",
                     }
-                )
-                return payload
-            # URL hinted at a playlist but yt-dlp disagrees → single video.
-        info = _extract_single(url)
-        return _info_payload(info, url)
-    except Exception as exc:  # noqa: BLE001 - surface any extractor failure
-        # yt-dlp failed — try the gallery-dl engine before giving up (covers
-        # Instagram, Pinterest and other sites outside yt-dlp's extractors).
-        if _gallerydl_available():
-            meta = _gallerydl_metadata(url)
-            if meta is not None:
-                return _info_payload_from_gallerydl(meta, url)
-        raise HTTPException(422, _friendly_error(exc))
+            except Exception:
+                pass
 
+            error_msg = result.stderr.strip()[-500:] if result.stderr else "Failed to extract info"
+            return {"success": False, "error": error_msg}
 
-def _run_ytdlp(
-    url: str,
-    format_id: str,
-    outtmpl: Path,
-    playlist: bool = False,
-    limit: int = 0,
-) -> None:
-    opts = _base_opts()
-    opts.update(
-        {
-            "format": format_id or "best",
-            "outtmpl": str(outtmpl),
-            "noplaylist": not playlist,
-        }
-    )
-    if playlist and limit and limit > 0:
-        opts["playlist_items"] = f"1-{limit}"
-    if "+" in (format_id or ""):
-        # Video+audio combo — merge into an mp4 container (needs ffmpeg).
-        opts["merge_output_format"] = "mp4"
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        ydl.download([url])
+        import json
+        raw = json.loads(result.stdout)
 
+        if is_playlist and "entries" in raw:
+            # Flat playlist — return entry list
+            entries = []
+            for entry in raw.get("entries", []):
+                if entry is None:
+                    continue
+                entries.append({
+                    "id": entry.get("id", ""),
+                    "title": entry.get("title", "Unknown"),
+                    "url": entry.get("url") or entry.get("webpage_url") or f"https://www.youtube.com/watch?v={entry.get('id', '')}",
+                    "duration": entry.get("duration"),
+                    "thumbnail": entry.get("thumbnail"),
+                })
 
-def _finished_files(folder: Path) -> list:
-    # Zero-byte leftovers (killed mid-write, exhausted disk) are NOT valid
-    # outputs — serving one would look like a successful empty download.
-    return [
-        p
-        for p in folder.iterdir()
-        if p.is_file()
-        and not p.name.endswith((".part", ".ytdl", ".temp"))
-        and p.stat().st_size > 0
-    ]
+            return {
+                "success": True,
+                "id": raw.get("id", ""),
+                "title": raw.get("title", "Playlist"),
+                "duration": None,
+                "thumbnail": raw.get("thumbnail"),
+                "uploader": raw.get("uploader") or raw.get("channel") or "Unknown",
+                "uploader_url": raw.get("uploader_url"),
+                "webpage_url": raw.get("webpage_url", url),
+                "formats": [],
+                "best_format_id": "best",
+                "best_audio_format_id": None,
+                "ffmpeg_available": shutil.which("ffmpeg") is not None,
+                "is_playlist": True,
+                "count": raw.get("playlist_count") or len(entries),
+                "entries": entries,
+            }
 
+        return _parse_video_info(result.stdout)
 
-def _download_single(url: str, format_id: str, workdir: Path, background_tasks: BackgroundTasks):
-    _run_ytdlp(url, format_id, workdir / "%(title).100B [%(id)s].%(ext)s")
-    files = _finished_files(workdir)
-    if not files:
-        shutil.rmtree(workdir, ignore_errors=True)
-        raise HTTPException(422, "yt-dlp finished without producing a file")
-    # Pick the LARGEST finished file, not an arbitrary first entry: without
-    # ffmpeg a video+audio combo leaves two files (.f137.mp4 + .f140.m4a),
-    # and files[0] could serve the audio-only stream as "the download".
-    target = max(files, key=lambda p: p.stat().st_size)
-    size = target.stat().st_size
-    if size > MAX_FILE_SIZE:
-        shutil.rmtree(workdir, ignore_errors=True)
-        raise HTTPException(
-            413,
-            f"File is {size / 1024 / 1024:.0f} MB — over the "
-            f"{MAX_FILE_SIZE / 1024 / 1024:.0f} MB server limit",
-        )
-    background_tasks.add_task(shutil.rmtree, workdir, ignore_errors=True)
-    return FileResponse(
-        str(target), media_type="application/octet-stream", filename=target.name
-    )
-
-
-def _download_playlist(
-    url: str, format_id: str, limit: int, workdir: Path, background_tasks: BackgroundTasks
-):
-    videos_dir = workdir / "videos"
-    videos_dir.mkdir()
-    _run_ytdlp(
-        url,
-        format_id,
-        videos_dir / "%(playlist_index)03d - %(title).80B [%(id)s].%(ext)s",
-        playlist=True,
-        limit=limit,
-    )
-    files = sorted(_finished_files(videos_dir))
-    if not files:
-        shutil.rmtree(workdir, ignore_errors=True)
-        raise HTTPException(422, "yt-dlp finished without producing any files")
-    zip_path = workdir / "playlist.zip"
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for i, f in enumerate(files, 1):
-            zf.write(f, f"{i:03d} - {f.name}")
-    background_tasks.add_task(shutil.rmtree, workdir, ignore_errors=True)
-    return FileResponse(str(zip_path), media_type="application/zip", filename="playlist.zip")
+    except subprocess.TimeoutExpired:
+        return {"success": False, "error": "Analysis timed out (60s limit)"}
+    except Exception as exc:
+        logger.exception("info error")
+        return {"success": False, "error": str(exc)}
 
 
 @app.get("/api/download")
-def api_download(
+def download(
     url: str = Query(...),
     format_id: str = Query("best"),
-    is_playlist: Optional[str] = Query(None),
-    limit: int = Query(0, ge=0),
-    background_tasks: BackgroundTasks = None,  # type: ignore[assignment]  # FastAPI injects it
+    is_playlist: bool = Query(False),
+    limit: int = Query(0),
 ):
-    if yt_dlp is None:
-        raise HTTPException(
-            500, "yt-dlp is not installed on this server. Run: pip install -r requirements.txt"
-        )
+    """Download a video (or playlist as ZIP) and stream it to the client."""
+    if not url.strip():
+        raise HTTPException(400, "URL is required")
 
     _cleanup_old_files()
-    playlist = is_playlist is not None and is_playlist.lower() in {"1", "true", "yes", "on"}
-    workdir = Path(tempfile.mkdtemp(prefix="vidfetch-", dir=DOWNLOAD_DIR))
+
     try:
-        if playlist:
-            return _download_playlist(url, format_id, limit, workdir, background_tasks)
-        try:
-            return _download_single(url, format_id, workdir, background_tasks)
-        except HTTPException as exc:
-            # yt-dlp could not handle this URL — fall back to gallery-dl so
-            # sites like Instagram/Pinterest still download.
-            if exc.status_code == 422 and _gallerydl_available():
-                shutil.rmtree(workdir, ignore_errors=True)
-                workdir.mkdir(parents=True, exist_ok=True)
-                return _download_gallerydl(url, workdir, background_tasks)
-            raise
+        if is_playlist:
+            return _download_playlist(url, format_id, limit)
+        return _download_single(url, format_id)
     except HTTPException:
-        shutil.rmtree(workdir, ignore_errors=True)
         raise
-    except Exception as exc:  # noqa: BLE001 - surface any download failure
-        shutil.rmtree(workdir, ignore_errors=True)
-        raise HTTPException(422, _friendly_error(exc))
+    except Exception as exc:
+        logger.exception("download error")
+        raise HTTPException(500, str(exc))
+
+
+def _download_single(url: str, format_id: str) -> FileResponse:
+    """Download a single video."""
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    output_template = str(DOWNLOAD_DIR / f"vid_{timestamp}_%(id)s.%(ext)s")
+
+    cmd = [
+        "yt-dlp",
+        "-f", format_id,
+        "--no-playlist",
+        "-o", output_template,
+        "--no-overwrites",
+    ]
+    if YTDLP_COOKIES_FILE and os.path.exists(YTDLP_COOKIES_FILE):
+        cmd += ["--cookies", YTDLP_COOKIES_FILE]
+    if YTDLP_PLAYER_CLIENT:
+        cmd += ["--extractor-args", f"youtube:player_client={YTDLP_PLAYER_CLIENT}"]
+    cmd.append(url)
+
+    result = _run_cmd(cmd, timeout=300)
+
+    if result.returncode != 0:
+        raise HTTPException(500, result.stderr.strip()[-500:] if result.stderr else "Download failed")
+
+    # Find the downloaded file
+    for f in sorted(DOWNLOAD_DIR.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+        if f.is_file() and f.stat().st_mtime > time.time() - 300:
+            return FileResponse(
+                path=str(f),
+                filename=f.name,
+                media_type="application/octet-stream",
+            )
+
+    raise HTTPException(500, "Downloaded file not found")
+
+
+def _download_playlist(url: str, format_id: str, limit: int) -> FileResponse:
+    """Download a playlist as a ZIP archive."""
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    zip_path = DOWNLOAD_DIR / f"playlist_{timestamp}.zip"
+
+    # First extract info
+    cmd = _build_ytdlp_args(url, ["--dump-json", "--flat-playlist"])
+    result = _run_cmd(cmd, timeout=60)
+    if result.returncode != 0:
+        raise HTTPException(500, "Failed to extract playlist info")
+
+    import json
+    raw = json.loads(result.stdout)
+    entries = [e for e in raw.get("entries", []) if e is not None]
+    if limit > 0:
+        entries = entries[:limit]
+
+    if not entries:
+        raise HTTPException(404, "Playlist is empty")
+
+    # Download each video
+    temp_dir = Path(tempfile.mkdtemp(prefix="vidfetch_pl_"))
+    try:
+        for idx, entry in enumerate(entries, 1):
+            entry_url = entry.get("url") or entry.get("webpage_url") or f"https://www.youtube.com/watch?v={entry.get('id', '')}"
+            out_template = str(temp_dir / f"{idx:03d}_%(title)s.%(ext)s")
+
+            dl_cmd = ["yt-dlp", "-f", format_id, "-o", out_template, "--no-overwrites"]
+            if YTDLP_COOKIES_FILE and os.path.exists(YTDLP_COOKIES_FILE):
+                dl_cmd += ["--cookies", YTDLP_COOKIES_FILE]
+            if YTDLP_PLAYER_CLIENT:
+                dl_cmd += ["--extractor-args", f"youtube:player_client={YTDLP_PLAYER_CLIENT}"]
+            dl_cmd.append(entry_url)
+
+            _run_cmd(dl_cmd, timeout=300)
+
+        # Create ZIP
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for f in temp_dir.iterdir():
+                if f.is_file():
+                    zf.write(f, f.name)
+
+        return FileResponse(
+            path=str(zip_path),
+            filename=f"playlist_{timestamp}.zip",
+            media_type="application/zip",
+        )
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+# ── Startup ──────────────────────────────────────────────────────────────────
+
+@app.on_event("startup")
+def on_startup():
+    logger.info("VidFetch yt-dlp Server starting on %s:%s", HOST, PORT)
+    logger.info("Download dir: %s", DOWNLOAD_DIR)
+    logger.info("yt-dlp version: %s", _current_version())
+
+    # Start cleanup thread
+    cleanup_thread = threading.Thread(target=_cleanup_loop, daemon=True)
+    cleanup_thread.start()
 
 
 if __name__ == "__main__":
     import uvicorn
-
-    host = os.environ.get("HOST", "0.0.0.0")
-    port = int(os.environ.get("PORT", "8080"))
-    uvicorn.run(app, host=host, port=port)
+    uvicorn.run(app, host=HOST, port=PORT)
