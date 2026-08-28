@@ -44,6 +44,26 @@
     (function () {
       var errors = [];
       var shown = false;
+      var readyCalled = false;
+      var CRITICAL资源整合 = [/* patterns that indicate a fatal bundle failure */];
+
+      function isLikelyFatal(msg) {
+        if (!msg) return false;
+        var lower = msg.toLowerCase();
+        // Only show the fatal screen for issues that truly prevent the app from
+        // loading: missing JS bundles, syntax errors in our own code, or React
+        // crashing at the root level.  Recoverable runtime errors from native
+        // bridges, lazy-loaded plugins, or third-party code must NOT blank the
+        // screen — they should be caught by React error boundaries instead.
+        if (lower.indexOf('failed to load') !== -1) return true;        // resource 404
+        if (lower.indexOf('unexpected token') !== -1) return true;     // syntax error
+        if (lower.indexOf('cannot use') !== -1 && lower.indexOf('import') !== -1) return true;
+        if (lower.indexOf('is not a function') !== -1 && lower.indexOf('react') !== -1) return true;
+        if (lower.indexOf('hook') !== -1 && lower.indexOf('render') !== -1) return true;
+        if (lower.indexOf('script error') !== -1) return false;        // cross-origin noise
+        return false;
+      }
+
       function showFatal(message, detail) {
         if (shown) return;
         shown = true;
@@ -65,29 +85,44 @@
           // ignore
         }
       }
+
+      // Capture uncaught JS errors — only show fatal for bundle-breaking issues
       window.addEventListener('error', function (e) {
+        var msg = e.message || 'Unknown error';
         var loc = (e.filename || '') + (e.lineno ? ':' + e.lineno : '');
-        errors.push((e.message || 'Unknown error') + (loc ? ' @ ' + loc : ''));
-        showFatal(e.message || 'Unknown error', loc);
+        errors.push(msg + (loc ? ' @ ' + loc : ''));
+        if (isLikelyFatal(msg)) {
+          showFatal(msg, loc);
+        }
+        // Non-fatal: log only, never blank the screen
       });
+
       // Script/resource LOAD failures — capture phase, they don't bubble.
       document.addEventListener('error', function (e) {
         var t = e.target;
         var src = t && (t.src || t.href);
         if (src) {
           errors.push('Failed to load: ' + src);
-          showFatal('A required file failed to load', src);
+          // Only show fatal for JS bundles, not for images/icons/fonts
+          if (src.indexOf('.js') !== -1 || src.indexOf('/src/') !== -1) {
+            showFatal('A required file failed to load', src);
+          }
         }
       }, true);
+
+      // Unhandled promise rejections — log but don't crash the WebView
       window.addEventListener('unhandledrejection', function (e) {
         var reason = e && e.reason;
         var msg = (reason && (reason.message || reason.stack)) || String(reason);
         errors.push('Unhandled promise rejection: ' + msg);
-        showFatal('Unhandled promise rejection', msg);
+        // Never show fatal for promise rejections — they are almost always
+        // recoverable (network, plugin, capacitor bridge) and React's own
+        // error boundary handles what matters.
       });
-      // Watchdog — if nothing rendered after 10s, explain the silence.
+
+      // Watchdog — if nothing rendered after 15s, explain the silence.
       setTimeout(function () {
-        if (shown || window.__vidfetchReadyCalled) return;
+        if (shown || readyCalled) return;
         var root = document.getElementById('root');
         if (root && root.children.length === 0) {
           showFatal(
@@ -98,10 +133,11 @@
                 '(check that the assets exist inside this package).'
           );
         }
-      }, 10000);
+      }, 15000);
+
+      // Expose ready flag for React to call
+      window.__VIDFETCH_READY__ = function () { readyCalled = true; window.__vidfetchReadyCalled = true; };
     })();
-    // Called by the app once React has mounted — cancels the watchdog.
-    window.__VIDFETCH_READY__ = function () { window.__vidfetchReadyCalled = true; };
 
     // ── Service worker ─────────────────────────────────────────────────
     // Only register the SW on a real hosted web origin. Inside the packaged
@@ -138,7 +174,7 @@
       }
     }
   </script>
-  <script type="module" crossorigin src="/assets/index-Boc4ugw9.js"></script>
+  <script type="module" crossorigin src="/assets/index-D-7ceQ_M.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/react-vendor-CLvenrei.js">
   <link rel="modulepreload" crossorigin href="/assets/framer-motion-CBAPqnxX.js">
   <link rel="modulepreload" crossorigin href="/assets/radix-ui-BPuq50AH.js">
