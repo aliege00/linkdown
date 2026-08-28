@@ -1,8 +1,20 @@
 <!-- 
-  AndroidManifest.xml — Required permissions for Scoped Storage / MediaStore
+  AndroidManifest.xml — Required permissions + portrait lock
   
   Add these to your app's AndroidManifest.xml inside the <manifest> tag.
   These are MERGE-compatible — add them alongside your existing permissions.
+-->
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     Portrait Lock — prevent landscape rotation that breaks the UI
+     Add android:screenOrientation="portrait" to your <activity> tag.
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<!--
+  <activity
+      android:name=".MainActivity"
+      android:screenOrientation="portrait"
+      ... >
+  </activity>
 -->
 
 <!-- ═══════════════════════════════════════════════════════════════════════════

@@ -36,6 +36,7 @@ import { ClipboardNotification } from "@/components/ClipboardNotification";
 import { useDownloadManager } from "@/hooks/use-download-manager";
 import { explainError } from "@/lib/error-help";
 import { normalizeVideoUrl } from "@/lib/url";
+import { useBatchQueue, hasMultipleUrls, extractUrls } from "@/hooks/use-batch-queue";
 import { postDownloadCleanup } from "@/lib/auto-cleanup";
 import EngineSwitcher, { type EngineId, getSavedEngine, saveEngine } from "@/components/EngineSwitcher";
 import { mp4FormatWithHeight, MP4_FORMAT_SELECTOR, MP3_FORMAT_SELECTOR, buildFormatSelector, getMimeType, filterFormats, type FormatLike } from "@/lib/format-enforce";
@@ -1183,6 +1184,8 @@ export default function DownloaderCard({
   const [errorPhase, setErrorPhase] = useState<"analyze" | "download">("analyze");
   // Active download engine (persisted to localStorage)
   const [activeEngine, setActiveEngine] = useState<EngineId>(() => getSavedEngine());
+  // Batch queue for multiple URLs
+  const batchQueue = useBatchQueue();
   const handleEngineChange = useCallback((engine: EngineId) => {
     setActiveEngine(engine);
     saveEngine(engine);
@@ -1324,11 +1327,10 @@ export default function DownloaderCard({
     setSavedDownloads(list);
   }, []);
 
-  // Scroll to results
+  // Auto-scroll DISABLED — prevents jarring page jumps during download.
+  // Users can manually scroll if needed.
   const scrollToResults = () => {
-    setTimeout(() => {
-      resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 200);
+    // Intentionally no-op to prevent unwanted page scrolling
   };
 
   // ─── Fetch video info ──────────────────────────────────────────────

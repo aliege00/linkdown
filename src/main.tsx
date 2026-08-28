@@ -7,6 +7,7 @@ import React, { StrictMode, useEffect, lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router";
 import { startupCleanup } from "@/lib/auto-cleanup";
+import { requestNotificationPermission } from "@/lib/notification-permission";
 import "./index.css";
 
 // Convex deployment URL baked in by Vite at build time. On CI/packaged builds
@@ -207,3 +208,6 @@ createRoot(document.getElementById("root")!).render(
 
 // Run auto-cleanup of orphan temp files on startup (non-blocking)
 startupCleanup().catch(() => {});
+
+// Request notification permission (non-blocking, never crashes)
+requestNotificationPermission().catch(() => {});

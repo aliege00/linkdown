@@ -238,6 +238,8 @@
 /* ─── App smoothness polish ─────────────────────────────────── */
 html {
   scroll-behavior: smooth;
+  overflow-x: hidden;
+  max-width: 100vw;
 }
 
 body {
@@ -245,6 +247,13 @@ body {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   overscroll-behavior-y: none;
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
+#root {
+  overflow-x: hidden;
+  min-height: 100dvh;
 }
 
 /* Snappier taps: no text-selection flash on buttons, no 300ms delay */
