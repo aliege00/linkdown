@@ -152,6 +152,49 @@ export interface NativeDownloadResult {
  *   - Desktop: Electron's shell.openExternal or direct download
  *   - Web: browser fetch + blob (limited, no background)
  */
+/**
+ * Validate and normalize a URL before passing to DownloadManager.
+ * Ensures the URL is a direct HTTP/HTTPS stream URL, not a page URL.
+ */
+function validateDownloadUrl(url: string): { valid: boolean; reason?: string } {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return { valid: false, reason: "Only HTTP/HTTPS URLs are supported" };
+    }
+    // Block common non-video URLs (YouTube watch pages, etc.)
+    if (parsed.hostname.includes("youtube.com") && parsed.pathname === "/watch") {
+      return { valid: false, reason: "YouTube watch URLs need extraction first — use the analyze step" };
+    }
+    return { valid: true };
+  } catch {
+    return { valid: false, reason: "Invalid URL format" };
+  }
+}
+
+/**
+ * Detect the correct MIME type from a URL or filename.
+ * Ensures DownloadManager receives valid MIME types.
+ */
+function detectMimeType(url: string, filename?: string): string {
+  const source = filename || url;
+  const ext = source.split(".").pop()?.split("?")[0]?.toLowerCase() ?? "";
+  const mimeMap: Record<string, string> = {
+    mp4: "video/mp4",
+    webm: "video/webm",
+    mkv: "video/x-matroska",
+    avi: "video/x-msvideo",
+    mov: "video/quicktime",
+    mp3: "audio/mpeg",
+    m4a: "audio/mp4",
+    ogg: "audio/ogg",
+    opus: "audio/opus",
+    wav: "audio/wav",
+    flac: "audio/flac",
+  };
+  return mimeMap[ext] ?? "video/mp4";
+}
+
 export async function nativeDownload(
   options: NativeDownloadOptions,
 ): Promise<NativeDownloadResult> {
@@ -166,6 +209,21 @@ export async function nativeDownload(
     };
   }
 
+  // Validate the URL before sending to DownloadManager
+  const urlCheck = validateDownloadUrl(url);
+  if (!urlCheck.valid) {
+    return {
+      success: false,
+      error: urlCheck.reason ?? "Invalid download URL",
+      errorTr: classifyNativeError(urlCheck.reason ?? "Geçersiz URL"),
+      usedNativeManager: false,
+    };
+  }
+
+  // Detect correct MIME type (force MP4 for video, MP3 for audio)
+  const detectedMime = mimeType || detectMimeType(url, fileName);
+  const finalMime = detectedMime === "video/webm" ? "video/mp4" : detectedMime;
+
   // ── Android (Capacitor) path ──────────────────────────────────────
   if (NativeDownload && isNativeEnv() && !Desktop?.isDesktop) {
     try {
@@ -173,7 +231,7 @@ export async function nativeDownload(
         url,
         title,
         description: description || `Downloading ${title}`,
-        mimeType: mimeType || "video/mp4",
+        mimeType: finalMime,
         fileName,
         subdirectory: subdirectory || "VidFetch",
       });

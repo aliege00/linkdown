@@ -36,6 +36,8 @@ import { ClipboardNotification } from "@/components/ClipboardNotification";
 import { useDownloadManager } from "@/hooks/use-download-manager";
 import { explainError } from "@/lib/error-help";
 import { normalizeVideoUrl } from "@/lib/url";
+import EngineSwitcher, { type EngineId, getSavedEngine, saveEngine } from "@/components/EngineSwitcher";
+import { mp4FormatWithHeight, MP4_FORMAT_SELECTOR, MP3_FORMAT_SELECTOR, buildFormatSelector, getMimeType } from "@/lib/format-enforce";
 import {
   QUALITY_PRESETS,
   pickFormatForPreset,
@@ -139,28 +141,28 @@ function looksLikePlaylist(raw: string): boolean {
   return /[?&]list=[^&\s]+/.test(raw) || /\/playlist([/?]|$)/.test(raw);
 }
 
-/** Quality presets for playlist downloads (yt-dlp format selectors). */
+/** Quality presets for playlist downloads — enforced MP4 output. */
 const PLAYLIST_PRESETS = [
-  { id: "best", label: "Best", desc: "Best available", spec: "best" },
+  { id: "best", label: "Best", desc: "Best MP4 available", spec: MP4_FORMAT_SELECTOR },
   {
     id: "1080p",
     label: "1080p",
-    desc: "Full HD + audio",
-    spec: "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
+    desc: "Full HD MP4",
+    spec: mp4FormatWithHeight(1080),
   },
   {
     id: "720p",
     label: "720p",
-    desc: "HD + audio",
-    spec: "bestvideo[height<=720]+bestaudio/best[height<=720]",
+    desc: "HD MP4",
+    spec: mp4FormatWithHeight(720),
   },
   {
     id: "480p",
     label: "480p",
-    desc: "SD + audio",
-    spec: "bestvideo[height<=480]+bestaudio/best[height<=480]",
+    desc: "SD MP4",
+    spec: mp4FormatWithHeight(480),
   },
-  { id: "audio", label: "Audio", desc: "MP3 / M4A", spec: "bestaudio" },
+  { id: "audio", label: "Audio", desc: "MP3", spec: MP3_FORMAT_SELECTOR },
 ] as const;
 
 // ─── Copy Command (small copy-to-clipboard button) ────────────────────
@@ -1178,6 +1180,12 @@ export default function DownloaderCard({
   // Whether the visible error came from analyzing the URL or starting the
   // download — used to pick the error box's kicker label.
   const [errorPhase, setErrorPhase] = useState<"analyze" | "download">("analyze");
+  // Active download engine (persisted to localStorage)
+  const [activeEngine, setActiveEngine] = useState<EngineId>(() => getSavedEngine());
+  const handleEngineChange = useCallback((engine: EngineId) => {
+    setActiveEngine(engine);
+    saveEngine(engine);
+  }, []);
   const nativeAvailable = isNativeAvailable();
   // Show the right paste shortcut on the button badge (⌘V on Mac, Ctrl+V
   // everywhere else).
@@ -1393,17 +1401,16 @@ export default function DownloaderCard({
     // Throttle window for progress re-renders (see onProgress below).
     let lastTick = 0;
 
-    // Video-only formats (common above 1080p on YouTube) carry no audio
-    // track. When ffmpeg is available (bundled in both the APK and the EXE),
-    // append bestaudio so the engine merges video + audio into one playable
-    // file instead of saving a silent video.
+    // Enforce MP4/MP3 output format. The format selector forces H.264/AAC
+    // inside MP4 container, rejecting webm/mkv and other raw formats.
     const picked = videoInfo?.formats.find(
       (f) => f.format_id === selectedFormat,
     );
-    const formatSpec =
-      picked && picked.vcodec && !picked.acodec && videoInfo?.ffmpeg_available
-        ? `${selectedFormat}+bestaudio/bestaudio`
-        : selectedFormat;
+    const formatSpec = buildFormatSelector(
+      selectedFormat,
+      false, // not audio-only
+      videoInfo?.ffmpeg_available ?? false,
+    );
 
     const workId = await startDownload({
       url: cleanUrl,
@@ -1821,8 +1828,21 @@ export default function DownloaderCard({
                   </div>
                 </div>
                 <p className="text-xs text-center text-muted-foreground/70 mt-3">
-                  Supports YouTube, TikTok, Twitter/X, Instagram, Vimeo, and 1000+ more
+                  {helpLang === "tr" ? "YouTube, TikTok, Twitter/X, Instagram, Vimeo ve 1000+ site destekler" : "Supports YouTube, TikTok, Twitter/X, Instagram, Vimeo, and 1000+ more"}
                 </p>
+
+                {/* Engine Switcher */}
+                <div className="mt-4 pt-3 border-t border-border/20">
+                  <EngineSwitcher value={activeEngine} onChange={handleEngineChange} />
+                </div>
+
+                {/* Format note — always MP4/MP3 enforced */}
+                <div className="mt-3 flex items-center justify-center gap-1.5 text-[10px] text-muted-foreground/50">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 font-medium text-emerald-600 dark:text-emerald-400">
+                    MP4 / MP3 only
+                  </span>
+                  <span>{" — " + (helpLang === "tr" ? "evrensel olarak oynatılabilir format" : "universally playable format")}</span>
+                </div>
 
                 {/* Example URLs — shown when input is empty */}
                 {!url.trim() && (
