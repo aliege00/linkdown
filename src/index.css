@@ -238,8 +238,10 @@
 /* ─── App smoothness polish ─────────────────────────────────── */
 html {
   scroll-behavior: smooth;
-  overflow-x: hidden;
   max-width: 100vw;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 body {
@@ -247,13 +249,16 @@ body {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   overscroll-behavior-y: none;
-  overflow-x: hidden;
   max-width: 100vw;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 #root {
-  overflow-x: hidden;
   min-height: 100dvh;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 /* Snappier taps: no text-selection flash on buttons, no 300ms delay */
