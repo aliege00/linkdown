@@ -50,6 +50,12 @@ try {
   // Not in a Capacitor environment — plugin won't be available
 }
 
+// Defensive: if registerPlugin returns something that doesn't have our
+// expected methods, treat it as unavailable instead of crashing later.
+if (MediaStore && typeof MediaStore.saveToGallery !== "function") {
+  MediaStore = undefined;
+}
+
 // ── Desktop bridge (Electron) ───────────────────────────────────────────────
 
 interface DesktopBridge {

@@ -23,13 +23,23 @@ const AuthPage = lazy(() => import("./pages/Auth.tsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 const VlyToolbar = lazy(() =>
-  import("../vly-toolbar-readonly.tsx").then((m) => ({ default: m.VlyToolbar })),
+  import("../vly-toolbar-readonly.tsx")
+    .then((m) => ({ default: m.VlyToolbar ?? (() => null) }))
+    .catch(() => ({ default: () => null })),
 );
 
 // Only construct the Convex client when a real deployment URL exists.
 // `new ConvexReactClient("")` throws at module load, which crashed the whole
 // app on builds without VITE_CONVEX_URL (the white-screen APK bug).
-const convex = CONVEX_URL ? new ConvexReactClient(CONVEX_URL) : null;
+let convex: ConvexReactClient | null = null;
+try {
+  if (CONVEX_URL) {
+    convex = new ConvexReactClient(CONVEX_URL);
+  }
+} catch (err) {
+  console.warn("[main] ConvexReactClient init failed (non-critical):", err);
+}
+
 
 // Simple loading fallback for route transitions
 function RouteLoading() {
@@ -144,6 +154,29 @@ function AppRoutes() {
       <Toaster />
     </BrowserRouter>
   );
+}
+
+// ── Global safety: catch errors that slip past React error boundaries ──
+// Prevents the WebView from going blank due to uncaught bridge/plugin errors.
+if (typeof window !== "undefined") {
+  window.addEventListener("error", (e) => {
+    // Only log non-fatal errors — fatal bundle errors are already handled by
+    // the index.html watchdog. Everything else (Capacitor bridge, plugin, lazy
+    // import) should be silently absorbed so the user never sees a blank screen.
+    const msg = e.message || "";
+    const isBundle = msg.includes("SyntaxError") || msg.includes("Unexpected token");
+    if (isBundle) {
+      console.error("[Global] Fatal script error:", msg, e.filename);
+    } else {
+      console.warn("[Global] Non-fatal error:", msg);
+    }
+  });
+
+  window.addEventListener("unhandledrejection", (e) => {
+    const reason = e.reason;
+    const msg = reason instanceof Error ? reason.message : String(reason);
+    console.warn("[Global] Unhandled rejection (non-fatal):", msg);
+  });
 }
 
 createRoot(document.getElementById("root")!).render(

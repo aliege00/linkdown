@@ -27,10 +27,10 @@ interface ClipboardPlugin {
 
 let CapacitorClipboard: ClipboardPlugin | undefined;
 try {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const cap = (window as any).Capacitor;
-  if (cap?.Plugins?.Clipboard) {
-    CapacitorClipboard = cap.Plugins.Clipboard as ClipboardPlugin;
+  const cap = (window as unknown as Record<string, unknown>)["Capacitor"] as Record<string, unknown> | undefined;
+  const plugins = cap?.["Plugins"] as Record<string, unknown> | undefined;
+  if (plugins && typeof plugins["Clipboard"] === "object" && plugins["Clipboard"] !== null) {
+    CapacitorClipboard = plugins["Clipboard"] as ClipboardPlugin;
   }
 } catch {
   // Not in Capacitor
@@ -43,8 +43,7 @@ interface DesktopBridge {
   readClipboard(): Promise<string>;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const Desktop = (window as any)["vidfetch"] as DesktopBridge | undefined;
+const Desktop = (window as unknown as Record<string, unknown>)["vidfetch"] as DesktopBridge | undefined;
 
 // ── Types ───────────────────────────────────────────────────────────────────
 

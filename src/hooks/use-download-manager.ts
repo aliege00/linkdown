@@ -38,8 +38,11 @@ export interface DownloadTask {
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 function getServerUrl(): string {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (import.meta as any).env.VITE_YTDLP_SERVER_URL || "";
+  try {
+    return (import.meta as { env: Record<string, string> }).env.VITE_YTDLP_SERVER_URL || "";
+  } catch {
+    return "";
+  }
 }
 
 function formatBytes(bytes: number): string {

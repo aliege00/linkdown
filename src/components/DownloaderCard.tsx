@@ -1328,47 +1328,62 @@ export default function DownloaderCard({
   // own URL.
   const runAnalyze = useCallback(
     async (targetUrl: string) => {
-      // Clean the pasted text first — links often arrive with extra
-      // whitespace, quotes or surrounding words from chat apps / notes.
-      const cleanUrl = normalizeVideoUrl(targetUrl);
-      if (!cleanUrl) {
-        setErrorMsg(targetUrl.trim());
+      try {
+        // Clean the pasted text first — links often arrive with extra
+        // whitespace, quotes or surrounding words from chat apps / notes.
+        const cleanUrl = normalizeVideoUrl(targetUrl);
+        if (!cleanUrl) {
+          setErrorMsg(targetUrl.trim());
+          setErrorPhase("analyze");
+          updateState("error");
+          return;
+        }
+
+        setUrl(cleanUrl);
+        updateState("loading");
+        setErrorMsg("");
+        setVideoInfo(null);
+        setSelectedFormat("");
+        setPlaylistSummary(null);
+        setPlaylistQuality("best");
+
+        const result = await getVideoInfo(cleanUrl, looksLikePlaylist(cleanUrl));
+
+        if (!result.success) {
+          setErrorMsg(result.error);
+          setErrorPhase("analyze");
+          updateState("error");
+          return;
+        }
+
+        setVideoInfo(result);
+        // Auto-select the format matching the user's pre-analysis quality
+        // choice; they can still override via the format cards below.
+        setSelectedFormat(pickFormatForPreset(result, videoQuality));
+        updateState("loaded");
+        scrollToResults();
+      } catch (err) {
+        // Catch any Script error / bridge crash so the UI never goes blank
+        console.error("[DownloaderCard] runAnalyze error:", err);
+        setErrorMsg(
+          err instanceof Error
+            ? err.message
+            : helpLang === "tr"
+              ? "Video bilgisi alınırken beklenmeyen bir hata oluştu"
+              : "An unexpected error occurred while fetching video info"
+        );
         setErrorPhase("analyze");
         updateState("error");
-        return;
       }
-
-      setUrl(cleanUrl);
-      updateState("loading");
-      setErrorMsg("");
-      setVideoInfo(null);
-      setSelectedFormat("");
-      setPlaylistSummary(null);
-      setPlaylistQuality("best");
-
-      const result = await getVideoInfo(cleanUrl, looksLikePlaylist(cleanUrl));
-
-      if (!result.success) {
-        setErrorMsg(result.error);
-        setErrorPhase("analyze");
-        updateState("error");
-        return;
-      }
-
-      setVideoInfo(result);
-      // Auto-select the format matching the user's pre-analysis quality
-      // choice; they can still override via the format cards below.
-      setSelectedFormat(pickFormatForPreset(result, videoQuality));
-      updateState("loaded");
-      scrollToResults();
     },
-    [updateState, videoQuality],
+    [updateState, videoQuality, helpLang],
   );
 
   const handleAnalyze = useCallback(() => runAnalyze(url), [url, runAnalyze]);
 
   // ─── Download ──────────────────────────────────────────────────────
   const handleDownload = useCallback(async () => {
+    try {
     const cleanUrl = normalizeVideoUrl(url);
     if (!cleanUrl || !selectedFormat) return;
 
@@ -1444,7 +1459,9 @@ export default function DownloaderCard({
       // The on-device engine only exists inside the APK / EXE build.
       // In a plain browser there is nothing to do the download — be honest.
       setErrorMsg(
-        "This preview runs in a browser, where there is no download engine. Install the Android APK or the Windows EXE — the engine runs right on your device. No server, no API key, unlimited."
+        helpLang === "tr"
+          ? "Bu önizleme tarayıcıda çalışıyor — indirme motoru yalnızca Android APK ve Windows EXE uygulamalarında mevcut. Sunucu gerekmez, API anahtarı gerekmez, sınırsızdır."
+          : "This preview runs in a browser with no download engine. Install the Android APK or Windows EXE — fully offline, no server needed."
       );
       setErrorPhase("download");
       updateState("error");
@@ -1473,10 +1490,24 @@ export default function DownloaderCard({
     completeResetTimerRef.current = setTimeout(() => {
       if (stateRef.current === "complete") updateState("loaded");
     }, 5000);
-  }, [url, selectedFormat, videoInfo, updateState, refreshHistory]);
+    } catch (err) {
+      // Catch Script errors / bridge crashes
+      console.error("[DownloaderCard] handleDownload error:", err);
+      setErrorMsg(
+        err instanceof Error
+          ? err.message
+          : helpLang === "tr"
+            ? "İndirme başlatılırken beklenmeyen bir hata oluştu"
+            : "An unexpected error occurred while starting the download"
+      );
+      setErrorPhase("download");
+      updateState("error");
+    }
+  }, [url, selectedFormat, videoInfo, updateState, refreshHistory, helpLang]);
 
   // ─── Playlist download (all videos at once) ───────────────────────
   const handleDownloadPlaylist = useCallback(async () => {
+    try {
     const cleanUrl = normalizeVideoUrl(url);
     if (!cleanUrl || !videoInfo?.is_playlist) return;
 
@@ -1565,7 +1596,9 @@ export default function DownloaderCard({
     });
     if (!workId) {
       setErrorMsg(
-        "This preview runs in a browser, where there is no download engine. Install the Android APK or the Windows EXE — the engine runs right on your device. No server, no API key, unlimited."
+        helpLang === "tr"
+          ? "Bu önizleme tarayıcıda çalışıyor — indirme motoru yalnızca Android APK ve Windows EXE uygulamalarında mevcut. Sunucu gerekmez, API anahtarı gerekmez, sınırsızdır."
+          : "This preview runs in a browser with no download engine. Install the Android APK or Windows EXE — fully offline, no server needed."
       );
       setErrorPhase("download");
       updateState("error");
@@ -1585,7 +1618,19 @@ export default function DownloaderCard({
     completeResetTimerRef.current = setTimeout(() => {
       if (stateRef.current === "complete") updateState("loaded");
     }, 10000);
-  }, [url, videoInfo, playlistQuality, updateState, refreshHistory]);
+    } catch (err) {
+      console.error("[DownloaderCard] handleDownloadPlaylist error:", err);
+      setErrorMsg(
+        err instanceof Error
+          ? err.message
+          : helpLang === "tr"
+            ? "Liste indirme başlatılırken beklenmeyen bir hata oluştu"
+            : "An unexpected error occurred while starting playlist download"
+      );
+      setErrorPhase("download");
+      updateState("error");
+    }
+  }, [url, videoInfo, playlistQuality, updateState, refreshHistory, helpLang]);
 
   // ─── Paste ─────────────────────────────────────────────────────────
   const handlePaste = async () => {

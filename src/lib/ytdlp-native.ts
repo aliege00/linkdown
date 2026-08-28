@@ -141,7 +141,25 @@ type ProgressCallback = (data: {
   fileName?: string;
 }) => void;
 
-const YtDlp = registerPlugin<YtDlpPluginInterface>("YtDlp");
+// Safe plugin registration — throws in non-Capacitor environments or when
+// the native plugin is not installed (e.g. plain web build).
+let YtDlp: YtDlpPluginInterface | undefined;
+try {
+  YtDlp = registerPlugin<YtDlpPluginInterface>("YtDlp");
+} catch {
+  // Plugin not available — isNativeAvailable() will return false.
+}
+
+/**
+ * Return the native YtDlp plugin, throwing a clear error when unavailable.
+ * All callers are already inside try-catch blocks and guarded by
+ * isNativeAvailable(), so this is a safety assertion, not a control-flow
+ * branch.
+ */
+function getYtDlp(): YtDlpPluginInterface {
+  if (!YtDlp) throw new Error("YtDlp native plugin is not available in this environment");
+  return YtDlp;
+}
 
 /** Desktop (Electron EXE) bridge — exposed by electron/preload.cjs. */
 export interface DesktopBridge {
@@ -172,18 +190,29 @@ let nativeAvailable: boolean | null = null;
  * Check if a download engine is available in this environment.
  * True in the Android APK (Capacitor plugin) and the Windows EXE
  * (window.vidfetch bridge). False in a plain browser preview.
+ *
+ * Wrapped in try-catch so a broken bridge never crashes the app —
+ * it just reports the engine as unavailable, which the UI handles
+ * gracefully.
  */
 export function isNativeAvailable(): boolean {
   if (nativeAvailable !== null) return nativeAvailable;
 
-  if (Desktop?.isDesktop) {
-    nativeAvailable = true;
-    return true;
+  try {
+    if (Desktop?.isDesktop) {
+      nativeAvailable = true;
+      return true;
+    }
+  } catch {
+    nativeAvailable = false;
+    return false;
   }
 
   try {
-    const capacitor = (window as unknown as Record<string, unknown>)["Capacitor"] as { isNativePlatform?: () => boolean } | undefined;
-    nativeAvailable = !!(capacitor?.isNativePlatform?.());
+    const cap = (window as unknown as Record<string, unknown>)["Capacitor"] as
+      | { isNativePlatform?: () => boolean }
+      | undefined;
+    nativeAvailable = !!(cap?.isNativePlatform?.());
   } catch {
     nativeAvailable = false;
   }
@@ -209,8 +238,7 @@ export async function getVideoInfo(
     }
     return {
       success: false,
-      error: "The download engine only exists inside the Android APK and the Windows EXE. " +
-        "Install one of those — no server, no API key, unlimited.",
+      error: "No download engine available in this preview. Install the Android APK or Windows EXE for full offline downloads — no server needed.",
     };
   }
 
@@ -226,7 +254,7 @@ export async function getVideoInfo(
   }
 
   try {
-    const result = await YtDlp.extractInfo({ url, isPlaylist });
+    const result = await getYtDlp().extractInfo({ url, isPlaylist });
 
     return result as YtDlpInfo;
   } catch (error) {
@@ -302,7 +330,7 @@ export async function startDownload(
       });
       return "server-download";
     }
-    console.warn("[ytdlp-native] Native engine not available");
+    console.warn("[ytdlp-native] Native engine not available — download requires the APK or EXE build");
     return null;
   }
 
@@ -363,7 +391,7 @@ export async function startDownload(
     // Register progress listener if callback provided
     if (onProgress) {
       let lastEmit = 0;
-      const handle = await YtDlp.addListener("downloadProgress", (data) => {
+      const handle = await getYtDlp().addListener("downloadProgress", (data) => {
         const now = Date.now();
         if (now - lastEmit < 100) return; // max ~10 updates/sec
         lastEmit = now;
@@ -381,7 +409,7 @@ export async function startDownload(
 
     // Register completion listener — carries the saved file URI
     if (onComplete) {
-      const handle = await YtDlp.addListener("downloadComplete", (data) => {
+      const handle = await getYtDlp().addListener("downloadComplete", (data) => {
         onComplete({
           uri: (data.uri as string) ?? "",
           fileName: (data.fileName as string) ?? "",
@@ -393,14 +421,14 @@ export async function startDownload(
 
     // Register error listener
     if (onError) {
-      const handle = await YtDlp.addListener("downloadError", (data) => {
+      const handle = await getYtDlp().addListener("downloadError", (data) => {
         onError((data.error as string) ?? "Download failed");
         handles.forEach((h) => h.remove());
       });
       handles.push(handle);
     }
 
-    const result = await YtDlp.startDownload({ url, formatId, isPlaylist });
+    const result = await getYtDlp().startDownload({ url, formatId, isPlaylist });
     return result.workId ?? null;
   } catch (error) {
     console.error("[ytdlp-native] startDownload failed:", error);
@@ -424,7 +452,7 @@ export async function cancelDownload(workId?: string): Promise<void> {
   }
 
   try {
-    await YtDlp.cancelDownload({ workId: workId ?? "" });
+    await getYtDlp().cancelDownload({ workId: workId ?? "" });
   } catch (error) {
     console.error("[ytdlp-native] cancelDownload failed:", error);
   }
@@ -447,7 +475,7 @@ export async function openFile(uri: string): Promise<boolean> {
   }
 
   try {
-    await YtDlp.openFile({ uri });
+    await getYtDlp().openFile({ uri });
     return true;
   } catch (error) {
     console.error("[ytdlp-native] openFile failed:", error);
@@ -473,7 +501,7 @@ export async function getDownloads(): Promise<DownloadEntry[]> {
   }
 
   try {
-    const result = await YtDlp.getDownloads();
+    const result = await getYtDlp().getDownloads();
     return result.downloads ?? [];
   } catch (error) {
     console.error("[ytdlp-native] getDownloads failed:", error);
@@ -498,7 +526,7 @@ export async function pickFolder(): Promise<DownloadLocation | null> {
   }
 
   try {
-    return await YtDlp.pickFolder();
+    return await getYtDlp().pickFolder();
   } catch (error) {
     // Cancelled by the user — not an error worth logging loudly
     console.log("[ytdlp-native] pickFolder:", error);
@@ -522,7 +550,7 @@ export async function getDownloadLocation(): Promise<DownloadLocation | null> {
   }
 
   try {
-    return await YtDlp.getDownloadLocation();
+    return await getYtDlp().getDownloadLocation();
   } catch (error) {
     console.error("[ytdlp-native] getDownloadLocation failed:", error);
     return null;
@@ -545,7 +573,7 @@ export async function resetDownloadLocation(): Promise<void> {
   }
 
   try {
-    await YtDlp.resetDownloadLocation();
+    await getYtDlp().resetDownloadLocation();
   } catch (error) {
     console.error("[ytdlp-native] resetDownloadLocation failed:", error);
   }
@@ -573,7 +601,7 @@ export async function getYouTubeSettings(): Promise<YouTubeSettings> {
   }
 
   try {
-    return await YtDlp.getYouTubeSettings();
+    return await getYtDlp().getYouTubeSettings();
   } catch (error) {
     console.error("[ytdlp-native] getYouTubeSettings failed:", error);
     return empty;
@@ -598,7 +626,7 @@ export async function setCookiesBrowser(browser: string): Promise<void> {
   }
 
   try {
-    await YtDlp.setCookiesBrowser(browser);
+    await getYtDlp().setCookiesBrowser(browser);
   } catch (error) {
     console.error("[ytdlp-native] setCookiesBrowser failed:", error);
   }
@@ -623,7 +651,7 @@ export async function pickCookieFile(): Promise<YouTubeSettings | null> {
   }
 
   try {
-    const res = await YtDlp.pickCookieFile();
+    const res = await getYtDlp().pickCookieFile();
     return {
       cookiesBrowser: "",
       cookiesFileName: res.cookiesFileName ?? "",
@@ -652,7 +680,7 @@ export async function clearCookieFile(): Promise<void> {
   }
 
   try {
-    await YtDlp.clearCookieFile();
+    await getYtDlp().clearCookieFile();
   } catch (error) {
     console.error("[ytdlp-native] clearCookieFile failed:", error);
   }
@@ -675,7 +703,7 @@ export async function setPoTokenProvider(url: string): Promise<void> {
   }
 
   try {
-    await YtDlp.setPoTokenProvider(url);
+    await getYtDlp().setPoTokenProvider(url);
   } catch (error) {
     console.error("[ytdlp-native] setPoTokenProvider failed:", error);
   }
