@@ -67,9 +67,9 @@ class DownloadWorker(
         //   [download] /path/to/file.mp4 has already been downloaded
         // Used to know exactly which file yt-dlp produced.
         private val OUTPUT_FILENAME_PATTERN =
-            Regex("\\[download\\]\s+Destination:\s+(.+?)\s*$")
+            Regex("\\[download\\]\\s+Destination:\\s+(.+?)\\s*$")
         private val ALREADY_DOWNLOADED_PATTERN =
-            Regex("\\[download\\]\s+(.+?)\s+has already been downloaded")
+            Regex("\\[download\\]\\s+(.+?)\\s+has already been downloaded")
 
         // Tracks the live yt-dlp process so cancelDownload() can kill it.
         @Volatile
