@@ -264,6 +264,121 @@ body {
   overflow: visible !important;
 }
 
+/* ─── Dark gradient background ──────────────────────────────── */
+.dark body {
+  background: linear-gradient(
+    165deg,
+    oklch(0.12 0 0) 0%,
+    oklch(0.10 0.01 260) 40%,
+    oklch(0.08 0.015 255) 100%
+  );
+  background-attachment: fixed;
+}
+
+body {
+  background: linear-gradient(
+    165deg,
+    oklch(0.985 0 0) 0%,
+    oklch(0.97 0.005 260) 40%,
+    oklch(0.95 0.01 255) 100%
+  );
+  background-attachment: fixed;
+}
+
+/* ─── iOS Glassmorphism (GPU-accelerated) ───────────────────── */
+.glass-card {
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(10px) saturate(180%);
+  -webkit-backdrop-filter: blur(10px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transform: translateZ(0);
+}
+
+.dark .glass-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* Light mode glass variant */
+.glass-card-light {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(10px) saturate(180%);
+  -webkit-backdrop-filter: blur(10px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 20px;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  transform: translateZ(0);
+}
+
+/* iOS-style inset input */
+.ios-input {
+  border-radius: 16px;
+  box-shadow:
+    inset 0 2px 4px rgba(0, 0, 0, 0.06),
+    inset 0 1px 2px rgba(0, 0, 0, 0.04);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.2s ease;
+}
+
+.dark .ios-input {
+  box-shadow:
+    inset 0 2px 6px rgba(0, 0, 0, 0.3),
+    inset 0 1px 2px rgba(0, 0, 0, 0.2);
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.ios-input:focus {
+  border-color: oklch(0.55 0.14 255 / 0.4);
+  box-shadow:
+    inset 0 2px 4px rgba(0, 0, 0, 0.06),
+    0 0 0 3px oklch(0.55 0.14 255 / 0.12);
+}
+
+.dark .ios-input:focus {
+  box-shadow:
+    inset 0 2px 6px rgba(0, 0, 0, 0.3),
+    0 0 0 3px oklch(0.65 0.16 255 / 0.2);
+}
+
+/* iOS-style button with tap scale */
+.ios-btn {
+  border-radius: 14px;
+  transition: transform 0.15s ease, box-shadow 0.2s ease;
+}
+
+.ios-btn:active {
+  transform: scale(0.95);
+}
+
+/* Tab bar glass background */
+.tab-bar-glass {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(20px) saturate(200%);
+  -webkit-backdrop-filter: blur(20px) saturate(200%);
+  border-top: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+.dark .tab-bar-glass {
+  background: rgba(15, 15, 20, 0.85);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Safe area for iOS notch / tab bar */
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
 /* Snappier taps: no text-selection flash on buttons, no 300ms delay */
 button,
 [role="button"] {
