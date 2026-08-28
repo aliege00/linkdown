@@ -401,7 +401,7 @@ def _download_playlist(url: str, format_id: str, limit: int) -> FileResponse:
 # ── Chunked Download (Multi-Threaded / Range Requests) ──────────────────────
 
 from chunked_downloader import ChunkedDownloader
-from resume_download import ResumeManager
+from resume_download import ResumeManager, ResumeState
 
 resume_manager = ResumeManager(str(DOWNLOAD_DIR))
 active_downloaders: dict[str, ChunkedDownloader] = {}
