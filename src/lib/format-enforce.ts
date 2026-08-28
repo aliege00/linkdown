@@ -1,79 +1,47 @@
 /**
- * Format Enforcement — strict MP4 / MP3 output only.
+ * Format Enforcement — STRICT Progressive MP4 / MP3 only.
  *
- * YouTube and other sites offer many raw container formats (webm, m4a,
- * mkv, etc.) that don't play well on all devices. This module enforces:
- *   - Video: H.264/AAC inside MP4 container
- *   - Audio: MP3 (or M4A as fallback)
+ * This module ruthlessly filters out:
+ *   - DASH / Adaptive streams (separate video + audio .m4s segments)
+ *   - webm, mkv, m4a, mhtml, fXXX format IDs
+ *   - Video-only tracks (no audio — causes silent video)
+ *   - Audio-only tracks in non-MP3/M4A containers
  *
- * It provides yt-dlp format selector strings that force these constraints,
- * and filters the format list shown to the user to only include playable
- * formats.
- */
-
-// ── Allowed output formats ────────────────────────────────────────────
-
-/** Extensions that are safe to download directly (no conversion needed). */
-export const ALLOWED_VIDEO_EXTENSIONS = ["mp4"];
-export const ALLOWED_AUDIO_EXTENSIONS = ["mp3", "m4a"];
-
-/** Extensions that should be rejected (raw/unconverted). */
-export const REJECTED_EXTENSIONS = ["webm", "mkv", "avi", "mov", "flv", "3gp", "ts", "ogg", "opus", "wav", "flac"];
-
-// ── yt-dlp Format Selectors ───────────────────────────────────────────
-
-/**
- * Strict MP4 format selector for yt-dlp.
+ * Only PASS-THROUGH formats are kept:
+ *   - Progressive MP4 (H.264 video + AAC audio in one file)
+ *   - MP3 audio
  *
- * Forces H.264 video + AAC audio merged into MP4:
- *   - bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a] — best quality
- *   - bestvideo[ext=mp4]+bestaudio[ext=m4a] — fallback
- *   - best[ext=mp4] — combined stream fallback
- *   - mp4 — last resort
+ * This prevents crashes from selecting unplayable DASH segments and
+ * ensures every format in the list is directly downloadable.
  */
-export const MP4_FORMAT_SELECTOR =
-  "bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/mp4";
+
+// ── Allowed Extensions ────────────────────────────────────────────────
+
+const STRICT_ALLOWED_VIDEO = new Set(["mp4"]);
+const STRICT_ALLOWED_AUDIO = new Set(["mp3", "m4a"]);
+
+/** Extensions that are NEVER allowed (raw/unconverted/DASH). */
+const BLOCKED_EXTENSIONS = new Set([
+  "webm", "mkv", "avi", "mov", "flv", "3gp", "ts", "ogg",
+  "opus", "wav", "flac", "mhtml", "m4s", "m3u8", "mpd",
+]);
+
+// ── Format ID Patterns to Reject ──────────────────────────────────────
 
 /**
- * Strict MP4 format selector with height cap.
- * @param maxHeight Maximum video height in pixels (e.g. 1080, 720, 480)
+ * YouTube format IDs that are DASH segments or adaptive streams.
+ * These are NOT progressive and cause crashes or silent video.
  */
-export function mp4FormatWithHeight(maxHeight: number): string {
-  return (
-    `bestvideo[ext=mp4][vcodec^=avc1][height<=${maxHeight}]+bestaudio[ext=m4a]/` +
-    `bestvideo[ext=mp4][height<=${maxHeight}]+bestaudio[ext=m4a]/` +
-    `best[ext=mp4][height<=${maxHeight}]/` +
-    `bestvideo[height<=${maxHeight}]+bestaudio/best[height<=${maxHeight}]`
-  );
-}
-
-/**
- * Strict MP3 audio-only format selector.
- * Forces MP3 output via ffmpeg post-processing when needed.
- */
-export const MP3_FORMAT_SELECTOR =
-  "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio";
-
-/**
- * Post-processing argument to force MP3 output via ffmpeg.
- * Pass as: --extract-audio --audio-format mp3
- */
-export const MP3_POSTPROCESS_ARGS = ["--extract-audio", "--audio-format", "mp3"];
+const DASH_FORMAT_PATTERNS = [
+  /^f\d{2,3}$/,           // f137, f248, f251 etc. (YouTube DASH IDs)
+  /\+bestaudio/,           // Merge selectors (handled by yt-dlp, not UI)
+  /bestvideo/,             // Video-only selectors
+  /bestaudio/,             // Audio-only selectors (when shown as video)
+];
 
 // ── Format Filtering ──────────────────────────────────────────────────
 
-export interface FilteredFormats {
-  /** Formats that will output as MP4 (combined or video-only with audio merge). */
-  mp4Formats: FormatLike[];
-  /** Formats that will output as MP3/M4A (audio-only). */
-  audioFormats: FormatLike[];
-  /** Best format ID for MP4 video. */
-  bestMp4FormatId: string;
-  /** Best format ID for audio. */
-  bestAudioFormatId: string;
-}
-
-interface FormatLike {
+export interface FormatLike {
   format_id: string;
   ext: string;
   resolution: string;
@@ -84,69 +52,154 @@ interface FormatLike {
   tbr: number | null;
 }
 
+export interface FilteredFormats {
+  /** Progressive MP4 formats (combined video + audio). Ready to play. */
+  progressiveMp4: FormatLike[];
+  /** Audio-only formats (MP3, M4A). Ready to play. */
+  audioFormats: FormatLike[];
+  /** Best progressive MP4 format ID. */
+  bestMp4Id: string;
+  /** Best audio format ID. */
+  bestAudioId: string;
+}
+
 /**
- * Filter a list of formats to only include MP4-compatible and audio formats.
- * Rejects webm, mkv, and other raw containers.
+ * Check if a format is a DASH/adaptive segment that should be rejected.
+ */
+function isDashSegment(f: FormatLike): boolean {
+  // Reject by extension
+  const ext = f.ext.toLowerCase();
+  if (BLOCKED_EXTENSIONS.has(ext)) return true;
+  if (!STRICT_ALLOWED_VIDEO.has(ext) && !STRICT_ALLOWED_AUDIO.has(ext)) return true;
+
+  // Reject by format ID pattern (YouTube DASH IDs)
+  for (const pattern of DASH_FORMAT_PATTERNS) {
+    if (pattern.test(f.format_id)) return true;
+  }
+
+  return false;
+}
+
+/**
+ * Check if a format is a true Progressive MP4 (combined video + audio).
+ * This is the ONLY video format we allow — it plays everywhere.
+ */
+function isProgressiveMp4(f: FormatLike): boolean {
+  const ext = f.ext.toLowerCase();
+
+  // Must be MP4 container
+  if (!STRICT_ALLOWED_VIDEO.has(ext)) return false;
+
+  // Must have BOTH video AND audio codecs (progressive = combined)
+  if (!f.vcodec) return false;
+  if (!f.acodec) return false;
+
+  // Must NOT be a DASH segment
+  if (isDashSegment(f)) return false;
+
+  // Must have a playable resolution (not "audio" or empty)
+  if (!f.resolution || f.resolution.toLowerCase() === "audio") return false;
+
+  return true;
+}
+
+/**
+ * Check if a format is a valid audio track (MP3 or M4A).
+ */
+function isAllowedAudio(f: FormatLike): boolean {
+  const ext = f.ext.toLowerCase();
+
+  // Must be in allowed audio extensions
+  if (!STRICT_ALLOWED_AUDIO.has(ext)) return false;
+
+  // Must have an audio codec
+  if (!f.acodec) return false;
+
+  // Must NOT have video (audio-only)
+  if (f.vcodec) return false;
+
+  // Must NOT be a DASH segment
+  if (isDashSegment(f)) return false;
+
+  return true;
+}
+
+/**
+ * STRICT filter: only Progressive MP4 + MP3/M4A.
+ *
+ * This is the core function that eliminates ALL problematic formats:
+ *   - DASH segments (.m4s, .m4a adaptive)
+ *   - Video-only tracks (no audio — silent video)
+ *   - webm/mkv containers (incompatible players)
+ *   - mhtml downloads (not media at all)
+ *   - fXXX format IDs (YouTube internal DASH IDs)
  */
 export function filterFormats(formats: FormatLike[]): FilteredFormats {
-  const mp4Formats: FormatLike[] = [];
+  const progressiveMp4: FormatLike[] = [];
   const audioFormats: FormatLike[] = [];
 
   for (const f of formats) {
-    const ext = f.ext.toLowerCase();
-
-    // Audio-only tracks
-    if (!f.vcodec && f.acodec) {
-      // Accept m4a and mp3 audio; reject ogg/opus/wav for MP3 output
-      if (ALLOWED_AUDIO_EXTENSIONS.includes(ext) || ext === "ogg" || ext === "opus") {
-        audioFormats.push(f);
-      }
-      continue;
+    if (isProgressiveMp4(f)) {
+      progressiveMp4.push(f);
+    } else if (isAllowedAudio(f)) {
+      audioFormats.push(f);
     }
-
-    // Video tracks (with or without audio)
-    if (f.vcodec) {
-      // Only include MP4-compatible formats
-      if (ext === "mp4") {
-        mp4Formats.push(f);
-      }
-      // Include webm/mkv ONLY if they can be remuxed to MP4 (ffmpeg available)
-      // and the codec is compatible (H.264 in webm is common on YouTube)
-      else if (
-        (ext === "webm" || ext === "mkv") &&
-        f.vcodec &&
-        (f.vcodec.startsWith("avc1") || f.vcodec.startsWith("vp9") || f.vcodec.startsWith("vp09"))
-      ) {
-        // Mark these as "convertible" — they'll be remuxed to MP4
-        mp4Formats.push({ ...f, ext: "mp4" });
-      }
-    }
+    // Everything else is REJECTED silently
   }
 
-  // Sort: highest resolution first for video, highest bitrate for audio
-  mp4Formats.sort((a, b) => {
+  // Sort: highest resolution first, then highest bitrate
+  progressiveMp4.sort((a, b) => {
     const ha = parseHeight(a.resolution);
     const hb = parseHeight(b.resolution);
     if (hb !== ha) return (hb ?? 0) - (ha ?? 0);
     return (b.tbr ?? 0) - (a.tbr ?? 0);
   });
 
+  // Sort audio: highest bitrate first
   audioFormats.sort((a, b) => (b.tbr ?? 0) - (a.tbr ?? 0));
 
   return {
-    mp4Formats,
+    progressiveMp4,
     audioFormats,
-    bestMp4FormatId: mp4Formats[0]?.format_id ?? "best",
-    bestAudioFormatId: audioFormats[0]?.format_id ?? "bestaudio",
+    bestMp4Id: progressiveMp4[0]?.format_id ?? "best",
+    bestAudioId: audioFormats[0]?.format_id ?? "bestaudio",
   };
 }
 
+// ── yt-dlp Format Selectors ───────────────────────────────────────────
+
 /**
- * Build the final format selector string for a download, enforcing MP4/MP3.
- *
- * @param selectedFormatId  The format ID the user picked (or "best")
- * @param isAudioOnly       Whether the user wants audio only
- * @param ffmpegAvailable   Whether ffmpeg is available for remuxing
+ * Strict MP4 format selector for yt-dlp.
+ * Forces: bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]
+ * Falls back to combined progressive MP4.
+ */
+export const MP4_FORMAT_SELECTOR =
+  "bestvideo[ext=mp4][vcodec^=avc1][acodec!=none]+bestaudio[ext=m4a]/" +
+  "bestvideo[ext=mp4][acodec!=none]+bestaudio[ext=m4a]/" +
+  "best[ext=mp4][vcodec^=avc1]/best[ext=mp4]/mp4";
+
+/**
+ * Strict MP4 format selector with height cap.
+ */
+export function mp4FormatWithHeight(maxHeight: number): string {
+  return (
+    `bestvideo[ext=mp4][vcodec^=avc1][height<=${maxHeight}][acodec!=none]+bestaudio[ext=m4a]/` +
+    `bestvideo[ext=mp4][height<=${maxHeight}][acodec!=none]+bestaudio[ext=m4a]/` +
+    `best[ext=mp4][height<=${maxHeight}]/` +
+    `bestvideo[height<=${maxHeight}]+bestaudio/best[height<=${maxHeight}]`
+  );
+}
+
+/**
+ * Strict MP3 audio-only selector.
+ */
+export const MP3_FORMAT_SELECTOR =
+  "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio";
+
+// ── Build Format Selector ─────────────────────────────────────────────
+
+/**
+ * Build the final yt-dlp format selector, enforcing MP4/MP3 only.
  */
 export function buildFormatSelector(
   selectedFormatId: string,
@@ -154,29 +207,18 @@ export function buildFormatSelector(
   ffmpegAvailable: boolean,
 ): string {
   if (isAudioOnly) {
-    // Force MP3 output
-    if (ffmpegAvailable) {
-      // Use best audio and let ffmpeg convert to MP3
-      return MP3_FORMAT_SELECTOR;
-    }
-    // No ffmpeg — return best audio in a compatible format
-    return "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio";
+    return ffmpegAvailable ? MP3_FORMAT_SELECTOR : "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio";
   }
 
-  // Video: enforce MP4
   if (selectedFormatId === "best") {
     return MP4_FORMAT_SELECTOR;
   }
 
-  // User picked a specific format — ensure it outputs as MP4
-  // If the selected format is webm/mkv and ffmpeg is available,
-  // let yt-dlp remux it; otherwise fall back to MP4 selector
+  // For a specific format, ensure it's progressive MP4
   if (ffmpegAvailable) {
-    return `${selectedFormatId}/bestvideo+bestaudio/best`;
+    return `${selectedFormatId}[acodec!=none]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]`;
   }
-
-  // No ffmpeg — must pick an MP4 format
-  return `${selectedFormatId}[ext=mp4]/best[ext=mp4]/mp4`;
+  return `${selectedFormatId}[ext=mp4][acodec!=none]/best[ext=mp4]/mp4`;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -187,20 +229,11 @@ function parseHeight(resolution: string): number | null {
   return m ? parseInt(m[1], 10) : null;
 }
 
-/**
- * Check if a file extension is allowed (MP4 or MP3/M4A).
- */
 export function isAllowedExtension(ext: string): boolean {
   const lower = ext.toLowerCase();
-  return (
-    ALLOWED_VIDEO_EXTENSIONS.includes(lower) ||
-    ALLOWED_AUDIO_EXTENSIONS.includes(lower)
-  );
+  return STRICT_ALLOWED_VIDEO.has(lower) || STRICT_ALLOWED_AUDIO.has(lower);
 }
 
-/**
- * Get the correct MIME type for the allowed formats.
- */
 export function getMimeType(filename: string): string {
   const ext = filename.split(".").pop()?.toLowerCase() ?? "";
   const mimeMap: Record<string, string> = {

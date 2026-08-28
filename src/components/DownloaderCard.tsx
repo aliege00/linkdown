@@ -37,7 +37,7 @@ import { useDownloadManager } from "@/hooks/use-download-manager";
 import { explainError } from "@/lib/error-help";
 import { normalizeVideoUrl } from "@/lib/url";
 import EngineSwitcher, { type EngineId, getSavedEngine, saveEngine } from "@/components/EngineSwitcher";
-import { mp4FormatWithHeight, MP4_FORMAT_SELECTOR, MP3_FORMAT_SELECTOR, buildFormatSelector, getMimeType } from "@/lib/format-enforce";
+import { mp4FormatWithHeight, MP4_FORMAT_SELECTOR, MP3_FORMAT_SELECTOR, buildFormatSelector, getMimeType, filterFormats, type FormatLike } from "@/lib/format-enforce";
 import {
   QUALITY_PRESETS,
   pickFormatForPreset,
@@ -106,18 +106,18 @@ export type PageState =
 import { HELP_CONTENT, type HelpLang } from "@/lib/help-content";
 
 
+/**
+ * Strict format grouping — only Progressive MP4 and MP3/M4A.
+ * ALL DASH/adaptive/webm/m4s/mhtml formats are eliminated.
+ */
 function groupFormats(formats: YtDlpFormat[]) {
-  const video: YtDlpFormat[] = [];
-  const videoOnly: YtDlpFormat[] = [];
-  const audioOnly: YtDlpFormat[] = [];
-
-  for (const f of formats) {
-    if (f.vcodec && f.acodec) video.push(f);
-    else if (f.vcodec) videoOnly.push(f);
-    else audioOnly.push(f);
-  }
-
-  return { video, videoOnly, audioOnly };
+  // Cast to FormatLike for the strict filter
+  const filtered = filterFormats(formats as unknown as FormatLike[]);
+  return {
+    video: filtered.progressiveMp4 as unknown as YtDlpFormat[],
+    videoOnly: [], // REMOVED — DASH segments are never shown
+    audioOnly: filtered.audioFormats as unknown as YtDlpFormat[],
+  };
 }
 
 function getQualityLabel(resolution: string): string {
@@ -1395,22 +1395,41 @@ export default function DownloaderCard({
     const cleanUrl = normalizeVideoUrl(url);
     if (!cleanUrl || !selectedFormat) return;
 
+    // Pre-validate: ensure the selected format exists in the filtered list
+    const safeFormats = groupFormats(videoInfo?.formats ?? []);
+    const allSafe = [...safeFormats.video, ...safeFormats.audioOnly];
+    const formatExists = allSafe.some((f) => f.format_id === selectedFormat);
+    if (!formatExists && allSafe.length > 0) {
+      // Selected format was filtered out (DASH/webm) — auto-pick best MP4
+      setSelectedFormat(safeFormats.video[0]?.format_id ?? safeFormats.audioOnly[0]?.format_id ?? "");
+      setErrorMsg(
+        helpLang === "tr"
+          ? "Seçilen format desteklenmiyor — MP4/MP3 olarak otomatik düzeltildi"
+          : "Selected format unsupported — auto-corrected to MP4/MP3"
+      );
+      setErrorPhase("analyze");
+      updateState("error");
+      return;
+    }
+
     updateState("downloading");
     setErrorMsg("");
     setDownloadProgress({ percent: 0, speed: "0", eta: "--:--" });
     // Throttle window for progress re-renders (see onProgress below).
     let lastTick = 0;
 
-    // Enforce MP4/MP3 output format. The format selector forces H.264/AAC
-    // inside MP4 container, rejecting webm/mkv and other raw formats.
+    // CRITICAL: Always use strict MP4 format selector to prevent crashes.
+    // Never pass raw format IDs to yt-dlp — they may refer to DASH segments
+    // that cause the native plugin to crash or produce unplayable files.
     const picked = videoInfo?.formats.find(
       (f) => f.format_id === selectedFormat,
     );
-    const formatSpec = buildFormatSelector(
-      selectedFormat,
-      false, // not audio-only
-      videoInfo?.ffmpeg_available ?? false,
-    );
+    // Determine if user selected audio-only
+    const isAudioSelection = selectedFormat === "bestaudio" ||
+      (picked && !picked.vcodec && !!picked.acodec);
+    const formatSpec = isAudioSelection
+      ? MP3_FORMAT_SELECTOR
+      : MP4_FORMAT_SELECTOR;
 
     const workId = await startDownload({
       url: cleanUrl,
@@ -1666,11 +1685,15 @@ export default function DownloaderCard({
   };
 
   const handleNewDownload = () => {
-    // If a native download is still running, actually stop it instead of
-    // only hiding the progress screen.
-    if (workIdRef.current) {
-      cancelDownload(workIdRef.current);
-      workIdRef.current = null;
+    try {
+      // If a native download is still running, actually stop it instead of
+      // only hiding the progress screen.
+      if (workIdRef.current) {
+        cancelDownload(workIdRef.current).catch(() => {});
+        workIdRef.current = null;
+      }
+    } catch {
+      // Non-critical — cancel might fail if the plugin is unavailable
     }
     resetAll();
   };
@@ -2054,25 +2077,9 @@ export default function DownloaderCard({
                             </div>
                           )}
 
-                          {/* Video only formats (high quality, needs separate audio) */}
-                          {grouped.videoOnly.length > 0 &&
-                            videoInfo.ffmpeg_available && (
-                              <div>
-                                <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-2 font-medium">
-                                  Video Only (requires ffmpeg)
-                                </p>
-                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                                  {grouped.videoOnly.slice(0, 6).map((f) => (
-                                    <FormatCard
-                                      key={f.format_id}
-                                      format={f}
-                                      selected={selectedFormat === f.format_id}
-                                      onSelect={handleSelectFormat}
-                                    />
-                                  ))}
-                                </div>
-                              </div>
-                            )}
+                          {/* Video-only DASH segments are intentionally REMOVED.
+                              Only Progressive MP4 (combined video+audio) is shown.
+                              This prevents crashes from selecting unplayable .m4s segments. */}
 
                           {/* Audio only */}
                           {grouped.audioOnly.length > 0 && (
