@@ -30,6 +30,7 @@ import {
   type DownloadLocation,
   type YouTubeSettings,
 } from "@/lib/ytdlp-native";
+import { saveToGallery, type GallerySaveResult } from "@/lib/gallery-save";
 import { explainError } from "@/lib/error-help";
 import { normalizeVideoUrl } from "@/lib/url";
 import {
@@ -1141,6 +1142,8 @@ export default function DownloaderCard({
   }>({ percent: 0, speed: "0", eta: "--:--" });
   const [savedDownloads, setSavedDownloads] = useState<DownloadEntry[]>([]);
   const [lastCompleted, setLastCompleted] = useState<CompletedDownload | null>(null);
+  const [gallerySaveState, setGallerySaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [gallerySaveResult, setGallerySaveResult] = useState<GallerySaveResult | null>(null);
   const [downloadLocation, setDownloadLocation] = useState<DownloadLocation | null>(null);
   const [pickingFolder, setPickingFolder] = useState(false);
   const [ytSettings, setYtSettings] = useState<YouTubeSettings | null>(null);
@@ -2193,6 +2196,38 @@ export default function DownloaderCard({
                       Open video
                     </Button>
                   )}
+                  {lastCompleted?.uri && (
+                    <Button
+                      onClick={async () => {
+                        if (!lastCompleted?.uri) return;
+                        setGallerySaveState("saving");
+                        try {
+                          const res = await saveToGallery({
+                            filePath: lastCompleted.uri,
+                            displayName: lastCompleted.fileName || undefined,
+                          });
+                          setGallerySaveResult(res);
+                          if (res.success) setGallerySaveState("saved");
+                          else setGallerySaveState("error");
+                        } catch {
+                          setGallerySaveState("error");
+                        }
+                      }}
+                      disabled={gallerySaveState === "saving" || gallerySaveState === "saved"}
+                      variant="outline"
+                      className="flex-1 gap-2 active:scale-[0.97]"
+                    >
+                      {gallerySaveState === "saving" ? (
+                        <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</>
+                      ) : gallerySaveState === "saved" ? (
+                        <><Check className="h-4 w-4" /> Saved</>
+                      ) : gallerySaveState === "error" ? (
+                        <><AlertCircle className="h-4 w-4" /> Error</>
+                      ) : (
+                        <><Video className="h-4 w-4" /> Save to gallery</>
+                      )}
+                    </Button>
+                  )}
                   <Button
                     onClick={handleNewDownload}
                     variant={lastCompleted?.uri ? "outline" : "default"}
@@ -2206,6 +2241,9 @@ export default function DownloaderCard({
                     Try again
                   </Button>
                 </div>
+                {gallerySaveState === "error" && gallerySaveResult?.error && (
+                  <p className="text-xs text-destructive mt-2 text-center">{gallerySaveResult.error}</p>
+                )}
               </motion.div>
             )}
           </AnimatePresence>

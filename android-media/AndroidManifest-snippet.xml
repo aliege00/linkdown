@@ -1,0 +1,48 @@
+<!-- 
+  AndroidManifest.xml — Required permissions for Scoped Storage / MediaStore
+  
+  Add these to your app's AndroidManifest.xml inside the <manifest> tag.
+  These are MERGE-compatible — add them alongside your existing permissions.
+-->
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     Android 13+ (API 33+): Granular media permissions
+     Only needed if you READ existing media. For WRITING new videos via
+     MediaStore, no permission is required on Android 10+.
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     Android 9 and below (legacy): Broad storage write
+     On Android 10+ this permission is ignored (scoped storage enforced).
+     Include it so older devices can still write to public Downloads.
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<uses-permission
+    android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+    android:maxSdkVersion="28" />
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     Optional: Request legacy external storage on Android 10 only
+     Needed if you use direct file paths instead of MediaStore on API 29.
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<application
+    android:requestLegacyExternalStorage="true"
+    ... >
+</application>
+
+<!--
+  ┌──────────────────────────────────────────────────────────────────────────┐
+  │  PERMISSION SUMMARY BY API LEVEL                                        │
+  ├──────────────┬───────────────────────────────────────────────────────────┤
+  │ API Level    │ What you need                                            │
+  ├──────────────┼───────────────────────────────────────────────────────────┤
+  │ 33+ (13)     │ READ_MEDIA_VIDEO (for reading), no write permission     │
+  │              │ needed for MediaStore inserts                            │
+  ├──────────────┼───────────────────────────────────────────────────────────┤
+  │ 29–32 (10-12)│ No permission needed for MediaStore writes.             │
+  │              │ WRITE_EXTERNAL_STORAGE is ignored.                       │
+  ├──────────────┼───────────────────────────────────────────────────────────┤
+  │ ≤ 28 (9-)    │ WRITE_EXTERNAL_STORAGE + requestLegacyExternalStorage   │
+  │              │ (for direct file paths)                                  │
+  └──────────────┴───────────────────────────────────────────────────────────┘
+-->
