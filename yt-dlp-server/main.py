@@ -40,6 +40,7 @@ logger = logging.getLogger("vidfetch.server")
 
 # ── Auto-updater (runs in background on import/startup) ─────────────────────
 from auto_update import start_auto_updater, get_update_status  # noqa: E402
+from dependency_checker import startup_check as check_ffmpeg_startup, get_dependency_status
 
 update_stop_event = start_auto_updater()
 
@@ -169,6 +170,7 @@ def _cleanup_loop() -> None:
 def health():
     """Health check endpoint."""
     status = get_update_status()
+    ffmpeg_status = get_dependency_status()
     return {
         "status": "ok",
         "version": status["installed"],
@@ -177,6 +179,9 @@ def health():
         "engines": {
             "yt-dlp": status["installed"],
             "gallery-dl": "available" if shutil.which("gallery-dl") else "not found",
+        },
+        "dependencies": {
+            "ffmpeg": ffmpeg_status,
         },
     }
 
@@ -584,6 +589,13 @@ def on_startup():
     logger.info("VidFetch yt-dlp Server starting on %s:%s", HOST, PORT)
     logger.info("Download dir: %s", DOWNLOAD_DIR)
     logger.info("yt-dlp version: %s", _current_version())
+
+    # Check FFmpeg availability (non-blocking — downloads in background if missing)
+    ffmpeg_path = check_ffmpeg_startup()
+    if ffmpeg_path:
+        logger.info("FFmpeg available: %s", ffmpeg_path)
+    else:
+        logger.info("FFmpeg not found — downloading in background...")
 
     # Start cleanup thread (removes old downloads + orphan .part/.state files)
     cleanup_thread = threading.Thread(target=_cleanup_loop, daemon=True)
