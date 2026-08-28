@@ -268,13 +268,23 @@ class ChunkedDownloader:
             state.total_size, num_chunks, effective_threads,
         )
 
+        # Store state for cleanup access
+        self._current_state = state
+
         # Download chunks in parallel
         return self._download_chunks(url, headers, on_progress, state)
 
-    def cancel(self):
-        """Cancel the current download."""
+    def cancel(self, cleanup: bool = True):
+        """Cancel the current download.
+        
+        Args:
+            cleanup: If True, remove .part files after cancellation.
+                     Set to False when you want to keep parts for resume.
+        """
         self._cancel_event.set()
         self._pause_event.set()  # Unblock if paused
+        if cleanup:
+            self._cleanup_parts()
 
     def pause(self):
         """Pause the current download."""
@@ -293,6 +303,20 @@ class ChunkedDownloader:
     @property
     def is_cancelled(self) -> bool:
         return self._cancel_event.is_set()
+
+    def _cleanup_parts(self):
+        """Remove all .part files for the current download."""
+        if not hasattr(self, '_current_state') or not self._current_state:
+            return
+        state = self._current_state
+        for chunk in state.chunks:
+            if chunk.part_file and os.path.exists(chunk.part_file):
+                try:
+                    os.remove(chunk.part_file)
+                    logger.debug("Cleaned up part file: %s", chunk.part_file)
+                except OSError as exc:
+                    logger.debug("Could not remove %s: %s", chunk.part_file, exc)
+        logger.info("Cleaned up %d part files for %s", len(state.chunks), state.output_path)
 
     # ── Internal: Chunked download ──────────────────────────────────────────
 
@@ -331,8 +355,10 @@ class ChunkedDownloader:
                 state.error = "Download cancelled"
                 state.failed = True
 
-            # Merge completed chunks
-            if not state.failed:
+            # Cleanup on failure/cancel, merge on success
+            if state.failed:
+                self._cleanup_parts()
+            elif not state.failed:
                 self._merge_chunks(state)
                 state.finished = True
                 logger.info("Download complete: %s", state.output_path)

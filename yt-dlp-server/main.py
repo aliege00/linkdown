@@ -537,11 +537,11 @@ def chunked_resume(download_id: str):
 
 @app.post("/api/chunked/cancel/{download_id}")
 def chunked_cancel(download_id: str):
-    """Cancel a chunked download."""
+    """Cancel a chunked download and clean up .part files."""
     dl = active_downloaders.get(download_id)
     if not dl:
         return {"success": False, "error": "Download not found"}
-    dl.cancel()
+    dl.cancel(cleanup=True)
     return {"success": True, "cancelled": True}
 
 
@@ -585,9 +585,13 @@ def on_startup():
     logger.info("Download dir: %s", DOWNLOAD_DIR)
     logger.info("yt-dlp version: %s", _current_version())
 
-    # Start cleanup thread
+    # Start cleanup thread (removes old downloads + orphan .part/.state files)
     cleanup_thread = threading.Thread(target=_cleanup_loop, daemon=True)
     cleanup_thread.start()
+
+    # Clean up orphan .state files on startup
+    resume_manager.cleanup_stale(max_age_hours=24)
+    logger.info("Startup orphan cleanup complete")
 
 
 if __name__ == "__main__":
