@@ -1,7 +1,8 @@
 import { cn } from "@/lib/utils";
 import { motion, LayoutGroup } from "framer-motion";
 import { Download, HelpCircle, Info, type LucideIcon } from "lucide-react";
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { currentGlassBar } from "@/lib/glass-styles";
 
 export type TabId = "download" | "help" | "about";
 
@@ -25,14 +26,26 @@ export default function BottomTabBar({
   active: TabId;
   onChange: (tab: TabId) => void;
 }) {
+  const [barStyle, setBarStyle] = useState(currentGlassBar());
+
+  // Re-read on theme change
+  useEffect(() => {
+    const obs = new MutationObserver(() => setBarStyle(currentGlassBar()));
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => obs.disconnect();
+  }, []);
+
   const handleTab = useCallback(
     (id: TabId) => { hapticTap(); onChange(id); },
     [onChange],
   );
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 safe-area-bottom">
-      <div className="liquid-glass-bar mx-4 mb-[max(16px,env(safe-area-inset-bottom))]">
+    <nav className="fixed bottom-0 left-0 right-0 z-50" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+      <div
+        className="mx-4 mb-4"
+        style={barStyle}
+      >
         <LayoutGroup id="liquidTab">
           <div className="relative flex items-center justify-around px-1 py-1">
             {TABS.map((tab) => {
@@ -50,9 +63,15 @@ export default function BottomTabBar({
                   {isActive && (
                     <motion.div
                       layoutId="liquidPill"
-                      className="absolute inset-x-1 inset-y-0.5 rounded-full bg-white/20 dark:bg-white/15 shadow-lg border border-white/30 dark:border-white/10"
+                      className="absolute inset-x-1 inset-y-0.5 rounded-full shadow-lg border"
+                      style={{
+                        background: "rgba(255,255,255,0.2)",
+                        borderColor: "rgba(255,255,255,0.3)",
+                        WebkitTransform: "translateZ(0)",
+                        transform: "translateZ(0)",
+                        willChange: "transform" as const,
+                      }}
                       transition={{ type: "spring", stiffness: 420, damping: 32, mass: 0.8 }}
-                      style={{ willChange: "transform", transform: "translateZ(0)" }}
                     />
                   )}
                   <div className="relative z-10">

@@ -16,7 +16,6 @@ import {
   Clock,
   Copy,
   Check,
-  RefreshCw,
   HelpCircle,
   Info,
   CheckCircle2,
@@ -32,6 +31,11 @@ import { HELP_CONTENT, type HelpLang } from "@/lib/help-content";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import {
+  currentGlassCard,
+  glassCard,
+  glassCardDark,
+} from "@/lib/glass-styles";
 
 /* ─── Copy Command ────────────────────────────────────────────── */
 function CopyCommand({ command, label, copiedLabel }: { command: string; label: string; copiedLabel: string }) {
@@ -47,6 +51,11 @@ function CopyCommand({ command, label, copiedLabel }: { command: string; label: 
       {copied ? copiedLabel : label}
     </button>
   );
+}
+
+/** Merge base glass style with optional overrides */
+function g(base: React.CSSProperties, extra?: React.CSSProperties): React.CSSProperties {
+  return { ...base, ...extra };
 }
 
 export default function Dashboard() {
@@ -65,41 +74,55 @@ export default function Dashboard() {
   const handleSignOut = async () => { await signOut(); navigate("/"); };
   const copyLink = useCallback(async (record: DownloadRecord) => { try { await navigator.clipboard.writeText(record.url); } catch { /* noop */ } }, []);
   const help = HELP_CONTENT[helpLang];
+  const gc = currentGlassCard();
 
   return (
-    <div className="min-h-screen bg-background flex flex-col" style={{ touchAction: "pan-y" }}>
+    /* ── Root: NO height lock, NO overflow hidden, natural scroll ── */
+    <div
+      className="w-full min-h-screen flex flex-col bg-background"
+      style={{ touchAction: "pan-y", WebkitOverflowScrolling: "touch" }}
+    >
       {/* ═══ Floating Glass Top Bar ═══ */}
-      <header className="sticky top-0 z-40 liquid-glass-card rounded-b-2xl mx-3 mt-2 px-4 py-3 flex items-center justify-between gap-3" style={{ touchAction: "pan-y" }}>
+      <header
+        className="sticky top-0 z-40 mx-3 mt-2 px-4 py-3 flex items-center justify-between gap-3"
+        style={g(gc, { borderRadius: "20px" })}
+      >
         <div className="flex items-center gap-3 min-w-0">
           <div className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-400 to-violet-500 text-white shadow-lg shadow-cyan-500/20">
             <Sparkles className="size-4" />
           </div>
           <div className="min-w-0">
             <h1 className="text-sm font-bold tracking-tight truncate bg-gradient-to-r from-cyan-500 to-violet-500 bg-clip-text text-transparent">VidFetch</h1>
-            <p className="text-[10px] text-muted-foreground/70 truncate">v1.2 · {user?.name || "Guest"}</p>
+            <p className="text-[10px] text-muted-foreground/70 truncate">v1.6 · {user?.name || "Guest"}</p>
           </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           <ThemeToggle />
-          <Button variant="ghost" size="icon" className="size-8 ios-btn" onClick={handleSignOut} title="Çıkış">
+          <Button variant="ghost" size="icon" className="size-8" onClick={handleSignOut} title="Çıkış">
             <LogOut className="size-4" />
           </Button>
         </div>
       </header>
 
-      {/* ═══ Main Content ═══ */}
-      <main className="flex-1 px-4 pt-4 pb-28" style={{ touchAction: "pan-y" }}>
+      {/* ═══ Main Content — NO overflow locks ═══ */}
+      <main
+        className="flex-1 px-4 pt-4 pb-32"
+        style={{ touchAction: "pan-y" }}
+      >
         <AnimatePresence mode="wait">
           {/* ── İndir Tab ── */}
           {tab === "download" && (
             <motion.div key="download" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }} className="mx-auto max-w-2xl space-y-4">
               {/* Hero Input Card */}
-              <div className="liquid-glass-card p-5 space-y-4">
+              <div className="p-5 space-y-4" style={gc}>
                 <div className="flex items-center gap-2 mb-1">
                   <Download className="size-4 text-cyan-400" />
                   <p className="text-sm font-semibold">Video İndir</p>
                 </div>
-                <div className="neon-glow-input flex items-center gap-2 rounded-2xl bg-white/5 dark:bg-white/[0.03] border border-white/15 px-4 py-3 transition-all duration-300">
+                <div
+                  className="flex items-center gap-2 px-4 py-3 transition-all duration-300"
+                  style={{ WebkitBackdropFilter: "blur(8px)", backdropFilter: "blur(8px)", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: "16px", WebkitBoxShadow: "inset 0 2px 4px rgba(0,0,0,0.06)", boxShadow: "inset 0 2px 4px rgba(0,0,0,0.06)" }}
+                >
                   <input
                     type="url"
                     placeholder="YouTube, TikTok, Instagram linkini yapıştırın..."
@@ -121,14 +144,14 @@ export default function Dashboard() {
                     ))}
                   </div>
                 </div>
-                <Button className="w-full ios-btn rounded-2xl h-12 bg-gradient-to-r from-cyan-500 to-violet-500 hover:from-cyan-600 hover:to-violet-600 text-white font-semibold shadow-lg shadow-cyan-500/20" onClick={() => navigate("/")}>
+                <Button className="w-full rounded-2xl h-12 bg-gradient-to-r from-cyan-500 to-violet-500 hover:from-cyan-600 hover:to-violet-600 text-white font-semibold shadow-lg shadow-cyan-500/20" onClick={() => navigate("/")}>
                   <Download className="size-4 mr-2" />
                   İndirmeyi Başlat
                 </Button>
               </div>
 
               {/* Engine Status */}
-              <div className="liquid-glass-card p-5">
+              <div className="p-5" style={gc}>
                 <div className="flex items-center gap-3 mb-4">
                   <div className="flex size-9 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-500">
                     <CheckCircle2 className="size-4" />
@@ -153,7 +176,7 @@ export default function Dashboard() {
               </div>
 
               {/* Desteklenen Platformlar */}
-              <div className="liquid-glass-card p-5">
+              <div className="p-5" style={gc}>
                 <p className="text-xs font-semibold text-muted-foreground/60 uppercase tracking-wider mb-3">Desteklenen Platformlar</p>
                 <div className="flex flex-wrap gap-2">
                   {["YouTube", "TikTok", "Twitter/X", "Instagram", "Vimeo", "Facebook", "Twitch"].map((p) => (
@@ -171,12 +194,12 @@ export default function Dashboard() {
                 <div className="flex items-center gap-0.5 rounded-full border border-border/30 bg-white/5 dark:bg-white/[0.02] p-0.5">
                   {(["tr", "en"] as const).map((lang) => (
                     <button key={lang} type="button" onClick={() => { setHelpLang(lang); localStorage.setItem("vidfetch.helpLang", lang); }}
-                      className={cn("rounded-full px-4 py-1.5 text-xs font-medium transition-colors ios-btn", helpLang === lang ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}
+                      className={cn("rounded-full px-4 py-1.5 text-xs font-medium transition-colors", helpLang === lang ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}
                     >{lang === "tr" ? "Türkçe" : "English"}</button>
                   ))}
                 </div>
               </div>
-              <div className="liquid-glass-card p-4">
+              <div className="p-4" style={gc}>
                 <Tabs defaultValue="bot">
                   <TabsList className="w-full h-auto grid grid-cols-3 gap-0.5 p-1">
                     <TabsTrigger value="bot" className="gap-1 px-1 py-2 text-[11px] leading-tight whitespace-normal text-center"><ShieldAlert className="h-3.5 w-3.5 shrink-0" />{help.tabs.bot}</TabsTrigger>
@@ -242,12 +265,12 @@ export default function Dashboard() {
           {/* ── Hakkında Tab ── */}
           {tab === "about" && (
             <motion.div key="about" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }} className="mx-auto max-w-2xl space-y-4">
-              <div className="liquid-glass-card p-5 text-center space-y-3">
+              <div className="p-5 text-center space-y-3" style={gc}>
                 <div className="mx-auto flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-400 to-violet-500 text-white shadow-xl shadow-cyan-500/25">
                   <Sparkles className="size-7" />
                 </div>
                 <h2 className="text-xl font-bold bg-gradient-to-r from-cyan-500 to-violet-500 bg-clip-text text-transparent">VidFetch</h2>
-                <p className="text-xs text-muted-foreground/70">v1.2 · On-device video downloader</p>
+                <p className="text-xs text-muted-foreground/70">v1.6 · On-device video downloader</p>
                 <div className="grid grid-cols-3 gap-3 pt-2">
                   {[
                     { label: "Motor", value: "yt-dlp" },
@@ -261,19 +284,19 @@ export default function Dashboard() {
                   ))}
                 </div>
               </div>
-              <div className="liquid-glass-card p-5">
+              <div className="p-5" style={gc}>
                 <p className="text-xs text-muted-foreground/70 leading-relaxed text-center">
                   VidFetch, <a href="https://github.com/yt-dlp/yt-dlp" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-medium">yt-dlp</a> motorunu doğrudan cihazınızda çalıştırır. Sunucu, bulut veya hesap yoktur. 1000+ site desteklenir — sınırsız, anahtarsız indirme.
                 </p>
               </div>
-              <div className="liquid-glass-card p-4">
+              <div className="p-4" style={gc}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Clock className="size-4 text-muted-foreground/60" />
                     <p className="text-sm font-semibold">Geçmiş</p>
                   </div>
                   {history.length > 0 && (
-                    <Button variant="ghost" size="sm" className="gap-1 text-xs ios-btn" onClick={handleClearHistory}>
+                    <Button variant="ghost" size="sm" className="gap-1 text-xs" onClick={handleClearHistory}>
                       <Trash2 className="size-3" />Temizle
                     </Button>
                   )}
@@ -291,7 +314,7 @@ export default function Dashboard() {
                           <p className="text-xs font-medium truncate">{record.title}</p>
                           <p className="text-[10px] text-muted-foreground/60">{record.formatLabel || "video"} · {new Date(record.time).toLocaleDateString()}</p>
                         </div>
-                        <Button variant="ghost" size="icon" className="size-6 ios-btn" onClick={() => copyLink(record)}><Copy className="size-3" /></Button>
+                        <Button variant="ghost" size="icon" className="size-6" onClick={() => copyLink(record)}><Copy className="size-3" /></Button>
                       </li>
                     ))}
                   </ul>
