@@ -9,7 +9,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Send, Bot, User, Loader2, Sparkles, AlertCircle } from "lucide-react";
 import { streamChat, isGeminiAvailable, type ChatMessage } from "@/lib/gemini";
-import { currentGlassCard } from "@/lib/glass-styles";
+import { GlassCard } from "@/components/GlassCard";
 
 const SUGGESTIONS_TR = [
   "YouTube'dan MP4 nasıl indiririm?",
@@ -34,7 +34,7 @@ export default function AiAssistant({ lang }: { lang: "tr" | "en" }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<boolean>(false);
 
-  const gc = currentGlassCard();
+
   const suggestions = lang === "tr" ? SUGGESTIONS_TR : SUGGESTIONS_EN;
   const placeholder = lang === "tr" ? "Sorunuzu yazın..." : "Type your question...";
 
@@ -120,7 +120,7 @@ export default function AiAssistant({ lang }: { lang: "tr" | "en" }) {
   }
 
   return (
-    <div className="flex flex-col rounded-2xl overflow-hidden border border-border/20" style={gc}>
+    <GlassCard interactive className="!p-0 overflow-hidden">
       {/* Chat messages area */}
       <div
         className="flex-1 overflow-y-auto px-4 pt-4 space-y-3 max-h-[360px]"
@@ -231,6 +231,6 @@ export default function AiAssistant({ lang }: { lang: "tr" | "en" }) {
           )}
         </button>
       </div>
-    </div>
+    </GlassCard>
   );
 }

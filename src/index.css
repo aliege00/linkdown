@@ -1,9 +1,11 @@
-/* DO NOT CHANGE */
+/* ═══ VidFetch v2.0 — Clean Foundation ═══════════════════════════════════════ */
+
+/* ── Tailwind v4 core ────────────────────────────────────────────────────── */
 @import "tailwindcss";
 @import "tw-animate-css";
 @custom-variant dark (&:is(.dark *));
 
-/* DO NOT CHANGE */
+/* ── Theme tokens (shadcn/ui compat) ─────────────────────────────────────── */
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -40,28 +42,16 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
-
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
 
   --animate-shimmer: shimmer 2s ease-in-out infinite;
-  --animate-float: float 6s ease-in-out infinite;
-  --animate-glow: glow 3s ease-in-out infinite alternate;
-
   @keyframes shimmer {
     0%, 100% { opacity: 0.4; }
     50% { opacity: 1; }
   }
-  @keyframes float {
-    0%, 100% { transform: translateY(0px); }
-    50% { transform: translateY(-10px); }
-  }
-  @keyframes glow {
-    0% { box-shadow: 0 0 20px rgba(59, 130, 246, 0.1); }
-    100% { box-shadow: 0 0 40px rgba(59, 130, 246, 0.2); }
-  }
 }
 
-/* MODERN THEME — quiet neutrals, refined accent */
+/* ── Light theme ─────────────────────────────────────────────────────────── */
 :root {
   --radius: 0.75rem;
   --background: oklch(0.985 0 0);
@@ -97,6 +87,7 @@
   --sidebar-ring: oklch(0.708 0 0);
 }
 
+/* ── Dark theme ──────────────────────────────────────────────────────────── */
 .dark {
   --background: oklch(0.12 0 0);
   --foreground: oklch(0.965 0 0);
@@ -131,6 +122,7 @@
   --sidebar-ring: oklch(0.65 0 0);
 }
 
+/* ── Base reset ──────────────────────────────────────────────────────────── */
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -160,49 +152,7 @@
   }
 }
 
-/* Smooth theme transitions — applied to all color-related properties */
-*,
-*::before,
-*::after {
-  transition: color 0.35s cubic-bezier(0.4, 0, 0.2, 1),
-              background-color 0.35s cubic-bezier(0.4, 0, 0.2, 1),
-              border-color 0.35s cubic-bezier(0.4, 0, 0.2, 1),
-              outline-color 0.35s cubic-bezier(0.4, 0, 0.2, 1),
-              box-shadow 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* But exclude elements where transitions would cause visual jank or infinite loops */
-.no-theme-transition,
-.no-theme-transition *,
-.no-theme-transition *::before,
-.no-theme-transition *::after {
-  transition: none !important;
-}
-
-/* Disable theme transitions when the user prefers reduced motion */
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    transition: none !important;
-  }
-}
-
-/* Subtle background pattern */
-.bg-subtle-grid {
-  background-image:
-    linear-gradient(var(--border) 1px, transparent 1px),
-    linear-gradient(90deg, var(--border) 1px, transparent 1px);
-  background-size: 48px 48px;
-  opacity: 0.3;
-}
-
-/* Smooth scroll sections with fixed header offset */
-.scroll-margin-top {
-  scroll-margin-top: 5rem;
-}
-
-/* Custom scrollbar — subtle, thin, modern */
+/* ── Scrollbar ───────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -218,7 +168,7 @@
   background: oklch(0.55 0 0 / 0.25);
 }
 
-/* Reduced motion preference */
+/* ── Reduced motion ──────────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -230,293 +180,29 @@
   }
 }
 
-/* Utility: tap highlight color for mobile */
+/* ── Utility: tap highlight ──────────────────────────────────────────────── */
 * {
   -webkit-tap-highlight-color: oklch(0.55 0.14 255 / 0.1);
 }
 
-/* ─── App smoothness polish ─────────────────────────────────── */
-html {
-  min-height: 100dvh;
-  height: auto !important;
-  overflow-x: hidden !important;
-  overflow-y: auto !important;
-  touch-action: pan-y !important;
-  -webkit-overflow-scrolling: touch !important;
-}
-
-body {
-  min-height: 100dvh;
-  height: auto !important;
-  overflow-x: hidden !important;
-  overflow-y: auto !important;
-  touch-action: pan-y !important;
-  -webkit-overflow-scrolling: touch !important;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  text-rendering: optimizeLegibility;
-  overscroll-behavior-y: none;
-}
-
-#root {
-  min-height: 100dvh;
-  height: auto !important;
-  overflow: visible !important;
-}
-
-/* ─── Dark gradient background ──────────────────────────────── */
-.dark body {
-  background: linear-gradient(
-    165deg,
-    oklch(0.12 0 0) 0%,
-    oklch(0.10 0.01 260) 40%,
-    oklch(0.08 0.015 255) 100%
-  );
-  background-attachment: fixed;
-}
-
-body {
-  background: linear-gradient(
-    165deg,
-    oklch(0.985 0 0) 0%,
-    oklch(0.97 0.005 260) 40%,
-    oklch(0.95 0.01 255) 100%
-  );
-  background-attachment: fixed;
-}
-
-/* ─── iOS Glassmorphism (GPU-accelerated) ───────────────────── */
-.glass-card {
-  background: rgba(255, 255, 255, 0.06);
-  backdrop-filter: blur(10px) saturate(180%);
-  -webkit-backdrop-filter: blur(10px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 20px;
-  box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  transform: translateZ(0);
-  touch-action: pan-y !important;
-}
-
-.dark .glass-card {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  touch-action: pan-y !important;
-}
-
-/* ─── iOS 18 Liquid Glass Card ──────────────────────────────── */
-.liquid-glass-card {
-  background: rgba(255, 255, 255, 0.07);
-  backdrop-filter: blur(8px) saturate(160%);
-  -webkit-backdrop-filter: blur(8px) saturate(160%);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 24px;
-  box-shadow:
-    0 12px 32px 0 rgba(0, 0, 0, 0.25),
-    inset 0 1px 1px rgba(255, 255, 255, 0.15);
-  transform: translateZ(0);
-  will-change: transform;
-  touch-action: pan-y !important;
-}
-
-.dark .liquid-glass-card {
-  background: rgba(18, 18, 24, 0.65);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow:
-    0 12px 32px 0 rgba(0, 0, 0, 0.5),
-    inset 0 1px 1px rgba(255, 255, 255, 0.05);
-  touch-action: pan-y !important;
-}
-
-/* ─── Neon Glow Input ─────────────────────────────────────── */
-.neon-glow-input {
-  transition: box-shadow 0.3s ease, border-color 0.3s ease;
-}
-
-.neon-glow-input:focus-within {
-  box-shadow:
-    0 0 20px rgba(59, 130, 246, 0.35),
-    0 0 40px rgba(99, 102, 241, 0.15);
-  border-color: rgba(99, 102, 241, 0.6);
-}
-
-.dark .neon-glow-input:focus-within {
-  box-shadow:
-    0 0 20px rgba(99, 102, 241, 0.4),
-    0 0 40px rgba(139, 92, 246, 0.2);
-  border-color: rgba(139, 92, 246, 0.6);
-}
-
-/* Light mode glass variant */
-.glass-card-light {
-  background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(10px) saturate(180%);
-  -webkit-backdrop-filter: blur(10px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  border-radius: 20px;
-  box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.8);
-  transform: translateZ(0);
-  touch-action: pan-y !important;
-}
-
-/* iOS-style inset input */
-.ios-input {
-  border-radius: 16px;
-  box-shadow:
-    inset 0 2px 4px rgba(0, 0, 0, 0.06),
-    inset 0 1px 2px rgba(0, 0, 0, 0.04);
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  transition: all 0.2s ease;
-}
-
-.dark .ios-input {
-  box-shadow:
-    inset 0 2px 6px rgba(0, 0, 0, 0.3),
-    inset 0 1px 2px rgba(0, 0, 0, 0.2);
-  background: rgba(0, 0, 0, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.ios-input:focus {
-  border-color: oklch(0.55 0.14 255 / 0.4);
-  box-shadow:
-    inset 0 2px 4px rgba(0, 0, 0, 0.06),
-    0 0 0 3px oklch(0.55 0.14 255 / 0.12);
-}
-
-.dark .ios-input:focus {
-  box-shadow:
-    inset 0 2px 6px rgba(0, 0, 0, 0.3),
-    0 0 0 3px oklch(0.65 0.16 255 / 0.2);
-}
-
-/* iOS-style button with tap scale */
-.ios-btn {
-  border-radius: 14px;
-  transition: transform 0.15s ease, box-shadow 0.2s ease;
-}
-
-.ios-btn:active {
-  transform: scale(0.95);
-}
-
-/* ─── Liquid Glass Tab Bar (iOS 18+ Floating Pill) ─────────── */
-.liquid-glass-bar {
-  position: relative;
-  touch-action: pan-y !important;
-  border-radius: 35px;
-  /* Light mode: frosted white glass */
-  background: rgba(255, 255, 255, 0.72);
-  backdrop-filter: blur(16px) saturate(200%);
-  -webkit-backdrop-filter: blur(16px) saturate(200%);
-  border: 1px solid rgba(255, 255, 255, 0.45);
-  box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.12),
-    0 2px 8px rgba(0, 0, 0, 0.06),
-    inset 0 1px 1px rgba(255, 255, 255, 0.6),
-    inset 0 -1px 1px rgba(0, 0, 0, 0.03);
-  /* GPU acceleration */
-  will-change: transform;
-  transform: translateZ(0);
-}
-
-.dark .liquid-glass-bar {
-  background: rgba(30, 30, 35, 0.78);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.4),
-    0 2px 8px rgba(0, 0, 0, 0.2),
-    inset 0 1px 1px rgba(255, 255, 255, 0.06),
-    inset 0 -1px 1px rgba(0, 0, 0, 0.1);
-}
-
-/* Legacy class kept for backward compat */
-.tab-bar-glass {
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(20px) saturate(200%);
-  -webkit-backdrop-filter: blur(20px) saturate(200%);
-  border-top: 1px solid rgba(255, 255, 255, 0.5);
-}
-
-.dark .tab-bar-glass {
-  background: rgba(15, 15, 20, 0.85);
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-/* Safe area for iOS notch / tab bar */
-.safe-area-bottom {
-  padding-bottom: env(safe-area-inset-bottom);
-}
-
-/* Snappier taps: no text-selection flash on buttons, no 300ms delay */
+/* ── Button / image defaults ─────────────────────────────────────────────── */
 button,
 [role="button"] {
   -webkit-user-select: none;
   user-select: none;
 }
-
-/* Avoid accidental image dragging on long-press */
 img {
   -webkit-user-drag: none;
 }
 
-/* ─── CAPACITOR WEBVIEW SCROLL + TOUCH PASS-THROUGH ──────────── */
-/* Glass cards with backdrop-filter create a stacking context that
-   traps touch events in the Capacitor WebView. Fix: make decorative
-   layers pointer-events:none, restore auto for interactive children. */
-
-/* 1) Body-level scroll — single scroll surface, no inner traps */
-html, body, #root, main {
-  touch-action: pan-y !important;
-  -webkit-overflow-scrolling: touch !important;
-  overscroll-behavior-y: none !important;
-  overflow-x: hidden !important;
-  overflow-y: auto !important;
-}
-body {
-  min-height: 100dvh !important;
-  max-height: none !important;
-  height: auto !important;
-  position: static !important;
-}
+/* ── Body scroll for Capacitor WebView ───────────────────────────────────── */
+html,
+body,
 #root {
-  min-height: 100dvh !important;
-  max-height: none !important;
-  height: auto !important;
-  overflow: visible !important;
-  position: static !important;
-}
-
-/* 2) Glass overlays pass touches through to the scroll surface */
-.glass-card,
-.glass-card-light,
-.liquid-glass-card,
-.liquid-glass-bar,
-.tab-bar-glass {
-  pointer-events: none !important;
-}
-
-/* 3) Interactive children re-enable pointer events */
-button,
-input,
-a,
-[role="button"],
-[role="tab"],
-[role="link"],
-select,
-textarea,
-[data-state] {
-  pointer-events: auto !important;
-}
-
-/* 4) All elements allow vertical panning (prevent horizontal swipe-jack) */
-*, *::before, *::after {
-  touch-action: pan-y !important;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  min-height: 100vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
