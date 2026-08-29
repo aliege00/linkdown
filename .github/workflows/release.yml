@@ -1,13 +1,16 @@
 # ──────────────────────────────────────────────────────────────────────
 # VidFetch — Manual Release Builder
 #
-# Trigger manually from the Actions tab.  Builds both APK + EXE,
-# creates a GitHub Release, and uploads both as release assets.
+# Trigger manually from the Actions tab. Builds APK, creates a
+# GitHub Release, and uploads the APK as a release asset.
+#
+# ⚠️ This workflow ONLY builds Android APK.
+#    There is NO Windows EXE / Electron build in this project.
 #
 # Usage:
 #   1. Go to Actions → "Release Builder" → Run workflow
 #   2. Enter the version tag (e.g. v1.2.0)
-#   3. The release is created with both APK and EXE attached
+#   3. The release is created with the APK attached
 # ──────────────────────────────────────────────────────────────────────
 
 name: Release Builder
@@ -64,60 +67,28 @@ jobs:
         id: apk
         run: |
           APK=$(find android/app/build/outputs/apk/debug -name "*.apk" | head -1)
+          if [ -z "$APK" ]; then
+            echo "❌ No APK found!"
+            exit 1
+          fi
           echo "path=$APK" >> "$GITHUB_OUTPUT"
+          echo "✅ APK found: $APK"
 
       - uses: actions/upload-artifact@v4
         with:
           name: release-apk
           path: ${{ steps.apk.outputs.path }}
 
-  # ── Windows EXE ────────────────────────────────────────────────────
-  build-exe:
-    name: Build EXE
-    runs-on: windows-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: "npm"
-
-      - run: npm ci
-      - run: npm run build
-      - name: Build EXE
-        run: npx electron-builder --config electron-builder.yml
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Find EXE
-        id: exe
-        shell: bash
-        run: |
-          EXE=$(find dist_electron -name "*.exe" 2>/dev/null | head -1)
-          echo "path=$EXE" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: release-exe
-          path: ${{ steps.exe.outputs.path }}
-
   # ── Create Release ─────────────────────────────────────────────────
   publish:
     name: Publish Release
-    needs: [build-apk, build-exe]
+    needs: [build-apk]
     runs-on: ubuntu-latest
     steps:
       - name: Download APK
         uses: actions/download-artifact@v4
         with:
           name: release-apk
-          path: ./artifacts
-
-      - name: Download EXE
-        uses: actions/download-artifact@v4
-        with:
-          name: release-exe
           path: ./artifacts
 
       - name: List artifacts
@@ -133,19 +104,17 @@ jobs:
           generate_release_notes: true
           files: |
             ./artifacts/**/*.apk
-            ./artifacts/**/*.exe
           body: |
             ## VidFetch ${{ inputs.tag }}
 
-            ### 📥 Downloads
-            - **Android APK** — Install on Android 8.0+
-            - **Windows EXE** — Portable, no installation needed
+            ### 📥 Download
+            Grab the Android APK below and install it on your device.
 
             ### What's new
             See the commit history for details.
 
             ### Requirements
-            - Android: 8.0 (API 26) or higher, ~50 MB storage
-            - Windows: 10 or higher
+            - Android 8.0 (API 26) or higher
+            - ~50 MB free storage
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

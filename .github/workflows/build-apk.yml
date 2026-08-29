@@ -5,10 +5,8 @@
 #   • Push to main / develop  → build + upload artifact
 #   • Push a version tag      → build + upload artifact + create GitHub Release
 #
-# The APK is ALWAYS uploaded as a build artifact so you can download it
-# from the Actions tab.  When the trigger is a version tag (v*), the same
-# APK is also attached as a release asset so users can find it on the
-# Releases page.
+# ⚠️ This workflow ONLY builds Android APK.
+#    There is NO Windows EXE / Electron build in this project.
 # ──────────────────────────────────────────────────────────────────────
 
 name: Build APK
