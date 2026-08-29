@@ -1,25 +1,23 @@
 # ──────────────────────────────────────────────────────────────────────
-# VidFetch — Manual Release Builder
+# VidFetch — Release Builder
 #
-# Trigger manually from the Actions tab. Builds APK, creates a
-# GitHub Release, and uploads the APK as a release asset.
+# Triggers:
+#   • Push a version tag (v*)  → auto-build + auto-release
+#   • Manual (workflow_dispatch) → build + release with custom options
 #
 # ⚠️ This workflow ONLY builds Android APK.
 #    There is NO Windows EXE / Electron build in this project.
-#
-# Usage:
-#   1. Go to Actions → "Release Builder" → Run workflow
-#   2. Enter the version tag (e.g. v1.2.0)
-#   3. The release is created with the APK attached
 # ──────────────────────────────────────────────────────────────────────
 
-name: Release Builder
+name: Release
 
 on:
+  push:
+    tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Version tag (e.g. v1.2.0)"
+        description: "Version tag (e.g. v1.7.0)"
         required: true
         type: string
       draft:
@@ -39,27 +37,40 @@ permissions:
 jobs:
   # ── Android APK ────────────────────────────────────────────────────
   build-apk:
-    name: Build APK
+    name: Build Android APK
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: "npm"
-      - uses: actions/setup-java@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
-      - uses: android-actions/setup-android@v3
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
         with:
           accept-android-sdk-licenses: true
 
-      - run: npm ci
-      - run: npm run build
-      - run: npx cap sync android
-      - name: Build APK
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      - name: Build debug APK
         working-directory: android
         run: ./gradlew assembleDebug
 
@@ -74,47 +85,71 @@ jobs:
           echo "path=$APK" >> "$GITHUB_OUTPUT"
           echo "✅ APK found: $APK"
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
         with:
           name: release-apk
           path: ${{ steps.apk.outputs.path }}
 
   # ── Create Release ─────────────────────────────────────────────────
   publish:
-    name: Publish Release
+    name: Publish GitHub Release
     needs: [build-apk]
     runs-on: ubuntu-latest
     steps:
+      - name: Determine version tag
+        id: version
+        run: |
+          # Use input tag for manual dispatch, or git tag for push trigger
+          TAG="${{ inputs.tag }}"
+          if [ -z "$TAG" ]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "📦 Version: $TAG"
+
       - name: Download APK
         uses: actions/download-artifact@v4
         with:
           name: release-apk
           path: ./artifacts
 
-      - name: List artifacts
-        run: ls -la ./artifacts/
+      - name: Rename APK
+        run: |
+          APK=$(find ./artifacts -name "*.apk" | head -1)
+          VERSION="${{ steps.version.outputs.tag }}"
+          # Remove leading 'v' for filename: v1.7.0 → VidFetch-v1.7.0.apk
+          mv "$APK" "./artifacts/VidFetch-${VERSION}.apk"
+          echo "✅ Renamed to VidFetch-${VERSION}.apk"
+          ls -la ./artifacts/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.tag }}
-          name: "VidFetch ${{ inputs.tag }}"
-          draft: ${{ inputs.draft }}
-          prerelease: ${{ inputs.prerelease }}
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "VidFetch ${{ steps.version.outputs.tag }}"
+          draft: ${{ inputs.draft || false }}
+          prerelease: ${{ inputs.prerelease || false }}
           generate_release_notes: true
           files: |
-            ./artifacts/**/*.apk
+            ./artifacts/VidFetch-*.apk
           body: |
-            ## VidFetch ${{ inputs.tag }}
+            ## VidFetch ${{ steps.version.outputs.tag }}
 
             ### 📥 Download
             Grab the Android APK below and install it on your device.
 
             ### What's new
-            See the commit history for details.
+            See the commit history and release notes for details.
 
             ### Requirements
             - Android 8.0 (API 26) or higher
             - ~50 MB free storage
+
+            ### Install
+            1. Download the APK below
+            2. Open it on your Android device
+            3. Allow "Install from unknown sources" if prompted
+            4. Done!
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
