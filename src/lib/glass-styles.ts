@@ -18,6 +18,7 @@ export const glassCard: React.CSSProperties = {
   transform: "translateZ(0)",
   willChange: "transform",
   touchAction: "pan-y" as const,
+  pointerEvents: "none" as const,
 };
 
 export const glassCardDark: React.CSSProperties = {
@@ -32,6 +33,7 @@ export const glassCardDark: React.CSSProperties = {
   transform: "translateZ(0)",
   willChange: "transform",
   touchAction: "pan-y" as const,
+  pointerEvents: "none" as const,
 };
 
 export const glassBar: React.CSSProperties = {

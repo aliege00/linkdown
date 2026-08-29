@@ -467,11 +467,12 @@ img {
   -webkit-user-drag: none;
 }
 
-/* ─── EMERGENCY SCROLL UNLOCK ───────────────────────────────── */
-/* This must be LAST to override any framework/toolbar rules that
-   might block vertical scrolling in the Capacitor WebView. */
+/* ─── CAPACITOR WEBVIEW SCROLL + TOUCH PASS-THROUGH ──────────── */
+/* Glass cards with backdrop-filter create a stacking context that
+   traps touch events in the Capacitor WebView. Fix: make decorative
+   layers pointer-events:none, restore auto for interactive children. */
 
-/* Force body-level scroll on the root elements */
+/* 1) Body-level scroll — single scroll surface, no inner traps */
 html, body, #root, main {
   touch-action: pan-y !important;
   -webkit-overflow-scrolling: touch !important;
@@ -479,23 +480,12 @@ html, body, #root, main {
   overflow-x: hidden !important;
   overflow-y: auto !important;
 }
-
-/* All elements: allow vertical panning so touch events are never swallowed */
-*, *::before, *::after {
-  touch-action: pan-y !important;
-}
-
-/* Ensure main page container allows body-level scroll */
 body {
   min-height: 100dvh !important;
   max-height: none !important;
   height: auto !important;
   position: static !important;
-  overflow-x: hidden !important;
-  overflow-y: auto !important;
 }
-
-/* Remove any inner scroll containers that trap touch */
 #root {
   min-height: 100dvh !important;
   max-height: none !important;
@@ -504,8 +494,29 @@ body {
   position: static !important;
 }
 
-/* Ensure no fixed-positioned overlays block the scroll area */
-[style*="position: fixed"],
-[style*="position:fixed"] {
-  pointer-events: auto;
+/* 2) Glass overlays pass touches through to the scroll surface */
+.glass-card,
+.glass-card-light,
+.liquid-glass-card,
+.liquid-glass-bar,
+.tab-bar-glass {
+  pointer-events: none !important;
+}
+
+/* 3) Interactive children re-enable pointer events */
+button,
+input,
+a,
+[role="button"],
+[role="tab"],
+[role="link"],
+select,
+textarea,
+[data-state] {
+  pointer-events: auto !important;
+}
+
+/* 4) All elements allow vertical panning (prevent horizontal swipe-jack) */
+*, *::before, *::after {
+  touch-action: pan-y !important;
 }

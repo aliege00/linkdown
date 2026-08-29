@@ -64,7 +64,7 @@ export default function Dashboard() {
     /* ── Root: NO height lock, NO overflow hidden, natural scroll ── */
     <div
       className="w-full min-h-screen flex flex-col bg-background"
-      style={{ touchAction: "pan-y", WebkitOverflowScrolling: "touch" }}
+      style={{ touchAction: "pan-y", WebkitOverflowScrolling: "touch", pointerEvents: "auto" }}
     >
       {/* ═══ Floating Glass Top Bar ═══ */}
       <header
