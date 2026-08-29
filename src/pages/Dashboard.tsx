@@ -31,6 +31,7 @@ import {
 import { useMemo, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router";
 import BottomTabBar, { type TabId } from "@/components/BottomTabBar";
+import DynamicIslandBanner, { type BannerRef } from "@/components/DynamicIslandBanner";
 import { HELP_CONTENT, type HelpLang } from "@/lib/help-content";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -87,6 +88,7 @@ export default function Dashboard() {
       return s === "en" || s === "tr" ? s : "tr";
     } catch { return "tr"; }
   });
+  const bannerRef = useRef<BannerRef>(null);
 
   const videoCount = history.filter((h) => h.kind === "video").length;
   const playlistCount = history.length - videoCount;
@@ -524,10 +526,16 @@ export default function Dashboard() {
         </AnimatePresence>
       </main>
 
-      {/* ═══ iOS Bottom Tab Bar ═══ */}
+      {/* ═══ Dynamic Island Banner ═══ */}
+      <DynamicIslandBanner ref={bannerRef} />
+
+      {/* ═══ iOS Liquid Glass Tab Bar ═══ */}
       <BottomTabBar
         active={tab}
-        onChange={setTab}
+        onChange={(t) => {
+          setTab(t);
+          if (t === "download") bannerRef.current?.show("info", "İndir", 1500);
+        }}
         queueCount={history.length}
       />
     </div>
