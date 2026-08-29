@@ -191,8 +191,16 @@ export default function Dashboard() {
                     <TabsTrigger value="errors" className="gap-1 px-1 py-2 text-[11px] leading-tight whitespace-normal text-center"><HelpCircle className="h-3.5 w-3.5 shrink-0" />{help.tabs.errors}</TabsTrigger>
                     <TabsTrigger value="tips" className="gap-1 px-1 py-2 text-[11px] leading-tight whitespace-normal text-center"><Lightbulb className="h-3.5 w-3.5 shrink-0" />{help.tabs.tips}</TabsTrigger>
                   </TabsList>
-                  <TabsContent value="ai" className="mt-4">
+                  <TabsContent value="ai" className="mt-4 space-y-4">
                     <AiAssistant lang={helpLang} />
+                    <button
+                      type="button"
+                      onClick={() => navigate("/chat")}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-sm font-semibold text-cyan-400 hover:bg-cyan-500/20 transition-colors cursor-pointer"
+                    >
+                      <Sparkle className="size-4" />
+                      {helpLang === "tr" ? "Tam Ekran AI Sohbet" : "Full Screen AI Chat"}
+                    </button>
                   </TabsContent>
                   <TabsContent value="bot" className="mt-4">
                     <div className="space-y-3">

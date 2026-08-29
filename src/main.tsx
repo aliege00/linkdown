@@ -23,6 +23,7 @@ const HAS_CONVEX = !!CONVEX_URL;
 const Landing = lazy(() => import("./pages/Landing.tsx"));
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
+const ChatPage = lazy(() => import("./components/ClaudeStyleChat.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 const VlyToolbar = lazy(() =>
   import("../vly-toolbar-readonly.tsx")
@@ -147,6 +148,14 @@ function AppRoutes() {
             element={
               <RequireAuth>
                 <Dashboard />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/chat"
+            element={
+              <RequireAuth>
+                <ChatPage />
               </RequireAuth>
             }
           />
