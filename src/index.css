@@ -296,6 +296,7 @@ body {
     0 8px 32px rgba(0, 0, 0, 0.12),
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
   transform: translateZ(0);
+  touch-action: pan-y !important;
 }
 
 .dark .glass-card {
@@ -304,6 +305,7 @@ body {
   box-shadow:
     0 8px 32px rgba(0, 0, 0, 0.3),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  touch-action: pan-y !important;
 }
 
 /* ─── iOS 18 Liquid Glass Card ──────────────────────────────── */
@@ -318,6 +320,7 @@ body {
     inset 0 1px 1px rgba(255, 255, 255, 0.15);
   transform: translateZ(0);
   will-change: transform;
+  touch-action: pan-y !important;
 }
 
 .dark .liquid-glass-card {
@@ -326,6 +329,7 @@ body {
   box-shadow:
     0 12px 32px 0 rgba(0, 0, 0, 0.5),
     inset 0 1px 1px rgba(255, 255, 255, 0.05);
+  touch-action: pan-y !important;
 }
 
 /* ─── Neon Glow Input ─────────────────────────────────────── */
@@ -358,6 +362,7 @@ body {
     0 8px 32px rgba(0, 0, 0, 0.06),
     inset 0 1px 0 rgba(255, 255, 255, 0.8);
   transform: translateZ(0);
+  touch-action: pan-y !important;
 }
 
 /* iOS-style inset input */
@@ -405,6 +410,7 @@ body {
 /* ─── Liquid Glass Tab Bar (iOS 18+ Floating Pill) ─────────── */
 .liquid-glass-bar {
   position: relative;
+  touch-action: pan-y !important;
   border-radius: 35px;
   /* Light mode: frosted white glass */
   background: rgba(255, 255, 255, 0.72);
@@ -465,16 +471,18 @@ img {
 /* This must be LAST to override any framework/toolbar rules that
    might block vertical scrolling in the Capacitor WebView. */
 
-/* Allow horizontal panning on interactive elements, vertical on everything */
-* {
-  touch-action: manipulation;
-}
-
-/* Force body scroll in all directions */
-html, body, #root {
+/* Force body-level scroll on the root elements */
+html, body, #root, main {
   touch-action: pan-y !important;
   -webkit-overflow-scrolling: touch !important;
   overscroll-behavior-y: none !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+}
+
+/* All elements: allow vertical panning so touch events are never swallowed */
+*, *::before, *::after {
+  touch-action: pan-y !important;
 }
 
 /* Ensure main page container allows body-level scroll */

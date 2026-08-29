@@ -67,9 +67,9 @@ export default function Dashboard() {
   const help = HELP_CONTENT[helpLang];
 
   return (
-    <div className="min-h-screen bg-background flex flex-col" style={{ contain: "layout style" }}>
+    <div className="min-h-screen bg-background flex flex-col" style={{ touchAction: "pan-y" }}>
       {/* ═══ Floating Glass Top Bar ═══ */}
-      <header className="sticky top-0 z-40 liquid-glass-card rounded-b-2xl mx-3 mt-2 px-4 py-3 flex items-center justify-between gap-3" style={{ contain: "layout" }}>
+      <header className="sticky top-0 z-40 liquid-glass-card rounded-b-2xl mx-3 mt-2 px-4 py-3 flex items-center justify-between gap-3" style={{ touchAction: "pan-y" }}>
         <div className="flex items-center gap-3 min-w-0">
           <div className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-400 to-violet-500 text-white shadow-lg shadow-cyan-500/20">
             <Sparkles className="size-4" />
@@ -88,13 +88,13 @@ export default function Dashboard() {
       </header>
 
       {/* ═══ Main Content ═══ */}
-      <main className="flex-1 px-4 pt-4 pb-28">
+      <main className="flex-1 px-4 pt-4 pb-28" style={{ touchAction: "pan-y" }}>
         <AnimatePresence mode="wait">
           {/* ── İndir Tab ── */}
           {tab === "download" && (
             <motion.div key="download" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }} className="mx-auto max-w-2xl space-y-4">
               {/* Hero Input Card */}
-              <div className="liquid-glass-card p-5 space-y-4" style={{ contain: "layout style" }}>
+              <div className="liquid-glass-card p-5 space-y-4">
                 <div className="flex items-center gap-2 mb-1">
                   <Download className="size-4 text-cyan-400" />
                   <p className="text-sm font-semibold">Video İndir</p>
@@ -128,7 +128,7 @@ export default function Dashboard() {
               </div>
 
               {/* Engine Status */}
-              <div className="liquid-glass-card p-5" style={{ contain: "layout" }}>
+              <div className="liquid-glass-card p-5">
                 <div className="flex items-center gap-3 mb-4">
                   <div className="flex size-9 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-500">
                     <CheckCircle2 className="size-4" />
@@ -153,7 +153,7 @@ export default function Dashboard() {
               </div>
 
               {/* Desteklenen Platformlar */}
-              <div className="liquid-glass-card p-5" style={{ contain: "layout" }}>
+              <div className="liquid-glass-card p-5">
                 <p className="text-xs font-semibold text-muted-foreground/60 uppercase tracking-wider mb-3">Desteklenen Platformlar</p>
                 <div className="flex flex-wrap gap-2">
                   {["YouTube", "TikTok", "Twitter/X", "Instagram", "Vimeo", "Facebook", "Twitch"].map((p) => (
@@ -176,7 +176,7 @@ export default function Dashboard() {
                   ))}
                 </div>
               </div>
-              <div className="liquid-glass-card p-4" style={{ contain: "layout" }}>
+              <div className="liquid-glass-card p-4">
                 <Tabs defaultValue="bot">
                   <TabsList className="w-full h-auto grid grid-cols-3 gap-0.5 p-1">
                     <TabsTrigger value="bot" className="gap-1 px-1 py-2 text-[11px] leading-tight whitespace-normal text-center"><ShieldAlert className="h-3.5 w-3.5 shrink-0" />{help.tabs.bot}</TabsTrigger>
@@ -242,7 +242,7 @@ export default function Dashboard() {
           {/* ── Hakkında Tab ── */}
           {tab === "about" && (
             <motion.div key="about" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }} className="mx-auto max-w-2xl space-y-4">
-              <div className="liquid-glass-card p-5 text-center space-y-3" style={{ contain: "layout" }}>
+              <div className="liquid-glass-card p-5 text-center space-y-3">
                 <div className="mx-auto flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-400 to-violet-500 text-white shadow-xl shadow-cyan-500/25">
                   <Sparkles className="size-7" />
                 </div>
@@ -261,12 +261,12 @@ export default function Dashboard() {
                   ))}
                 </div>
               </div>
-              <div className="liquid-glass-card p-5" style={{ contain: "layout" }}>
+              <div className="liquid-glass-card p-5">
                 <p className="text-xs text-muted-foreground/70 leading-relaxed text-center">
                   VidFetch, <a href="https://github.com/yt-dlp/yt-dlp" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-medium">yt-dlp</a> motorunu doğrudan cihazınızda çalıştırır. Sunucu, bulut veya hesap yoktur. 1000+ site desteklenir — sınırsız, anahtarsız indirme.
                 </p>
               </div>
-              <div className="liquid-glass-card p-4" style={{ contain: "layout" }}>
+              <div className="liquid-glass-card p-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Clock className="size-4 text-muted-foreground/60" />
