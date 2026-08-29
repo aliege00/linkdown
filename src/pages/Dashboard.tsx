@@ -5,24 +5,7 @@ import {
   clearDownloadHistory,
   type DownloadRecord,
 } from "@/lib/history";
-import { motion, AnimatePresence } from "framer-motion";
-import {
-  Download,
-  FileVideo,
-  ListVideo,
-  LogOut,
-  Sparkles,
-  Trash2,
-  Clock,
-  Copy,
-  Check,
-  HelpCircle,
-  Info,
-  CheckCircle2,
-  Globe,
-  ShieldAlert,
-  Lightbulb,
-  Link,
+import { motion, AnimatePresence } from "framer-motion";import { Download, FileVideo, ListVideo, LogOut, Sparkles, Trash2, Clock, Copy, Check, HelpCircle, Info, CheckCircle2, Globe, ShieldAlert, Lightbulb, Link, Bot, Sparkle,
 } from "lucide-react";
 import { useMemo, useState, useCallback } from "react";
 import { useNavigate } from "react-router";
@@ -36,6 +19,7 @@ import {
   glassCard,
   glassCardDark,
 } from "@/lib/glass-styles";
+import AiAssistant from "@/components/AiAssistant";
 
 /* ─── Copy Command ────────────────────────────────────────────── */
 function CopyCommand({ command, label, copiedLabel }: { command: string; label: string; copiedLabel: string }) {
@@ -201,11 +185,15 @@ export default function Dashboard() {
               </div>
               <div className="p-4" style={gc}>
                 <Tabs defaultValue="bot">
-                  <TabsList className="w-full h-auto grid grid-cols-3 gap-0.5 p-1">
+                  <TabsList className="w-full h-auto grid grid-cols-4 gap-0.5 p-1">
+                    <TabsTrigger value="ai" className="gap-1 px-1 py-2 text-[11px] leading-tight whitespace-normal text-center"><Bot className="h-3.5 w-3.5 shrink-0" />AI Asistan</TabsTrigger>
                     <TabsTrigger value="bot" className="gap-1 px-1 py-2 text-[11px] leading-tight whitespace-normal text-center"><ShieldAlert className="h-3.5 w-3.5 shrink-0" />{help.tabs.bot}</TabsTrigger>
                     <TabsTrigger value="errors" className="gap-1 px-1 py-2 text-[11px] leading-tight whitespace-normal text-center"><HelpCircle className="h-3.5 w-3.5 shrink-0" />{help.tabs.errors}</TabsTrigger>
                     <TabsTrigger value="tips" className="gap-1 px-1 py-2 text-[11px] leading-tight whitespace-normal text-center"><Lightbulb className="h-3.5 w-3.5 shrink-0" />{help.tabs.tips}</TabsTrigger>
                   </TabsList>
+                  <TabsContent value="ai" className="mt-4">
+                    <AiAssistant lang={helpLang} />
+                  </TabsContent>
                   <TabsContent value="bot" className="mt-4">
                     <div className="space-y-3">
                       <div>
