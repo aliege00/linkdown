@@ -7,7 +7,7 @@
  */
 
 export const glassCard: React.CSSProperties = {
-  background: "rgba(255, 255, 255, 0.08)",
+  background: "rgba(255, 255, 255, 0.18)",
   WebkitBackdropFilter: "blur(12px) saturate(180%)",
   backdropFilter: "blur(12px) saturate(180%)",
   border: "1px solid rgba(255, 255, 255, 0.18)",
@@ -21,7 +21,7 @@ export const glassCard: React.CSSProperties = {
 };
 
 export const glassCardDark: React.CSSProperties = {
-  background: "rgba(18, 18, 24, 0.65)",
+  background: "rgba(20, 20, 28, 0.85)",
   WebkitBackdropFilter: "blur(12px) saturate(180%)",
   backdropFilter: "blur(12px) saturate(180%)",
   border: "1px solid rgba(255, 255, 255, 0.08)",

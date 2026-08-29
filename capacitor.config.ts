@@ -8,10 +8,11 @@ const config: CapacitorConfig = {
     androidScheme: "https",
   },
   android: {
-    backgroundColor: "#f8f7f5",
+    backgroundColor: "#00000000",
     allowMixedContent: false,
     captureInput: true,
     webContentsDebuggingEnabled: process.env.NODE_ENV !== "production",
+    hardwareAccelerated: true,
   },
   plugins: {
     CapacitorHttp: {
@@ -19,7 +20,7 @@ const config: CapacitorConfig = {
     },
     SplashScreen: {
       launchShowDuration: 1000,
-      backgroundColor: "#f8f7f5",
+      backgroundColor: "#00000000",
       androidSplashResourceName: "splash",
       androidScaleType: "CENTER_CROP",
     },
