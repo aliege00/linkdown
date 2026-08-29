@@ -15,12 +15,11 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { GlassCard } from "@/components/GlassCard";
+import { FlatCard } from "@/components/FlatCard";
 import { cn } from "@/lib/utils";
 import { HELP_CONTENT, type HelpLang } from "@/lib/help-content";
 import AiAssistant from "@/components/AiAssistant";
 
-/* ─── Copy Command (inline helper) ────────────────────────────────────────── */
 function CopyCommand({
   command,
   label,
@@ -44,10 +43,10 @@ function CopyCommand({
     <button
       type="button"
       onClick={copy}
-      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border/40 bg-background/50 px-2 py-1.5 text-[10px] font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+      className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-[#262930] bg-[#0d0f12] px-2.5 py-1.5 text-[11px] font-medium text-[#8e8e93] transition-colors hover:border-[#6cb4ee]/40 hover:text-[#e8e8e8]"
     >
       {copied ? (
-        <Check className="h-3 w-3 text-emerald-500" />
+        <Check className="h-3 w-3 text-[#34c759]" />
       ) : (
         <Copy className="h-3 w-3" />
       )}
@@ -71,17 +70,15 @@ export default function SettingsTab() {
   const help = HELP_CONTENT[helpLang];
 
   return (
-    <div className="mx-auto max-w-2xl space-y-4">
+    <div className="mx-auto max-w-2xl space-y-4 p-4">
       {/* ── App Info ── */}
-      <GlassCard interactive className="space-y-3 text-center">
-        <div className="mx-auto flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-400 to-violet-500 text-white shadow-xl shadow-cyan-500/25">
-          <Sparkles className="size-7" />
+      <FlatCard interactive className="space-y-3 text-center">
+        <div className="mx-auto flex size-16 items-center justify-center rounded-2xl bg-[#6cb4ee]">
+          <Sparkles className="size-7 text-[#0d0f12]" />
         </div>
-        <h2 className="bg-gradient-to-r from-cyan-500 to-violet-500 bg-clip-text text-xl font-bold text-transparent">
-          VidFetch
-        </h2>
-        <p className="text-xs text-muted-foreground/70">
-          v2.0 · On-device video downloader
+        <h2 className="text-xl font-bold text-[#e8e8e8]">VidFetch</h2>
+        <p className="text-xs text-[#8e8e93]">
+          v2.1 · On-device video downloader
         </p>
         <div className="grid grid-cols-3 gap-3 pt-2">
           {[
@@ -91,37 +88,37 @@ export default function SettingsTab() {
           ].map((s) => (
             <div
               key={s.label}
-              className="rounded-xl border border-border/20 bg-white/5 p-3 dark:bg-white/[0.02]"
+              className="rounded-xl border border-[#262930] bg-[#0d0f12] p-3"
             >
-              <p className="text-lg font-bold text-primary">{s.value}</p>
-              <p className="text-[10px] text-muted-foreground/60">{s.label}</p>
+              <p className="text-lg font-bold text-[#6cb4ee]">{s.value}</p>
+              <p className="text-[10px] text-[#8e8e93]">{s.label}</p>
             </div>
           ))}
         </div>
-      </GlassCard>
+      </FlatCard>
 
       {/* ── Description ── */}
-      <GlassCard interactive>
-        <p className="text-center text-xs leading-relaxed text-muted-foreground/70">
+      <FlatCard interactive>
+        <p className="text-center text-xs leading-relaxed text-[#8e8e93]">
           VidFetch,{" "}
           <a
             href="https://github.com/yt-dlp/yt-dlp"
             target="_blank"
             rel="noopener noreferrer"
-            className="font-medium text-primary hover:underline"
+            className="font-medium text-[#6cb4ee] hover:underline"
           >
             yt-dlp
           </a>{" "}
           motorunu doğrudan cihazınızda çalıştırır. Sunucu, bulut veya hesap
           yoktur. 1000+ site desteklenir — sınırsız, anahtarsız indirme.
         </p>
-      </GlassCard>
+      </FlatCard>
 
       {/* ── Help Tabs ── */}
-      <GlassCard interactive>
-        {/* Language switcher */}
+      <FlatCard interactive>
+        {/* Language */}
         <div className="mb-4 flex justify-center">
-          <div className="flex items-center gap-0.5 rounded-full border border-border/30 bg-white/5 p-0.5 dark:bg-white/[0.02]">
+          <div className="flex rounded-lg border border-[#262930] bg-[#0d0f12] p-0.5">
             {(["tr", "en"] as const).map((lang) => (
               <button
                 key={lang}
@@ -131,10 +128,10 @@ export default function SettingsTab() {
                   localStorage.setItem("vidfetch.helpLang", lang);
                 }}
                 className={cn(
-                  "rounded-full px-4 py-1.5 text-xs font-medium transition-colors",
+                  "rounded-md px-4 py-2 text-xs font-semibold transition-colors",
                   helpLang === lang
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:text-foreground",
+                    ? "bg-[#6cb4ee] text-[#0d0f12]"
+                    : "text-[#8e8e93] hover:text-[#e8e8e8]",
                 )}
               >
                 {lang === "tr" ? "Türkçe" : "English"}
@@ -144,31 +141,31 @@ export default function SettingsTab() {
         </div>
 
         <Tabs defaultValue="bot">
-          <TabsList className="grid h-auto w-full grid-cols-4 gap-0.5 p-1">
+          <TabsList className="grid h-auto w-full grid-cols-4 gap-1 p-1">
             <TabsTrigger
               value="ai"
-              className="gap-1 whitespace-normal px-1 py-2 text-center text-[11px] leading-tight"
+              className="gap-1 whitespace-normal px-1 py-2.5 text-center text-[11px] leading-tight"
             >
               <Bot className="h-3.5 w-3.5 shrink-0" />
               AI Asistan
             </TabsTrigger>
             <TabsTrigger
               value="bot"
-              className="gap-1 whitespace-normal px-1 py-2 text-center text-[11px] leading-tight"
+              className="gap-1 whitespace-normal px-1 py-2.5 text-center text-[11px] leading-tight"
             >
               <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
               {help.tabs.bot}
             </TabsTrigger>
             <TabsTrigger
               value="errors"
-              className="gap-1 whitespace-normal px-1 py-2 text-center text-[11px] leading-tight"
+              className="gap-1 whitespace-normal px-1 py-2.5 text-center text-[11px] leading-tight"
             >
               <HelpCircle className="h-3.5 w-3.5 shrink-0" />
               {help.tabs.errors}
             </TabsTrigger>
             <TabsTrigger
               value="tips"
-              className="gap-1 whitespace-normal px-1 py-2 text-center text-[11px] leading-tight"
+              className="gap-1 whitespace-normal px-1 py-2.5 text-center text-[11px] leading-tight"
             >
               <Lightbulb className="h-3.5 w-3.5 shrink-0" />
               {help.tabs.tips}
@@ -181,7 +178,7 @@ export default function SettingsTab() {
             <button
               type="button"
               onClick={() => navigate("/chat")}
-              className="flex w-full items-center justify-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-400 transition-colors hover:bg-cyan-500/20"
+              className="flex h-[52px] w-full items-center justify-center gap-2 rounded-xl border border-[#6cb4ee]/30 bg-[#6cb4ee]/10 text-sm font-bold text-[#6cb4ee] transition-colors hover:bg-[#6cb4ee]/20 active:scale-[0.98]"
             >
               <Sparkle className="size-4" />
               {helpLang === "tr"
@@ -195,10 +192,10 @@ export default function SettingsTab() {
             <div className="space-y-3">
               <div>
                 <p className="flex items-center gap-1.5 text-sm font-semibold">
-                  <Globe className="h-3.5 w-3.5 text-primary" />
+                  <Globe className="h-4 w-4 text-[#6cb4ee]" />
                   {help.bot.introTitle}
                 </p>
-                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                <p className="mt-1 text-xs leading-relaxed text-[#8e8e93]">
                   {help.bot.intro}
                 </p>
               </div>
@@ -210,20 +207,20 @@ export default function SettingsTab() {
                   {help.bot.fixes.map((fix, i) => (
                     <div
                       key={i}
-                      className="rounded-xl border border-border/30 bg-white/3 p-3 dark:bg-white/[0.01]"
+                      className="rounded-xl border border-[#262930] bg-[#0d0f12] p-3"
                     >
                       <div className="mb-1 flex flex-wrap items-center gap-2">
-                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-bold text-primary">
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#6cb4ee]/10 text-[11px] font-bold text-[#6cb4ee]">
                           {i + 1}
                         </span>
                         <p className="text-sm font-medium">{fix.title}</p>
                       </div>
-                      <p className="text-xs leading-relaxed text-muted-foreground">
+                      <p className="text-xs leading-relaxed text-[#8e8e93]">
                         {fix.body}
                       </p>
                       {"command" in fix && fix.command && (
                         <div className="mt-2 flex items-start gap-2">
-                          <code className="min-w-0 flex-1 break-all rounded-lg border border-border/30 bg-white/3 px-2 py-1.5 font-mono text-[10px] leading-relaxed text-muted-foreground dark:bg-white/[0.01]">
+                          <code className="min-w-0 flex-1 break-all rounded-lg border border-[#262930] bg-[#0d0f12] px-2.5 py-2 font-mono text-[11px] leading-relaxed text-[#8e8e93]">
                             {fix.command}
                           </code>
                           <CopyCommand
@@ -247,13 +244,11 @@ export default function SettingsTab() {
               {help.errors.items.map((item, i) => (
                 <div
                   key={i}
-                  className="rounded-xl border border-border/30 bg-white/3 p-3 dark:bg-white/[0.01]"
+                  className="rounded-xl border border-[#262930] bg-[#0d0f12] p-3"
                 >
                   <p className="text-sm font-medium">{item.title}</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    {item.what}
-                  </p>
-                  <p className="mt-1 flex items-start gap-1.5 text-xs text-emerald-400">
+                  <p className="mt-0.5 text-xs text-[#8e8e93]">{item.what}</p>
+                  <p className="mt-1 flex items-start gap-1.5 text-xs text-[#34c759]">
                     <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                     {item.fix}
                   </p>
@@ -269,14 +264,14 @@ export default function SettingsTab() {
               {help.tips.items.map((item, i) => (
                 <div
                   key={i}
-                  className="flex items-start gap-3 rounded-xl border border-border/30 bg-white/3 p-3 dark:bg-white/[0.01]"
+                  className="flex items-start gap-3 rounded-xl border border-[#262930] bg-[#0d0f12] p-3"
                 >
-                  <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-500">
-                    <Lightbulb className="h-4 w-4" />
+                  <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[#ff9f0a]/10">
+                    <Lightbulb className="h-4 w-4 text-[#ff9f0a]" />
                   </div>
                   <div>
                     <p className="text-sm font-medium">{item.title}</p>
-                    <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                    <p className="mt-0.5 text-xs leading-relaxed text-[#8e8e93]">
                       {item.body}
                     </p>
                   </div>
@@ -285,14 +280,14 @@ export default function SettingsTab() {
             </div>
           </TabsContent>
         </Tabs>
-      </GlassCard>
+      </FlatCard>
 
       {/* ── Sign Out ── */}
       <div className="flex justify-center pb-4">
         <Button
           variant="ghost"
           size="sm"
-          className="gap-2 text-xs text-muted-foreground/60"
+          className="gap-2 text-xs text-[#8e8e93]"
           onClick={async () => {
             await signOut();
             navigate("/");

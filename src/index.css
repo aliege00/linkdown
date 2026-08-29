@@ -1,4 +1,4 @@
-/* ═══ VidFetch v2.0 — Clean Foundation ═══════════════════════════════════════ */
+/* ═══ VidFetch v2.1 — Flat Dark Design System ═══════════════════════════════ */
 
 /* ── Tailwind v4 core ────────────────────────────────────────────────────── */
 @import "tailwindcss";
@@ -43,83 +43,69 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
-
-  --animate-shimmer: shimmer 2s ease-in-out infinite;
-  @keyframes shimmer {
-    0%, 100% { opacity: 0.4; }
-    50% { opacity: 1; }
-  }
 }
 
-/* ── Light theme ─────────────────────────────────────────────────────────── */
+/* ── Flat dark theme (ChatGPT-style) ─────────────────────────────────────── */
 :root {
   --radius: 0.75rem;
-  --background: oklch(0.985 0 0);
-  --foreground: oklch(0.13 0 0);
-  --card: oklch(0.995 0 0);
-  --card-foreground: oklch(0.13 0 0);
-  --popover: oklch(0.995 0 0);
-  --popover-foreground: oklch(0.13 0 0);
-  --primary: oklch(0.55 0.14 255);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.96 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.965 0 0);
-  --muted-foreground: oklch(0.55 0 0);
-  --accent: oklch(0.55 0.14 255 / 0.08);
-  --accent-foreground: oklch(0.13 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.91 0 0);
-  --input: oklch(0.91 0 0);
-  --ring: oklch(0.55 0.14 255 / 0.3);
-  --chart-1: oklch(0.55 0.14 255);
-  --chart-2: oklch(0.6 0.12 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.13 0 0);
-  --sidebar-primary: oklch(0.55 0.14 255);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.96 0 0);
-  --sidebar-accent-foreground: oklch(0.13 0 0);
-  --sidebar-border: oklch(0.91 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --background: #0d0f12;
+  --foreground: #e8e8e8;
+  --card: #17191e;
+  --card-foreground: #e8e8e8;
+  --popover: #17191e;
+  --popover-foreground: #e8e8e8;
+  --primary: #6cb4ee;
+  --primary-foreground: #0d0f12;
+  --secondary: #1e2026;
+  --secondary-foreground: #e8e8e8;
+  --muted: #1e2026;
+  --muted-foreground: #8e8e93;
+  --accent: #6cb4ee;
+  --accent-foreground: #0d0f12;
+  --destructive: #ff453a;
+  --border: #262930;
+  --input: #262930;
+  --ring: #6cb4ee;
+  --chart-1: #6cb4ee;
+  --chart-2: #34c759;
+  --chart-3: #ff9f0a;
+  --chart-4: #ff453a;
+  --chart-5: #bf5af2;
+  --sidebar: #17191e;
+  --sidebar-foreground: #e8e8e8;
+  --sidebar-primary: #6cb4ee;
+  --sidebar-primary-foreground: #0d0f12;
+  --sidebar-accent: #1e2026;
+  --sidebar-accent-foreground: #e8e8e8;
+  --sidebar-border: #262930;
+  --sidebar-ring: #6cb4ee;
 }
 
-/* ── Dark theme ──────────────────────────────────────────────────────────── */
+/* ── Dark theme (same as root — always dark) ─────────────────────────────── */
 .dark {
-  --background: oklch(0.12 0 0);
-  --foreground: oklch(0.965 0 0);
-  --card: oklch(0.16 0.003 260);
-  --card-foreground: oklch(0.965 0 0);
-  --popover: oklch(0.16 0.003 260);
-  --popover-foreground: oklch(0.965 0 0);
-  --primary: oklch(0.65 0.16 255);
-  --primary-foreground: oklch(0.12 0 0);
-  --secondary: oklch(0.22 0.003 260);
-  --secondary-foreground: oklch(0.965 0 0);
-  --muted: oklch(0.22 0.003 260);
-  --muted-foreground: oklch(0.65 0 0);
-  --accent: oklch(0.65 0.16 255 / 0.12);
-  --accent-foreground: oklch(0.965 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.26 0.003 260);
-  --input: oklch(0.26 0.003 260);
-  --ring: oklch(0.65 0.16 255 / 0.3);
-  --chart-1: oklch(0.65 0.16 255);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.16 0.003 260);
-  --sidebar-foreground: oklch(0.965 0 0);
-  --sidebar-primary: oklch(0.65 0.16 255);
-  --sidebar-primary-foreground: oklch(0.12 0 0);
-  --sidebar-accent: oklch(0.22 0.003 260);
-  --sidebar-accent-foreground: oklch(0.965 0 0);
-  --sidebar-border: oklch(0.26 0.003 260);
-  --sidebar-ring: oklch(0.65 0 0);
+  --background: #0d0f12;
+  --foreground: #e8e8e8;
+  --card: #17191e;
+  --card-foreground: #e8e8e8;
+  --popover: #17191e;
+  --popover-foreground: #e8e8e8;
+  --primary: #6cb4ee;
+  --primary-foreground: #0d0f12;
+  --secondary: #1e2026;
+  --secondary-foreground: #e8e8e8;
+  --muted: #1e2026;
+  --muted-foreground: #8e8e93;
+  --accent: #6cb4ee;
+  --accent-foreground: #0d0f12;
+  --destructive: #ff453a;
+  --border: #262930;
+  --input: #262930;
+  --ring: #6cb4ee;
+  --chart-1: #6cb4ee;
+  --chart-2: #34c759;
+  --chart-3: #ff9f0a;
+  --chart-4: #ff453a;
+  --chart-5: #bf5af2;
 }
 
 /* ── Base reset ──────────────────────────────────────────────────────────── */
@@ -128,7 +114,7 @@
     @apply border-border outline-ring/50;
   }
   *::selection {
-    background-color: oklch(0.55 0.14 255 / 0.2);
+    background-color: rgba(108, 180, 238, 0.25);
     color: inherit;
   }
   html {
@@ -140,6 +126,7 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     line-height: 1.6;
+    background-color: #0d0f12;
   }
   button:not([disabled]),
   [role="button"]:not([disabled]) {
@@ -154,18 +141,15 @@
 
 /* ── Scrollbar ───────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 4px;
+  height: 4px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: oklch(0.55 0 0 / 0.15);
-  border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: oklch(0.55 0 0 / 0.25);
+  background: rgba(142, 142, 147, 0.2);
+  border-radius: 2px;
 }
 
 /* ── Reduced motion ──────────────────────────────────────────────────────── */
@@ -180,12 +164,7 @@
   }
 }
 
-/* ── Utility: tap highlight ──────────────────────────────────────────────── */
-* {
-  -webkit-tap-highlight-color: oklch(0.55 0.14 255 / 0.1);
-}
-
-/* ── Button / image defaults ─────────────────────────────────────────────── */
+/* ── Defaults ────────────────────────────────────────────────────────────── */
 button,
 [role="button"] {
   -webkit-user-select: none;
@@ -195,7 +174,7 @@ img {
   -webkit-user-drag: none;
 }
 
-/* ── Body scroll for Capacitor WebView ───────────────────────────────────── */
+/* ── Body / root — Capacitor WebView scroll ──────────────────────────────── */
 html,
 body,
 #root {
@@ -203,6 +182,8 @@ body,
   padding: 0;
   width: 100%;
   min-height: 100vh;
+  background-color: #0d0f12;
+  color: #e8e8e8;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }

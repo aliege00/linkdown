@@ -6,7 +6,7 @@ import {
 } from "@/lib/history";
 import { Clock, FileVideo, ListVideo, Trash2, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { GlassCard } from "@/components/GlassCard";
+import { FlatCard } from "@/components/FlatCard";
 
 export default function HistoryTab() {
   const [history, setHistory] = useState<DownloadRecord[]>(() =>
@@ -27,44 +27,44 @@ export default function HistoryTab() {
   }, []);
 
   return (
-    <div className="mx-auto max-w-2xl space-y-4">
-      <GlassCard interactive>
+    <div className="mx-auto max-w-2xl space-y-4 p-4">
+      <FlatCard interactive>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Clock className="size-4 text-muted-foreground/60" />
-            <p className="text-sm font-semibold">Geçmiş</p>
+            <Clock className="size-5 text-[#8e8e93]" />
+            <p className="text-base font-semibold">Geçmiş</p>
           </div>
           {history.length > 0 && (
             <Button
               variant="ghost"
               size="sm"
-              className="gap-1 text-xs"
+              className="gap-1 text-xs text-[#8e8e93]"
               onClick={handleClear}
             >
-              <Trash2 className="size-3" />
+              <Trash2 className="size-3.5" />
               Temizle
             </Button>
           )}
         </div>
 
         {history.length === 0 ? (
-          <p className="py-6 text-center text-xs text-muted-foreground/50">
+          <p className="py-8 text-center text-sm text-[#8e8e93]">
             Henüz indirme yok
           </p>
         ) : (
-          <ul className="mt-2 divide-y divide-border/20">
+          <ul className="mt-3 divide-y divide-[#262930]">
             {history.map((record) => (
-              <li key={record.id} className="flex items-center gap-3 py-2.5">
-                <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <li key={record.id} className="flex items-center gap-3 py-3">
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[#6cb4ee]/10">
                   {record.kind === "playlist" ? (
-                    <ListVideo className="size-3.5" />
+                    <ListVideo className="size-4 text-[#6cb4ee]" />
                   ) : (
-                    <FileVideo className="size-3.5" />
+                    <FileVideo className="size-4 text-[#6cb4ee]" />
                   )}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs font-medium">{record.title}</p>
-                  <p className="text-[10px] text-muted-foreground/60">
+                  <p className="truncate text-sm font-medium">{record.title}</p>
+                  <p className="text-xs text-[#8e8e93]">
                     {record.formatLabel || "video"} ·{" "}
                     {new Date(record.time).toLocaleDateString()}
                   </p>
@@ -72,16 +72,16 @@ export default function HistoryTab() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="size-6"
+                  className="size-8 text-[#8e8e93]"
                   onClick={() => copyLink(record)}
                 >
-                  <Copy className="size-3" />
+                  <Copy className="size-4" />
                 </Button>
               </li>
             ))}
           </ul>
         )}
-      </GlassCard>
+      </FlatCard>
     </div>
   );
 }
