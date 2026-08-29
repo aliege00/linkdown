@@ -306,6 +306,47 @@ body {
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
+/* ─── iOS 18 Liquid Glass Card ──────────────────────────────── */
+.liquid-glass-card {
+  background: rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(8px) saturate(160%);
+  -webkit-backdrop-filter: blur(8px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 24px;
+  box-shadow:
+    0 12px 32px 0 rgba(0, 0, 0, 0.25),
+    inset 0 1px 1px rgba(255, 255, 255, 0.15);
+  transform: translateZ(0);
+  will-change: transform;
+}
+
+.dark .liquid-glass-card {
+  background: rgba(18, 18, 24, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 12px 32px 0 rgba(0, 0, 0, 0.5),
+    inset 0 1px 1px rgba(255, 255, 255, 0.05);
+}
+
+/* ─── Neon Glow Input ─────────────────────────────────────── */
+.neon-glow-input {
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
+}
+
+.neon-glow-input:focus-within {
+  box-shadow:
+    0 0 20px rgba(59, 130, 246, 0.35),
+    0 0 40px rgba(99, 102, 241, 0.15);
+  border-color: rgba(99, 102, 241, 0.6);
+}
+
+.dark .neon-glow-input:focus-within {
+  box-shadow:
+    0 0 20px rgba(99, 102, 241, 0.4),
+    0 0 40px rgba(139, 92, 246, 0.2);
+  border-color: rgba(139, 92, 246, 0.6);
+}
+
 /* Light mode glass variant */
 .glass-card-light {
   background: rgba(255, 255, 255, 0.7);
