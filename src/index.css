@@ -390,3 +390,44 @@ button,
 img {
   -webkit-user-drag: none;
 }
+
+/* ─── EMERGENCY SCROLL UNLOCK ───────────────────────────────── */
+/* This must be LAST to override any framework/toolbar rules that
+   might block vertical scrolling in the Capacitor WebView. */
+
+/* Allow horizontal panning on interactive elements, vertical on everything */
+* {
+  touch-action: manipulation;
+}
+
+/* Force body scroll in all directions */
+html, body, #root {
+  touch-action: pan-y !important;
+  -webkit-overflow-scrolling: touch !important;
+  overscroll-behavior-y: none !important;
+}
+
+/* Ensure main page container allows body-level scroll */
+body {
+  min-height: 100dvh !important;
+  max-height: none !important;
+  height: auto !important;
+  position: static !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+}
+
+/* Remove any inner scroll containers that trap touch */
+#root {
+  min-height: 100dvh !important;
+  max-height: none !important;
+  height: auto !important;
+  overflow: visible !important;
+  position: static !important;
+}
+
+/* Ensure no fixed-positioned overlays block the scroll area */
+[style*="position: fixed"],
+[style*="position:fixed"] {
+  pointer-events: auto;
+}

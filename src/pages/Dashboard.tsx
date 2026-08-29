@@ -139,7 +139,7 @@ export default function Dashboard() {
       </header>
 
       {/* ═══ Main Content ═══ */}
-      <main className="flex-1 overflow-y-auto px-4 sm:px-6 pt-4 pb-28">
+      <main className="flex-1 px-4 sm:px-6 pt-4 pb-28">
         <AnimatePresence mode="wait">
           {/* ── Download Tab ── */}
           {tab === "download" && (
