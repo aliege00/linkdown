@@ -32,7 +32,7 @@
   <script>
     // ── Build fingerprint ─────────────────────────────────────────────
     // Lets us identify exactly which APK/EXE is installed from a screenshot.
-    window.__VIDFETCH_BUILD__ = "fix14";
+    window.__VIDFETCH_BUILD__ = "fix15";
 
     // ── Crash reporter ──────────────────────────────────────────────────
     // If the JS bundle fails to load or crashes during startup, paint a
@@ -103,8 +103,12 @@
         var src = t && (t.src || t.href);
         if (src) {
           errors.push('Failed to load: ' + src);
-          // Only show fatal for JS bundles, not for images/icons/fonts
-          if (src.indexOf('.js') !== -1 || src.indexOf('/src/') !== -1) {
+          // Only treat LOCAL bundle files as fatal. Third-party CDN scripts
+          // (e.g. html2canvas-pro from jsdelivr) must NOT crash the app —
+          // they are optional and loaded dynamically by libraries like snapdom.
+          var isLocal = src.indexOf('/src/') !== -1 ||
+            (src.indexOf('.js') !== -1 && src.indexOf('cdn.') === -1 && src.indexOf('jsdelivr') === -1 && src.indexOf('unpkg') === -1);
+          if (isLocal) {
             showFatal('A required file failed to load', src);
           }
         }
@@ -174,16 +178,16 @@
       }
     }
   </script>
-  <script type="module" crossorigin src="/assets/index-DxatAQRa.js"></script>
+  <script type="module" crossorigin src="/assets/index-DiDm_VTX.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/react-vendor-CLvenrei.js">
   <link rel="modulepreload" crossorigin href="/assets/framer-motion-CBAPqnxX.js">
   <link rel="modulepreload" crossorigin href="/assets/radix-ui-BPuq50AH.js">
-  <link rel="stylesheet" crossorigin href="/assets/index-B7Q_YSUe.css">
+  <link rel="stylesheet" crossorigin href="/assets/index-BwZ7Mc4D.css">
 </head>
 
 
-<body style="overflow-x: hidden; max-width: 100vw;">
-  <div id="root" style="overflow-x: hidden; min-height: 100dvh;"></div>
+<body style="min-height: 100dvh; height: auto; overflow-x: hidden; overflow-y: auto; touch-action: pan-y; -webkit-overflow-scrolling: touch;">
+  <div id="root" style="min-height: 100dvh; height: auto; overflow: visible;"></div>
 </body>
 
 </html>
