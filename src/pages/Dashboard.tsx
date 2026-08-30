@@ -15,7 +15,7 @@ export default function Dashboard() {
   const [tab, setTab] = useState<TabId>("download");
 
   return (
-    <div className="flex h-screen w-full flex-col bg-[#0d0f12] text-[#e8e8e8]">
+    <div className="flex h-full w-full flex-col overflow-hidden bg-[#0d0f12] text-[#e8e8e8]">
       {/* ── Top Bar ── */}
       <header className="flex shrink-0 items-center justify-between border-b border-[#262930] bg-[#17191e] px-4 py-3">
         <div className="flex min-w-0 items-center gap-3">
@@ -25,7 +25,7 @@ export default function Dashboard() {
           <div className="min-w-0">
             <h1 className="truncate text-sm font-bold">VidFetch</h1>
             <p className="truncate text-[11px] text-[#8e8e93]">
-              v2.1 · {user?.name || "Guest"}
+              v2.1.1 · {user?.name || "Guest"}
             </p>
           </div>
         </div>
@@ -47,10 +47,7 @@ export default function Dashboard() {
       </header>
 
       {/* ── Active Tab (fills remaining space, independent scroll) ── */}
-      <main
-        className="flex-1 overflow-y-auto"
-        style={{ height: "calc(100vh - 56px - 64px)" }}
-      >
+      <main className="min-h-0 flex-1 overflow-y-auto">
         {tab === "download" && <DownloaderTab />}
         {tab === "help" && <HistoryTab />}
         {tab === "about" && <SettingsTab />}

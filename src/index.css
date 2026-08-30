@@ -174,16 +174,15 @@ img {
   -webkit-user-drag: none;
 }
 
-/* ── Body / root — Capacitor WebView scroll ──────────────────────────────── */
+/* ── Body / root — Lock to viewport, no page scroll ─────────────────────── */
 html,
 body,
 #root {
   margin: 0;
   padding: 0;
   width: 100%;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   background-color: #0d0f12;
   color: #e8e8e8;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
 }
