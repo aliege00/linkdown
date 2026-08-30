@@ -4,7 +4,14 @@ import {
   clearDownloadHistory,
   type DownloadRecord,
 } from "@/lib/history";
-import { Clock, FileVideo, ListVideo, Trash2, Copy } from "lucide-react";
+import {
+  Clock,
+  FileVideo,
+  ListVideo,
+  Trash2,
+  Copy,
+  Download,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FlatCard } from "@/components/FlatCard";
 
@@ -33,24 +40,39 @@ export default function HistoryTab() {
           <div className="flex items-center gap-2">
             <Clock className="size-5 text-[#8e8e93]" />
             <p className="text-base font-semibold">Geçmiş</p>
+            {history.length > 0 && (
+              <span className="rounded-full bg-[#6cb4ee]/10 px-2 py-0.5 text-[11px] font-bold text-[#6cb4ee]">
+                {history.length}
+              </span>
+            )}
           </div>
           {history.length > 0 && (
             <Button
               variant="ghost"
               size="sm"
-              className="gap-1 text-xs text-[#8e8e93]"
+              className="gap-1.5 text-xs text-[#8e8e93] hover:text-[#ff453a]"
               onClick={handleClear}
             >
               <Trash2 className="size-3.5" />
-              Temizle
+              Tümünü Temizle
             </Button>
           )}
         </div>
 
         {history.length === 0 ? (
-          <p className="py-8 text-center text-sm text-[#8e8e93]">
-            Henüz indirme yok
-          </p>
+          <div className="flex flex-col items-center gap-4 py-12">
+            <div className="flex size-16 items-center justify-center rounded-2xl bg-[#262930]">
+              <Download className="size-7 text-[#8e8e93]" />
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-semibold text-[#e8e8e8]">
+                Henüz indirme yok
+              </p>
+              <p className="mt-1 text-xs text-[#8e8e93]">
+                İndirdiğiniz videolar burada görünecek
+              </p>
+            </div>
+          </div>
         ) : (
           <ul className="mt-3 divide-y divide-[#262930]">
             {history.map((record) => (

@@ -1,14 +1,14 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { motion, LayoutGroup } from "framer-motion";
-import { Download, HelpCircle, Info, type LucideIcon } from "lucide-react";
+import { Download, History, Settings, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type TabId = "download" | "help" | "about";
 
 const TABS: { id: TabId; label: string; icon: LucideIcon }[] = [
   { id: "download", label: "İndir", icon: Download },
-  { id: "help", label: "Geçmiş", icon: HelpCircle },
-  { id: "about", label: "Ayarlar", icon: Info },
+  { id: "help", label: "Geçmiş", icon: History },
+  { id: "about", label: "Ayarlar", icon: Settings },
 ];
 
 async function hapticTap() {
@@ -23,6 +23,30 @@ async function hapticTap() {
   }
 }
 
+/**
+ * Detect Android keyboard by comparing visualViewport height to window height.
+ * When the keyboard opens, viewport shrinks — we hide the bar.
+ */
+function useKeyboardVisible() {
+  const [visible, setVisible] = useState(true);
+
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    const onResize = () => {
+      // If viewport height drops below 70% of window height, keyboard is likely open
+      const threshold = window.innerHeight * 0.7;
+      setVisible(vv.height > threshold);
+    };
+
+    vv.addEventListener("resize", onResize);
+    return () => vv.removeEventListener("resize", onResize);
+  }, []);
+
+  return visible;
+}
+
 export default function BottomTabBar({
   active,
   onChange,
@@ -30,6 +54,8 @@ export default function BottomTabBar({
   active: TabId;
   onChange: (tab: TabId) => void;
 }) {
+  const keyboardVisible = useKeyboardVisible();
+
   const handleTab = useCallback(
     (id: TabId) => {
       hapticTap();
@@ -40,7 +66,10 @@ export default function BottomTabBar({
 
   return (
     <nav
-      className="fixed bottom-0 left-0 right-0 z-50 border-t border-[#262930] bg-[#17191e]"
+      className={cn(
+        "fixed bottom-0 left-0 right-0 z-50 border-t border-[#262930] bg-[#17191e] transition-transform duration-200",
+        keyboardVisible ? "translate-y-0" : "translate-y-full",
+      )}
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
       <LayoutGroup id="flatTab">
