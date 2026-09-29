@@ -174,23 +174,27 @@ img {
   -webkit-user-drag: none;
 }
 
-/* ── Body / root — Lock to viewport, no page scroll ─────────────────────── */
+/* ── Body / root — native document scroll ──────────────────────────────────
+ * Android WebView (Capacitor) trusts the DOCUMENT itself as the scroll
+ * container far more reliably than any nested overflow box. Locking html/body
+ * with overflow:hidden and scrolling an inner <main> was the root cause of the
+ * touch "freeze": the WebView can refuse to route touch → inner scroller on
+ * some OEM builds. Let the page scroll naturally instead.
+ * ───────────────────────────────────────────────────────────────────────── */
 html,
 body,
 #root {
   margin: 0;
   padding: 0;
   width: 100%;
-  height: 100vh;
-  height: 100dvh;
-  overflow: hidden;
+  min-height: 100vh;
+  min-height: 100dvh;
   background-color: #0d0f12;
   color: #e8e8e8;
-  overscroll-behavior: none;
 }
 
-/* Capacitor WebView scroll support */
 body {
+  overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  overscroll-behavior: none;
+  overscroll-behavior-y: contain; /* no pull-to-refresh / bounce fighting the app */
 }

@@ -297,9 +297,13 @@ class DownloadWorker(
                 savedName != null -> "Saved: $savedName"
                 else -> "Download complete"
             }
-            updateNotification(statusText, 100, true, savedUri, savedMime)
-            // Keep a tappable "complete" notification after the foreground
-            // service stops (WorkManager auto-removes the FGS notification).
+            // Do NOT post a "done" notification on NOTIFICATION_ID here.
+            // WorkManager cancels that exact ID when the foreground service
+            // stops, so a done-notification on it disappears immediately —
+            // and re-posting the completion on a separate ID a moment later
+            // made the notification visibly blink (gone → back) in the shade.
+            // The only completion notification is the persistent one on
+            // COMPLETE_NOTIFICATION_ID, posted once, below.
             showCompleteNotification(statusText, savedUri, savedMime)
 
             val output = Data.Builder()
@@ -356,20 +360,24 @@ class DownloadWorker(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val builder = NotificationCompat.Builder(
-            applicationContext,
-            DownloadApp.DOWNLOAD_CHANNEL_ID
-        )
-            .setContentTitle(if (done) "Download complete" else "Downloading video")
-            .setContentText(text)
-            .setSmallIcon(
-                if (done) android.R.drawable.stat_sys_download_done
-                else android.R.drawable.stat_sys_download
+            val builder = NotificationCompat.Builder(
+                applicationContext,
+                DownloadApp.DOWNLOAD_CHANNEL_ID
             )
-            .setOngoing(!done)
-            .setAutoCancel(done)
-            .setContentIntent(pendingIntent)
-            .setProgress(100, progress, progress <= 0)
+                .setContentTitle(if (done) "Download complete" else "Downloading video")
+                .setContentText(text)
+                .setSmallIcon(
+                    if (done) android.R.drawable.stat_sys_download_done
+                    else android.R.drawable.stat_sys_download
+                )
+                .setOngoing(!done)
+                .setAutoCancel(done)
+                .setContentIntent(pendingIntent)
+                // Only alert once — re-posting progress must NOT re-trigger
+                // sound/vibration/heads-up, otherwise the notification
+                // "flickers" in the shade on every update.
+                .setOnlyAlertOnce(true)
+                .setProgress(100, progress, progress <= 0)
 
         // "Open" action on the completion notification
         if (done && !openUri.isNullOrEmpty()) {

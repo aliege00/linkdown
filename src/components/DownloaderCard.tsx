@@ -1115,6 +1115,7 @@ export default function DownloaderCard({
   resultsRef,
   onStateChange,
   initialUrl,
+  className,
 }: {
   /** Focus target for the URL input (driven from the page nav / CTA). */
   inputRef: RefObject<HTMLInputElement | null>;
@@ -1124,6 +1125,8 @@ export default function DownloaderCard({
   onStateChange?: (state: PageState) => void;
   /** Prefill the URL input (e.g. re-download from the dashboard via ?url=). */
   initialUrl?: string;
+  /** Optional wrapper classes so hosts (Dashboard tab) can control layout. */
+  className?: string;
 }) {
   const [url, setUrl] = useState(initialUrl ?? "");
   const [state, setState] = useState<PageState>("idle");
@@ -1737,7 +1740,7 @@ export default function DownloaderCard({
 
   // ─── Page render ───────────────────────────────────────────────────
   return (
-    <>
+    <div className={className}>
       {/* On-device download history — works in every build */}
       {history.length > 0 && (
         <DownloadHistoryCard
@@ -2377,6 +2380,6 @@ export default function DownloaderCard({
         }}
         onDismiss={clearLastUrl}
       />
-    </>
+    </div>
   );
 }

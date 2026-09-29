@@ -25,11 +25,6 @@ const AuthPage = lazy(() => import("./pages/Auth.tsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
 const ChatPage = lazy(() => import("./components/ClaudeStyleChat.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
-const VlyToolbar = lazy(() =>
-  import("../vly-toolbar-readonly.tsx")
-    .then((m) => ({ default: m.VlyToolbar ?? (() => null) }))
-    .catch(() => ({ default: () => null })),
-);
 
 // Only construct the Convex client when a real deployment URL exists.
 // `new ConvexReactClient("")` throws at module load, which crashed the whole
@@ -53,8 +48,7 @@ function RouteLoading() {
   );
 }
 
-/** Silent error boundary — if VlyToolbar crashes it renders nothing instead of
- *  crashing the whole app (e.g. hook errors in WebContainer environment). */
+/** Silent error boundary kept for future dev-only overlays. */
 class ToolbarErrorBoundary extends React.Component<
   { children: React.ReactNode },
   { hasError: boolean }
@@ -64,7 +58,7 @@ class ToolbarErrorBoundary extends React.Component<
     return { hasError: true };
   }
   componentDidCatch(err: Error) {
-    console.warn("[VlyToolbar] Caught error, toolbar disabled:", err.message);
+    console.warn("[Overlay] Caught error, overlay disabled:", err.message);
   }
   render() {
     return this.state.hasError ? null : this.props.children;
@@ -193,11 +187,7 @@ if (typeof window !== "undefined") {
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <RootErrorBoundary>
-      <ToolbarErrorBoundary>
-        <Suspense fallback={null}>
-          <VlyToolbar />
-        </Suspense>
-      </ToolbarErrorBoundary>
+      <ToolbarErrorBoundary>{null}</ToolbarErrorBoundary>
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
         {HAS_CONVEX && convex ? (
           <ConvexAuthProvider client={convex}>
