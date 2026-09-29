@@ -53,10 +53,12 @@ jobs:
           java-version: "21"
 
       # ── Android SDK ────────────────────────────────────────────────
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          accept-android-sdk-licenses: true
+      # ubuntu-latest runners ship with the Android SDK preinstalled
+      # (ANDROID_HOME is set). The android-actions/setup-android@v3 action
+      # is currently broken (it tries to install the deprecated "tools"
+      # package and fails sdkmanager), so we only accept licenses here.
+      - name: Accept Android SDK licenses
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
 
       # ── Install dependencies ───────────────────────────────────────
       - name: Install dependencies
