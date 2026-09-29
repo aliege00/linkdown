@@ -73,7 +73,6 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       <div className="min-h-screen flex items-center justify-center p-6 bg-background relative overflow-hidden">
         {/* Background decoration */}
         <div className="absolute inset-0 bg-subtle-grid pointer-events-none" />
-        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] rounded-full bg-primary/5 blur-3xl pointer-events-none" />
 
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -171,7 +170,6 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     <div className="min-h-screen flex flex-col bg-background relative overflow-hidden">
       {/* Background decoration */}
       <div className="absolute inset-0 bg-subtle-grid pointer-events-none" />
-      <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full bg-primary/5 blur-3xl pointer-events-none" />
 
       {/* Floating nav */}
       <header className="relative z-10 flex items-center justify-between px-6 py-4">
@@ -197,7 +195,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
           transition={{ duration: 0.5, ease: "easeOut" }}
           className="w-full max-w-sm"
         >
-          <Card className="border-border/50 shadow-xl shadow-primary/5 backdrop-blur-sm">
+          <Card className="border-border/50 shadow-xl shadow-primary/5">
             {step === "signIn" ? (
               <>
                 <CardHeader className="text-center pt-8">

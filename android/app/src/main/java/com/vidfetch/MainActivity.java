@@ -1,46 +1,20 @@
 package com.vidfetch;
 
 import android.os.Bundle;
-import android.webkit.WebSettings;
-import android.webkit.WebView;
-import com.getcapacitor.BridgeActivity;
 
 /**
- * Custom MainActivity that forces WebView scroll and touch settings
- * to prevent the Capacitor WebView from locking touch/scroll on Android.
+ * Legacy MainActivity in the wrong package — the real, used entry point is
+ * com.vidfetch.downloader.MainActivity (see AndroidManifest.xml `.MainActivity`
+ * resolving against the application namespace com.vidfetch.downloader).
  *
- * BridgeActivity sets up the Capacitor bridge and WebView. After super.onCreate,
- * we access the WebView via getBridge().getWebView() and force:
- *   - Vertical scrollbar visible (Android renders a scroll indicator)
- *   - Overscroll mode ALWAYS (shows overscroll glow, confirms touch works)
- *   - JavaScript enabled (required, but make sure it's not disabled)
+ * This file registers NO plugins and is never referenced. Kept as a stub with
+ * no behavior so it can never shadow or break the real activity. If you are
+ * looking for the app entry point, see downloader/MainActivity.java.
  */
-public class MainActivity extends BridgeActivity {
-
+public class MainActivity extends androidx.activity.ComponentActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
-        // Force WebView scroll settings after bridge is initialized
-        WebView webView = getBridge().getWebView();
-        if (webView != null) {
-            WebSettings settings = webView.getSettings();
-
-            // Enable JavaScript (Capacitor requires it)
-            settings.setJavaScriptEnabled(true);
-
-            // Allow file access
-            settings.setAllowFileAccess(true);
-
-            // Force vertical scrollbar
-            webView.setVerticalScrollBarEnabled(true);
-            webView.setHorizontalScrollBarEnabled(false);
-
-            // Force overscroll mode — confirms touch events reach WebView
-            webView.setOverScrollMode(WebView.OVER_SCROLL_ALWAYS);
-
-            // Ensure the WebView itself can scroll
-            webView.setScrollContainer(true);
-        }
+        finish(); // Not the real entry point — never shown.
     }
 }

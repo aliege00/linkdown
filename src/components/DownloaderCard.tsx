@@ -756,7 +756,7 @@ const NativeToolsPanel = memo(function NativeToolsPanel({
   return (
     <div className="mt-6 mx-auto max-w-2xl">
       {/* Download location — changeable via the system folder picker */}
-      <Card className="border-border/50 shadow-sm bg-card/95 backdrop-blur-sm">
+      <Card className="border-border/50 shadow-sm bg-card">
         <CardContent className="p-4 sm:p-5 text-left">
           <div className="flex items-center gap-3 pb-3 mb-3 border-b border-border/30">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
@@ -846,7 +846,7 @@ const NativeToolsPanel = memo(function NativeToolsPanel({
       {/* YouTube anti-bot troubleshooting (optional, advanced) */}
       <Card
         id="youtube-troubleshooting"
-        className="mt-4 scroll-mt-24 border-border/50 shadow-sm bg-card/95 backdrop-blur-sm"
+        className="mt-4 scroll-mt-24 border-border/50 shadow-sm bg-card"
       >
         <CardContent className="p-4 sm:p-5 text-left">
           <div className="flex items-center gap-3 pb-3 mb-3 border-b border-border/30">
@@ -1011,7 +1011,7 @@ const DownloadHistoryCard = memo(function DownloadHistoryCard({
 
   return (
     <div className="mt-6 mx-auto max-w-2xl">
-      <Card className="border-border/50 shadow-sm bg-card/95 backdrop-blur-sm">
+      <Card className="border-border/50 shadow-sm bg-card">
         <CardContent className="p-4 sm:p-5 text-left">
           <div className="flex items-center gap-3 pb-3 mb-3 border-b border-border/30">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
@@ -1751,7 +1751,7 @@ export default function DownloaderCard({
         />
       )}
 
-      <Card className="border-border/50 shadow-lg shadow-primary/5 bg-card/95 backdrop-blur-sm">
+      <Card className="border-border/50 shadow-lg shadow-primary/5 bg-card">
         <CardContent className="p-4 sm:p-6 space-y-4">
           {/* On-device engine note */}
           <div className="flex items-start gap-3 p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200/50 dark:border-emerald-800/30">
@@ -1919,7 +1919,6 @@ export default function DownloaderCard({
               >
                 <div className="relative">
                   <Loader2 className="h-10 w-10 animate-spin text-primary" />
-                  <div className="absolute inset-0 animate-ping opacity-20 rounded-full bg-primary" />
                 </div>
                 <div className="text-center">
                   <p className="font-medium text-foreground">

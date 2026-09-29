@@ -95,7 +95,7 @@ class DownloadWorker(
         return try {
             // ── Step 1: Promote to Foreground Service ──────────────
             // Tells Android: "This task is important, don't kill it"
-            setForeground(createForegroundInfo("Starting download…", 0, false))
+            setForeground(createForegroundInfo("Starting download…", 0))
 
             // ── Step 1.5: Ensure the engine is initialized ─────────
             // The Application class initializes it at startup, but a
@@ -185,12 +185,14 @@ class DownloadWorker(
                     setProgress(progressData)
                 }
 
-                // Update the persistent notification (percent · speed · ETA),
-                // throttled to keep the status bar smooth
+                // Update the SAME WorkManager-owned FGS notification by
+                // re-calling setForeground() — throttled to keep the status
+                // bar smooth. Manual notify() on the FGS id races WorkManager
+                // (flicker); setForeground() is the supported update path.
                 val now = SystemClock.elapsedRealtime()
                 if (now - lastNotificationUpdate >= 250 || pct >= 100) {
                     lastNotificationUpdate = now
-                    updateNotification("$pct% · $speed · ETA $eta", pct, false)
+                    setForegroundSafely("$pct% · $speed · ETA $eta", pct)
                 }
             }
 
@@ -248,7 +250,7 @@ class DownloadWorker(
 
             if (isPlaylist && downloaded != null && downloaded.isDirectory) {
                 // Save every file of the playlist, one by one.
-                updateNotification("Saving ${downloaded.name}…", 100, false)
+                setForegroundSafely("Saving ${downloaded.name}…", 100)
                 val files = (downloaded.listFiles() ?: emptyArray())
                     .filter { it.isFile }
                     .sortedBy { it.name }
@@ -272,7 +274,7 @@ class DownloadWorker(
                 downloaded.delete()
                 savedName = downloaded.name
             } else if (downloaded != null && downloaded.exists() && downloaded.isFile) {
-                updateNotification("Saving to Downloads…", 100, false)
+                setForegroundSafely("Saving to Downloads…", 100)
                 val mime = MediaStoreHelper.mimeTypeFor(downloaded.name)
                 // Save into the user's chosen folder when set, otherwise the
                 // default Downloads/VidFetch folder.
@@ -297,13 +299,15 @@ class DownloadWorker(
                 savedName != null -> "Saved: $savedName"
                 else -> "Download complete"
             }
-            // Do NOT post a "done" notification on NOTIFICATION_ID here.
-            // WorkManager cancels that exact ID when the foreground service
-            // stops, so a done-notification on it disappears immediately —
-            // and re-posting the completion on a separate ID a moment later
-            // made the notification visibly blink (gone → back) in the shade.
-            // The only completion notification is the persistent one on
-            // COMPLETE_NOTIFICATION_ID, posted once, below.
+            // Do NOT post anything on NOTIFICATION_ID (the FGS id) manually.
+            // WorkManager owns that id: it posts it at setForeground() and
+            // CANCELS it when the foreground service stops. Any manual
+            // notify(NOTIFICATION_ID, …) races that cancel — the notification
+            // visibly blinks (gone → back) in the shade. All in-flight updates
+            // below go through setForegroundSafely(), which re-calls
+            // setForeground() so WorkManager keeps updating the SAME
+            // WorkManager-owned notification. The only separate, persistent
+            // completion notification is on COMPLETE_NOTIFICATION_ID below.
             showCompleteNotification(statusText, savedUri, savedMime)
 
             val output = Data.Builder()
@@ -319,7 +323,12 @@ class DownloadWorker(
             // Build an actionable error message that survives the
             // WorkManager → observer → frontend pipeline.
             val errorMsg = e.message ?: "Download failed"
-            updateNotification(errorMsg, 0, true)
+
+            // NOTE: no manual notification here — posting on the FGS id races
+            // WorkManager's cancellation when the service stops (flicker),
+            // and on retry the worker re-promotes itself with a fresh
+            // setForeground() anyway. The UI receives the real error via
+            // outputData (DownloadBridge forwards it).
 
             // Pass the real error message to the UI via outputData so
             // DownloadBridge can forward it instead of a generic string.
@@ -337,10 +346,25 @@ class DownloadWorker(
 
     // ── Foreground Service Helpers ──────────────────────────────────
 
-    private fun createForegroundInfo(text: String, progress: Int, done: Boolean): ForegroundInfo {
+    /**
+     * Re-promotes (or updates) the WorkManager-owned foreground notification.
+     * Calling setForeground() repeatedly with the same ForegroundInfo id is
+     * the SUPPORTED way to update a WorkManager FGS notification — the system
+     * service updates the existing notification in place, no cancel/post
+     * cycle, no flicker. Wrapped in runCatching so a rejected promotion
+     * (Android 14+ FGS restrictions while backgrounded) can never crash the
+     * worker; the download itself keeps running normally.
+     */
+    private fun setForegroundSafely(text: String, progress: Int) {
+        runCatching {
+            setForeground(createForegroundInfo(text, progress))
+        }
+    }
+
+    private fun createForegroundInfo(text: String, progress: Int): ForegroundInfo {
         return ForegroundInfo(
             NOTIFICATION_ID,
-            createNotification(text, progress, done),
+            createNotification(text, progress, done = false),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
         )
     }
@@ -393,20 +417,6 @@ class DownloadWorker(
         }
 
         return builder.build()
-    }
-
-    private fun updateNotification(
-        text: String,
-        progress: Int,
-        done: Boolean,
-        openUri: String? = null,
-        openMime: String? = null
-    ) {
-        val manager = applicationContext.getSystemService(NotificationManager::class.java)
-        manager?.notify(
-            NOTIFICATION_ID,
-            createNotification(text, progress, done, openUri, openMime)
-        )
     }
 
     /** Posts the persistent "Download complete — Open" notification. */

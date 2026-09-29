@@ -16,10 +16,9 @@ export default function NotFound() {
     >
       {/* Background decoration */}
       <div className="absolute inset-0 bg-subtle-grid pointer-events-none" />
-      <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] rounded-full bg-primary/5 blur-3xl pointer-events-none" />
 
       {/* Brand header */}
-      <header className="relative z-10 border-b border-border/40 bg-background/80 backdrop-blur-xl">
+      <header className="relative z-10 border-b border-border/40 bg-background">
         <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-6">
           <button
             onClick={() => navigate("/")}

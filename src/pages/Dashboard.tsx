@@ -29,7 +29,7 @@ export default function Dashboard() {
             <div className="min-w-0">
               <h1 className="truncate text-sm font-bold">VidFetch</h1>
               <p className="truncate text-[11px] text-[#8e8e93]">
-                v2.3 · {user?.name || "Guest"}
+                v2.3.2 · {user?.name || "Guest"}
               </p>
             </div>
           </div>

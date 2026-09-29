@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { motion, AnimatePresence } from "framer-motion";
 import { Clipboard, Download, X } from "lucide-react";
+import { useEffect, useRef } from "react";
 import type { ClipboardUrl } from "@/hooks/use-clipboard-monitor";
 
 interface ClipboardNotificationProps {
@@ -29,12 +30,16 @@ export function ClipboardNotification({
   onDismiss,
   autoDismiss = 8000,
 }: ClipboardNotificationProps) {
-  // Auto-dismiss timer
-  if (url && autoDismiss > 0) {
-    setTimeout(() => {
-      onDismiss();
-    }, autoDismiss);
-  }
+  // Auto-dismiss timer — correctly keyed to the url value so it is
+  // registered ONCE per notification (a timer inside the render body would
+  // schedule a new timeout on every re-render and dismiss unpredictably).
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
+  useEffect(() => {
+    if (!url || autoDismiss <= 0) return;
+    const t = setTimeout(() => onDismissRef.current(), autoDismiss);
+    return () => clearTimeout(t);
+  }, [url, autoDismiss]);
 
   return (
     <AnimatePresence>
@@ -47,7 +52,7 @@ export function ClipboardNotification({
           transition={{ type: "spring", stiffness: 400, damping: 25 }}
           className="fixed bottom-6 right-6 z-50 max-w-sm"
         >
-          <Card className="border-primary/20 bg-card/95 shadow-lg backdrop-blur-sm">
+          <Card className="border-primary/20 bg-card shadow-lg">
             <CardContent className="p-4">
               <div className="flex items-start gap-3">
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">

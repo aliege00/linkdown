@@ -89,10 +89,10 @@ export default function Landing() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.5 }}
-      className="min-h-screen flex flex-col overflow-x-hidden"
+      className="relative min-h-screen flex flex-col overflow-x-hidden"
     >
       {/* ═══ Navigation ═══ */}
-      <header className="fixed top-0 inset-x-0 z-50 border-b border-border/40 bg-background/80 backdrop-blur-xl">
+      <header className="absolute top-0 inset-x-0 z-40 border-b border-border/40 bg-background">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
           <div className="flex items-center gap-2.5">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
@@ -143,9 +143,6 @@ export default function Landing() {
       >
         {/* Subtle background grid */}
         <div className="absolute inset-0 bg-subtle-grid pointer-events-none" />
-
-        {/* Decorative glow */}
-        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full bg-primary/5 blur-3xl pointer-events-none" />
 
         <div className="relative z-10 mx-auto max-w-4xl text-center">
           {/* Badge */}
@@ -203,12 +200,13 @@ export default function Landing() {
           </motion.div>
         </div>
 
-        {/* Scroll indicator */}
+        {/* Scroll indicator — static (infinite bounce animations keep the
+            compositor busy forever and can freeze low-end Android WebViews) */}
         {heroState === "idle" && (
           <motion.button
             initial={{ opacity: 0 }}
-            animate={{ opacity: 1, y: [0, 6, 0] }}
-            transition={{ delay: 1, y: { repeat: Infinity, duration: 2 } }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 1 }}
             onClick={() =>
               featuresRef.current?.scrollIntoView({ behavior: "smooth" })
             }
