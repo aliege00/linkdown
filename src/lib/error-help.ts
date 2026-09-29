@@ -104,23 +104,21 @@ const COPY: Record<
     tr: {
       title: "YouTube bot kontrolüne takıldı",
       message:
-        "YouTube bu isteği şüpheli buldu ve \"Devam etmek için giriş yapın\" benzeri bir doğrulama istiyor. Bu, uygulamanın hatası değildir; VPN, veri merkezi veya ortak ağlardan gelen isteklerde sıkça görülür.",
+        "YouTube bu isteği şüpheli buldu. Uygulama otomatik olarak alternatif bağlantı yöntemlerini denedi ama hepsi engellendi. Bu, uygulamanın hatası değildir; VPN, veri merkezi veya ortak ağlardan gelen isteklerde sıkça görülür.",
       steps: [
-        "VPN'i kapat (en hızlı çözüm)",
-        "Giriş yaptığın tarayıcıdan cookies içe aktar (Gelişmiş → YouTube sorun giderme)",
-        "Birkaç dakika bekleyip tekrar dene",
-        "Aşağıdaki yardım rehberini incele",
+        "VPN'i kapat ve tekrar dene (en hızlı çözüm)",
+        "Birkaç dakika bekleyip tekrar dene — engel genellikle geçicidir",
+        "Hâlâ engelliyse: Giriş yaptığın tarayıcıdan cookies içe aktar (Gelişmiş → YouTube sorun giderme) — son çare olarak orada",
       ],
     },
     en: {
       title: "YouTube bot check",
       message:
-        "YouTube flagged this request as suspicious and is asking for a \"Sign in to confirm you're not a bot\" verification. This is not a bug in the app — it's common for requests coming from VPNs, datacenter or shared networks.",
+        "YouTube flagged this request as suspicious. The app automatically tried alternate connection methods but all were blocked. This is not a bug in the app — it's common for requests coming from VPNs, datacenter or shared networks.",
       steps: [
-        "Turn your VPN off (fastest fix)",
-        "Import cookies from a browser where you are logged in (Advanced → YouTube troubleshooting)",
-        "Wait a few minutes and try again",
-        "Read the help guide below",
+        "Turn your VPN off and retry (fastest fix)",
+        "Wait a few minutes and try again — the block is usually temporary",
+        "Still blocked? Import cookies from a browser where you are logged in (Advanced → YouTube troubleshooting) — kept there as a last resort",
       ],
     },
   },

@@ -108,13 +108,46 @@ class DownloadBridge : Plugin() {
                 request, "vidfetch_info_${System.currentTimeMillis()}"
             )
             if (response.exitCode != 0) {
+                // Automatic bot-check fallback: rotate player clients before
+                // surfacing any error to the user.
+                if (response.err.lowercase().contains("not a bot") ||
+                    response.err.lowercase().contains("sign in to confirm")
+                ) {
+                    var lastErr = response.err
+                    for (retry in botCheckRetryArgs()) {
+                        val retryReq = YoutubeDLRequest(url).apply {
+                            addOption("--dump-json")
+                            addOption("--flat-playlist")
+                            addOption("--no-warnings")
+                            retry.forEach { addOption(it) }
+                        }
+                        val r = YoutubeDL.execute(
+                            retryReq, "vidfetch_info_${System.currentTimeMillis()}"
+                        )
+                        if (r.exitCode == 0) {
+                            return handlePlaylistJson(r.out, url, call)
+                        }
+                        lastErr = r.err
+                    }
+                    call.reject(lastErr.ifBlank { "yt-dlp failed" })
+                    return true
+                }
                 call.reject(response.err.ifBlank { "yt-dlp exited with code ${response.exitCode}" })
                 return true
             }
+            return handlePlaylistJson(response.out, url, call)
+        } catch (e: Exception) {
+            Log.e(TAG, "extractPlaylistInfo failed", e)
+            call.reject(e.message ?: "Playlist extraction failed")
+            return true
+        }
+    }
 
-            val root = JSONObject(response.out)
-            val rawEntries = root.optJSONArray("entries")
-            if (rawEntries == null) return false // not actually a playlist
+    /** Parses a flat-playlist JSON payload and resolves the plugin call. */
+    private fun handlePlaylistJson(out: String, url: String, call: PluginCall): Boolean {
+        val root = JSONObject(out)
+        val rawEntries = root.optJSONArray("entries")
+        if (rawEntries == null) return false // not actually a playlist
 
             val entries = JSONArray()
             for (i in 0 until rawEntries.length()) {
@@ -159,24 +192,74 @@ class DownloadBridge : Plugin() {
             }
             call.resolve(result)
             return true
-        } catch (e: Exception) {
-            Log.e(TAG, "extractPlaylistInfo failed", e)
-            call.reject(e.message ?: "Playlist extraction failed")
-            return true
-        }
     }
 
-    /** Single-video analysis — full format list. */
+    /**
+     * Builds the retry ladder for YouTube bot-check failures. YouTube's
+     * "Sign in to confirm you're not a bot" wall depends on which player
+     * client yt-dlp uses; rotating the client almost always gets through
+     * WITHOUT any cookies. The default client stays first; only when the
+     * user has explicitly imported a cookies.txt does it come into play.
+     */
+    private fun hasCookies(): Boolean =
+        DownloadPrefs.getCookiesFileName(context) != null &&
+            File(context.filesDir, COOKIES_FILE).exists()
+
+    private fun botCheckRetryArgs(): List<List<String>> {
+        val ladder = mutableListOf<List<String>>()
+        ladder.add(listOf("--extractor-args", "youtube:player_client=default"))
+        ladder.add(listOf("--extractor-args", "youtube:player_client=android"))
+        ladder.add(listOf("--extractor-args", "youtube:player_client=ios"))
+        ladder.add(listOf("--extractor-args", "youtube:player_client=tv_embedded"))
+        // Cookies are the LAST resort — only when the user imported them.
+        if (hasCookies()) {
+            ladder.add(cookiesArgs())
+        }
+        return ladder
+    }
+
+    /** True when the error looks like YouTube's bot-check wall. */
+    private fun isBotCheckError(e: Exception): Boolean {
+        val msg = (e.message ?: "").lowercase()
+        return msg.contains("sign in to confirm") ||
+            msg.contains("confirm you're not a bot") ||
+            msg.contains("not a bot")
+    }
+
+    /** Single-video analysis — full format list, with automatic retry ladder. */
     private fun extractSingleVideoInfo(url: String, call: PluginCall) {
         try {
-            val request = YoutubeDLRequest(url).apply {
+            val base = YoutubeDLRequest(url).apply {
                 addOption("--no-playlist")
                 addOption("--no-warnings")
                 cookiesArgs().forEach { addOption(it) }
             }
 
-            // getInfo() adds --dump-json and parses the JSON for us
-            val info = YoutubeDL.getInfo(request)
+            // getInfo() adds --dump-json and parses the JSON for us.
+            // On a bot-check failure, rotate the player client automatically —
+            // the user never sees the error unless EVERY fallback fails.
+            val info = try {
+                YoutubeDL.getInfo(base)
+            } catch (e: Exception) {
+                if (!isBotCheckError(e)) throw e
+                Log.w(TAG, "bot check on analyze — trying fallback clients")
+                var last: Exception = e
+                var result: com.yausername.youtubedl_android.YoutubeDL.Info? = null
+                for (retry in botCheckRetryArgs()) {
+                    try {
+                        val retryReq = YoutubeDLRequest(url).apply {
+                            addOption("--no-playlist")
+                            addOption("--no-warnings")
+                            retry.forEach { addOption(it) }
+                        }
+                        result = YoutubeDL.getInfo(retryReq)
+                        break
+                    } catch (e2: Exception) {
+                        last = e2
+                    }
+                }
+                result ?: throw last
+            }
 
             // Build the format list matching the existing VidFetch API contract
             val formats = JSONArray()

@@ -127,6 +127,19 @@ function youtubeSettingsPayload() {
 }
 
 /**
+ * Player-client rotation for YouTube's bot-check wall. Different clients use
+ * different extraction paths and almost always get through WITHOUT any
+ * cookies — so the user never needs to import cookies.txt. Cookies are the
+ * LAST resort (kept only because a user may still configure them).
+ */
+const BOT_CHECK_CLIENTS = ["android", "ios", "tv_embedded"];
+
+function isBotCheckError(message) {
+  const m = String(message || "").toLowerCase();
+  return m.includes("not a bot") || m.includes("sign in to confirm");
+}
+
+/**
  * Extra yt-dlp args for YouTube anti-bot mitigations, based on the user's
  * settings. Empty when nothing is configured (default behavior unchanged).
  */
@@ -217,6 +230,32 @@ async function getVideoInfo(url, isPlaylist) {
     child.on("close", (code) =>
       code === 0 ? resolve(stdout) : reject(new Error(stderr.trim() || `yt-dlp exited with code ${code}`)),
     );
+  }).catch(async (err) => {
+    // Automatic bot-check fallback: rotate the player client — the user
+    // never sees the wall unless every client fails.
+    if (!isBotCheckError(err.message)) throw err;
+    for (const client of BOT_CHECK_CLIENTS) {
+      const retryArgs = args.filter(
+        (a, i) => !(a === "--extractor-args" && args[i + 1]?.startsWith("youtube:")),
+      );
+      retryArgs.push("--extractor-args", `youtube:player_client=${client}`);
+      try {
+        return await new Promise((resolve, reject) => {
+          const child = spawn(YTDLP_EXE, retryArgs, { windowsHide: true });
+          let stdout = "";
+          let stderr = "";
+          child.stdout.on("data", (d) => (stdout += d.toString()));
+          child.stderr.on("data", (d) => (stderr += d.toString()));
+          child.on("error", reject);
+          child.on("close", (code) =>
+            code === 0 ? resolve(stdout) : reject(new Error(stderr.trim() || `yt-dlp exited with code ${code}`)),
+          );
+        });
+      } catch {
+        // try the next client
+      }
+    }
+    throw err;
   });
 
   const info = JSON.parse(out);

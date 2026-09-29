@@ -71,6 +71,19 @@ class DownloadWorker(
         private val ALREADY_DOWNLOADED_PATTERN =
             Regex("\\[download\\]\\s+(.+?)\\s+has already been downloaded")
 
+        /**
+         * Player-client rotation for YouTube's "Sign in to confirm you're
+         * not a bot" wall. Different player clients use different extraction
+         * paths and almost always get through WITHOUT any cookies — so the
+         * user never has to import cookies.txt. Tried in order after the
+         * default request fails with a bot-check error.
+         */
+        private val BOT_CHECK_ARGS = listOf(
+            listOf("--extractor-args", "youtube:player_client=android"),
+            listOf("--extractor-args", "youtube:player_client=ios"),
+            listOf("--extractor-args", "youtube:player_client=tv_embedded"),
+        )
+
         // Tracks the live yt-dlp process so cancelDownload() can kill it.
         @Volatile
         var activeProcessId: String? = null
@@ -141,12 +154,15 @@ class DownloadWorker(
             }
 
             // ── Step 4: Execute download with real-time progress ──
-            // Callback args: (percent 0-100 Float, ETA seconds Long,
-            // raw progress line String?).
+            // On a bot-check failure, automatically retry with alternate
+            // player clients — the user never sees the wall unless every
+            // fallback fails. The retry reuses the SAME progress callback
+            // captured in `runDownloadWithClients`.
             var currentItem = 0
             var totalItems = 0
             var outputFilePath: String? = null
-            YoutubeDL.execute(request, processId, true) { percent, etaSeconds, line ->
+
+            val progressCb: (Float, Long, String?) -> Unit = { percent, etaSeconds, line ->
                 val pct = if (percent >= 0f) percent.toInt().coerceIn(0, 100) else 0
                 val speed = SPEED_PATTERN.find(line ?: "")?.groupValues?.getOrNull(1) ?: "0 B/s"
                 val eta = formatEta(etaSeconds)
@@ -202,6 +218,14 @@ class DownloadWorker(
                     }
                 }
             }
+
+            // First attempt with the default request (user cookies included
+            // when configured). If YouTube's bot-check wall trips, rotate the
+            // player client — different clients almost always get through
+            // WITHOUT any cookies.
+            runDownloadWithClients(
+                request, url, formatId, isPlaylist, outputTemplate, processId, progressCb,
+            )
 
             // ── Step 5: Find the downloaded output ────────────────
             // Use the exact filename captured from yt-dlp output (Step 4).
@@ -349,6 +373,53 @@ class DownloadWorker(
             activeProcessId = null
             progressScope.cancel()
         }
+    }
+
+    // ── Download with automatic bot-check fallback ─────────────────
+
+    /**
+     * Runs the download; if yt-dlp throws a bot-check error, transparently
+     * retries with alternate player clients. Callbacks mirror the ones used
+     * by the first attempt so progress keeps flowing from whichever client
+     * succeeds.
+     */
+    private suspend fun runDownloadWithClients(
+        request: YoutubeDLRequest,
+        url: String,
+        formatId: String,
+        isPlaylist: Boolean,
+        outputTemplate: String,
+        processId: String,
+        progressCb: (Float, Long, String?) -> Unit,
+    ) {
+        try {
+            YoutubeDL.execute(request, processId, true, progressCb)
+            return
+        } catch (e: Exception) {
+            val msg = (e.message ?: "").lowercase()
+            if (!(msg.contains("not a bot") || msg.contains("sign in to confirm"))) throw e
+            Log.w("DownloadWorker", "bot check on download — rotating player clients")
+            setForegroundSafely("YouTube bot check — alternate client deneniyor…", 0)
+        }
+
+        var last: Exception? = null
+        for (retry in BOT_CHECK_ARGS) {
+            try {
+                val retryReq = YoutubeDLRequest(url).apply {
+                    addOption("-f", formatId)
+                    if (!isPlaylist) addOption("--no-playlist")
+                    addOption("--no-warnings")
+                    addOption("--no-cache-dir")
+                    addOption("-o", outputTemplate)
+                    retry.forEach { addOption(it) }
+                }
+                YoutubeDL.execute(retryReq, processId, true, progressCb)
+                return
+            } catch (e: Exception) {
+                last = e
+            }
+        }
+        throw last ?: IllegalStateException("All download attempts failed")
     }
 
     // ── Foreground Service Helpers ──────────────────────────────────

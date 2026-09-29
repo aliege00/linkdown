@@ -34,13 +34,18 @@ export const HELP_CONTENT = {
       fixesTitle: "Nasıl çözülür?",
       fixes: [
         {
-          badge: "Windows",
-          title: "Tarayıcı cookies — en kolay yol",
-          body: "Chrome, Edge veya Firefox'ta YouTube'a giriş yap. Uygulamada Gelişmiş → YouTube sorun giderme → Tarayıcı cookies bölümünden tarayıcını seç. İndirme sırasında tarayıcının kapalı veya kilidi açık olması gerekir.",
+          badge: "Önce bunu dene",
+          title: "VPN'i kapat ve birkaç dakika bekle",
+          body: "Uygulama bot kontrolüne takıldığında otomatik olarak alternatif bağlantı yöntemlerini dener ve çoğu durumda cookies gerektirmeden geçer. Engel genellikle geçicidir — birkaç dakika sonra tekrar dene.",
+        },
+        {
+          badge: "Windows • Son çare",
+          title: "Tarayıcı cookies",
+          body: "Yukarıdaki işe yaramazsa: Chrome, Edge veya Firefox'ta YouTube'a giriş yap. Uygulamada Gelişmiş → YouTube sorun giderme → Tarayıcı cookies bölümünden tarayıcını seç. İndirme sırasında tarayıcının kapalı veya kilidi açık olması gerekir.",
           settingsKey: "cookies",
         },
         {
-          badge: "Android + Windows",
+          badge: "Android + Windows • Son çare",
           title: "cookies.txt dosyası",
           body: "Tarayıcına \"Get cookies.txt LOCALLY\" eklentisini kur, YouTube'a giriş yap ve cookies dosyasını dışa aktar. Ardından uygulamada Gelişmiş → YouTube sorun giderme bölümünden bu dosyayı seç.",
           settingsKey: "cookies",
@@ -53,7 +58,7 @@ export const HELP_CONTENT = {
           settingsKey: "po",
         },
       ],
-      note: "Bu ayarlar yalnızca YouTube isteklerini etkiler ve Gelişmiş → YouTube sorun giderme bölümündedir. En güvenilir çözüm, giriş yaptığın bir tarayıcıdan cookies almaktır. VPN'i kapatmak da çoğu zaman yeterlidir.",
+      note: "Uygulama bot kontrolüne karşı otomatik olarak alternatif yöntemleri dener — çoğu kullanıcı cookies'e hiç ihtiyaç duymaz. Cookies yalnızca son çaredir ve Gelişmiş → YouTube sorun giderme bölümünde bulunur.",
     },
     errors: {
       title: "Sık karşılaşılan hatalar",
@@ -162,8 +167,8 @@ export const HELP_CONTENT = {
       fixes: [
         {
           badge: "Windows",
-          title: "Browser cookies — easiest way",
-          body: "Log into YouTube in Chrome, Edge or Firefox. In the app open Advanced → YouTube troubleshooting → Browser cookies and pick your browser. The browser must be closed or unlocked while downloading.",
+          title: "Browser cookies — last resort",
+          body: "The app automatically retries with alternate connection methods first. If everything stays blocked: log into YouTube in Chrome, Edge or Firefox. In the app open Advanced → YouTube troubleshooting → Browser cookies and pick your browser. The browser must be closed or unlocked while downloading.",
           settingsKey: "cookies",
         },
         {
@@ -233,8 +238,8 @@ export const HELP_CONTENT = {
       title: "General tips",
       items: [
         {
-          title: "Browser cookies are the most reliable fix",
-          body: "Importing cookies from a browser where you're logged into YouTube is the most effective way to get past the bot check. It lives under Advanced → YouTube troubleshooting.",
+          title: "The app retries automatically",
+          body: "When YouTube's bot check trips, the app automatically rotates connection methods — most users never need cookies at all.",
         },
         {
           title: "Turn your VPN off",
