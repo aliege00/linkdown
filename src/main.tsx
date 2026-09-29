@@ -3,6 +3,7 @@ import { RequireAuth } from "@/components/RequireAuth";
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
 import { ConvexReactClient } from "convex/react";
 import { ThemeProvider } from "next-themes";
+import { MotionConfig } from "framer-motion";
 import React, { StrictMode, useEffect, lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router";
@@ -189,13 +190,23 @@ createRoot(document.getElementById("root")!).render(
     <RootErrorBoundary>
       <ToolbarErrorBoundary>{null}</ToolbarErrorBoundary>
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-        {HAS_CONVEX && convex ? (
-          <ConvexAuthProvider client={convex}>
+        {/* Disable ALL framer-motion animation inside the packaged apps:
+            the landing page animates ~30 elements with whileInView
+            (IntersectionObserver callbacks on every scroll frame) and low-end
+            Android WebViews stall under that load — the UI freezes and touch
+            appears "locked". On-device the animations add nothing; native
+            performance beats motion. Animated presence (entrance/exit) is
+            also disabled by reducedMotion="always" — layout stays identical,
+            elements just appear without motion. */}
+        <MotionConfig reducedMotion={HAS_CONVEX ? "user" : "always"}>
+          {HAS_CONVEX && convex ? (
+            <ConvexAuthProvider client={convex}>
+              <AppRoutes />
+            </ConvexAuthProvider>
+          ) : (
             <AppRoutes />
-          </ConvexAuthProvider>
-        ) : (
-          <AppRoutes />
-        )}
+          )}
+        </MotionConfig>
       </ThemeProvider>
     </RootErrorBoundary>
   </StrictMode>,

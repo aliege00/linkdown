@@ -8,8 +8,15 @@ android {
         applicationId "com.vidfetch.downloader"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // ⚠️ versionCode MUST strictly increase for Android to install an
+        // updated APK over an existing one. It was pinned at 1 through nine
+        // releases (v1.8.0 → v2.3.1): users could not update in place
+        // ("App not installed") and kept testing STALE builds — which is why
+        // every previous fix appeared to "not work". CI stamps the real
+        // code/name from the git tag (see build-apk.yml / release.yml);
+        // these defaults only apply to bare local builds.
+        versionCode 10
+        versionName "2.3.2"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

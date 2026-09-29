@@ -186,11 +186,14 @@ class DownloadWorker(
                 }
 
                 // Update the SAME WorkManager-owned FGS notification by
-                // re-calling setForeground() — throttled to keep the status
-                // bar smooth. Manual notify() on the FGS id races WorkManager
-                // (flicker); setForeground() is the supported update path.
+                // re-calling setForeground() — throttled to once a second.
+                // Manual notify() on the FGS id races WorkManager's own
+                // cancel of that id (flicker); and rebuilding the
+                // notification many times per second makes some OEM
+                // launchers re-rank it, which reads as "disappearing and
+                // reappearing". 1 Hz keeps the indicator stable.
                 val now = SystemClock.elapsedRealtime()
-                if (now - lastNotificationUpdate >= 250 || pct >= 100) {
+                if (now - lastNotificationUpdate >= 1000 || pct >= 100) {
                     lastNotificationUpdate = now
                     // setForeground() is suspend — hop into the worker's
                     // progress scope (this yt-dlp callback is a plain lambda).
@@ -400,11 +403,11 @@ class DownloadWorker(
                 )
                 .setOngoing(!done)
                 .setAutoCancel(done)
-                .setContentIntent(pendingIntent)
-                // Only alert once — re-posting progress must NOT re-trigger
-                // sound/vibration/heads-up, otherwise the notification
-                // "flickers" in the shade on every update.
+                // Alert (sound/vibration/shade jump) only on the FIRST post.
+                // Without this, every rebuild can re-alert on OEM skins and
+                // the notification appears to jump/blip in the shade.
                 .setOnlyAlertOnce(true)
+                .setContentIntent(pendingIntent)
                 .setProgress(100, progress, progress <= 0)
 
         // "Open" action on the completion notification
