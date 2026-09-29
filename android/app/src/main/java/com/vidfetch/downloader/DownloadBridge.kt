@@ -244,7 +244,7 @@ class DownloadBridge : Plugin() {
                 if (!isBotCheckError(e)) throw e
                 Log.w(TAG, "bot check on analyze — trying fallback clients")
                 var last: Exception = e
-                var result: com.yausername.youtubedl_android.YoutubeDL.Info? = null
+                var success = false
                 for (retry in botCheckRetryArgs()) {
                     try {
                         val retryReq = YoutubeDLRequest(url).apply {
@@ -252,20 +252,35 @@ class DownloadBridge : Plugin() {
                             addOption("--no-warnings")
                             retry.forEach { addOption(it) }
                         }
-                        result = YoutubeDL.getInfo(retryReq)
+                        resolveSingleVideoInfo(url, YoutubeDL.getInfo(retryReq), call)
+                        success = true
                         break
                     } catch (e2: Exception) {
                         last = e2
                     }
                 }
-                result ?: throw last
+                if (!success) throw last
+                return
             }
 
-            // Build the format list matching the existing VidFetch API contract
-            val formats = JSONArray()
-            info.formats?.forEach { f ->
-                // Skip text-only formats (subtitles, etc.)
-                if (f.vcodec == null && f.acodec == null) return@forEach
+            resolveSingleVideoInfo(url, info, call)
+        } catch (e: Exception) {
+            Log.e(TAG, "extractSingleVideoInfo failed", e)
+            call.reject(e.message ?: "Extraction failed")
+        }
+    }
+
+    /** Maps a yt-dlp VideoInfo object onto the plugin response and resolves the call. */
+    private fun resolveSingleVideoInfo(
+        url: String,
+        info: com.yausername.youtubedl_android.mapper.VideoInfo,
+        call: PluginCall,
+    ) {
+        // Build the format list matching the existing VidFetch API contract
+        val formats = JSONArray()
+        info.formats?.forEach { f ->
+            // Skip text-only formats (subtitles, etc.)
+            if (f.vcodec == null && f.acodec == null) return@forEach
 
                 val resolution = when {
                     f.width > 0 && f.height > 0 -> "${f.width}x${f.height}"
@@ -283,43 +298,39 @@ class DownloadBridge : Plugin() {
                     put("fps", f.fps)
                     put("tbr", f.tbr)
                 }
-                formats.put(clean)
-            }
-
-            // Determine best combined (video+audio) format
-            var bestFormatId = "best"
-            for (i in 0 until formats.length()) {
-                val f = formats.getJSONObject(i)
-                if (f.has("vcodec") && !f.isNull("vcodec") &&
-                    f.has("acodec") && !f.isNull("acodec")
-                ) {
-                    bestFormatId = f.optString("format_id", "best")
-                    break
-                }
-            }
-
-            // Build response matching the existing VidFetch API contract
-            val result = JSObject().apply {
-                put("success", true)
-                put("is_playlist", false)
-                put("id", info.id ?: "")
-                put("title", info.title ?: info.fulltitle ?: "Unknown")
-                put("duration", info.duration)
-                put("thumbnail", info.thumbnail ?: "")
-                put("uploader", info.uploader ?: "Unknown")
-                put("uploader_url", info.webpageUrl ?: url)
-                put("webpage_url", info.webpageUrl ?: url)
-                put("formats", formats)
-                put("best_format_id", bestFormatId)
-                put("best_audio_format_id", JSONObject.NULL)
-                put("ffmpeg_available", true)
-            }
-
-            call.resolve(result)
-        } catch (e: Exception) {
-            Log.e(TAG, "extractSingleVideoInfo failed", e)
-            call.reject(e.message ?: "Extraction failed")
+            formats.put(clean)
         }
+
+        // Determine best combined (video+audio) format
+        var bestFormatId = "best"
+        for (i in 0 until formats.length()) {
+            val f = formats.getJSONObject(i)
+            if (f.has("vcodec") && !f.isNull("vcodec") &&
+                f.has("acodec") && !f.isNull("acodec")
+            ) {
+                bestFormatId = f.optString("format_id", "best")
+                break
+            }
+        }
+
+        // Build response matching the existing VidFetch API contract
+        val result = JSObject().apply {
+            put("success", true)
+            put("is_playlist", false)
+            put("id", info.id ?: "")
+            put("title", info.title ?: info.fulltitle ?: "Unknown")
+            put("duration", info.duration)
+            put("thumbnail", info.thumbnail ?: "")
+            put("uploader", info.uploader ?: "Unknown")
+            put("uploader_url", info.webpageUrl ?: url)
+            put("webpage_url", info.webpageUrl ?: url)
+            put("formats", formats)
+            put("best_format_id", bestFormatId)
+            put("best_audio_format_id", JSONObject.NULL)
+            put("ffmpeg_available", true)
+        }
+
+        call.resolve(result)
     }
 
     // ── Start Download ─────────────────────────────────────────────
