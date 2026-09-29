@@ -192,7 +192,11 @@ class DownloadWorker(
                 val now = SystemClock.elapsedRealtime()
                 if (now - lastNotificationUpdate >= 250 || pct >= 100) {
                     lastNotificationUpdate = now
-                    setForegroundSafely("$pct% · $speed · ETA $eta", pct)
+                    // setForeground() is suspend — hop into the worker's
+                    // progress scope (this yt-dlp callback is a plain lambda).
+                    progressScope.launch {
+                        setForegroundSafely("$pct% · $speed · ETA $eta", pct)
+                    }
                 }
             }
 
@@ -355,7 +359,7 @@ class DownloadWorker(
      * (Android 14+ FGS restrictions while backgrounded) can never crash the
      * worker; the download itself keeps running normally.
      */
-    private fun setForegroundSafely(text: String, progress: Int) {
+    private suspend fun setForegroundSafely(text: String, progress: Int) {
         runCatching {
             setForeground(createForegroundInfo(text, progress))
         }
