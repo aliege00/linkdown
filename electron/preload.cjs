@@ -10,6 +10,10 @@ contextBridge.exposeInMainWorld("vidfetch", {
   // wrap the payload, turning the URL into an object that yt-dlp sees as
   // "[object Object] is not a valid URL".
   getVideoInfo: (options) => ipcRenderer.invoke("vidfetch:getInfo", options),
+
+  // Download-event WebSocket endpoint (ws://127.0.0.1:<port> + session
+  // token). Null when the WS server could not start (IPC-only mode).
+  getSocketInfo: () => ipcRenderer.invoke("vidfetch:getSocketInfo"),
   startDownload: (options) =>
     ipcRenderer.invoke("vidfetch:startDownload", options),
   cancelDownload: (options) => ipcRenderer.invoke("vidfetch:cancel", options),

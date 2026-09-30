@@ -41,10 +41,15 @@ import { postDownloadCleanup } from "@/lib/auto-cleanup";
 import EngineSwitcher, { type EngineId, getSavedEngine, saveEngine } from "@/components/EngineSwitcher";
 import { mp4FormatWithHeight, MP4_FORMAT_SELECTOR, MP3_FORMAT_SELECTOR, buildFormatSelector, getMimeType, filterFormats, type FormatLike } from "@/lib/format-enforce";
 import {
-  QUALITY_PRESETS,
   pickFormatForPreset,
   type QualityPresetId,
 } from "@/lib/format-pick";
+import {
+  DOWNLOAD_MODES,
+  selectorForMode,
+  estimateSizeMb,
+  type DownloadModeId,
+} from "@/lib/download-modes";
 import {
   getDownloadHistory,
   addDownloadRecord,
@@ -1147,7 +1152,9 @@ export default function DownloaderCard({
   const [selectedFormat, setSelectedFormat] = useState<string>("");
   // Preferred quality picked BEFORE analysis — the analyze step maps it onto
   // the closest real format once details arrive (see pickFormatForPreset).
-  const [videoQuality, setVideoQuality] = useState<QualityPresetId>("best");
+  // Download mode (Best / Data Saver / Audio). "data" is the default —
+  // the user explicitly asked for low-data downloads with small files.
+  const [videoQuality, setVideoQuality] = useState<DownloadModeId>("data");
   const [playlistQuality, setPlaylistQuality] = useState<string>("best");
   const [playlistSummary, setPlaylistSummary] = useState<{
     saved: number;
@@ -1373,7 +1380,12 @@ export default function DownloaderCard({
         setPlaylistSummary(null);
         setPlaylistQuality("best");
 
-        const result = await getVideoInfo(cleanUrl, looksLikePlaylist(cleanUrl));
+        // Playlist links SKIP the format-picker screen entirely and go
+        // straight to downloading every video — the user asked for
+        // "playlist link → download all, no extra step".
+        const isPlaylist = looksLikePlaylist(cleanUrl);
+
+        const result = await getVideoInfo(cleanUrl, isPlaylist);
 
         if (!result.success) {
           setErrorMsg(result.error);
@@ -1383,9 +1395,26 @@ export default function DownloaderCard({
         }
 
         setVideoInfo(result);
-        // Auto-select the format matching the user's pre-analysis quality
-        // choice; they can still override via the format cards below.
-        setSelectedFormat(pickFormatForPreset(result, videoQuality));
+
+        if (isPlaylist && result.success && result.is_playlist) {
+          // Fire-and-forget: start the whole-playlist download with the
+          // currently selected download mode (default: Data Saver). The
+          // progress screen (item X of N) takes over from here; the user
+          // can cancel like any download.
+          updateState("downloading");
+          downloadPlaylistRef.current();
+          return;
+        }
+
+        // Audio mode downloads the best audio track directly; Best/Data
+        // map onto the closest real format for the mode's height cap.
+        setSelectedFormat(
+          videoQuality === "audio"
+            ? "bestaudio"
+            : videoQuality === "data"
+              ? mp4FormatWithHeight(480)
+              : MP4_FORMAT_SELECTOR,
+        );
         updateState("loaded");
         scrollToResults();
       } catch (err) {
@@ -1406,6 +1435,11 @@ export default function DownloaderCard({
   );
 
   const handleAnalyze = useCallback(() => runAnalyze(url), [url, runAnalyze]);
+
+  // Ref filled AFTER handleDownloadPlaylist is declared below, so the
+  // auto-playlist flow inside runAnalyze can invoke the exact same handler
+  // (identical progress/complete wiring) without a circular dependency.
+  const downloadPlaylistRef = useRef<() => void>(() => {});
 
   // ─── Download ──────────────────────────────────────────────────────
   const handleDownload = useCallback(async () => {
@@ -1558,9 +1592,10 @@ export default function DownloaderCard({
     if (!cleanUrl || !videoInfo?.is_playlist) return;
 
     const total = videoInfo.count ?? videoInfo.entries?.length ?? 0;
-    const preset =
-      PLAYLIST_PRESETS.find((p) => p.id === playlistQuality) ??
-      PLAYLIST_PRESETS[0];
+    // Playlist downloads honor the same download mode chips (Best / Data
+    // Saver / Audio) — Data Saver keeps mobile-data use low across every
+    // video in the list.
+    const modeSpec = selectorForMode(videoQuality);
 
     updateState("downloading");
     setErrorMsg("");
@@ -1577,7 +1612,7 @@ export default function DownloaderCard({
 
     const workId = await startDownload({
       url: cleanUrl,
-      formatId: preset.spec,
+      formatId: modeSpec,
       isPlaylist: true,
       onProgress: (progress) => {
         // The last item reaching 100% means the whole playlist finished.
@@ -1676,7 +1711,10 @@ export default function DownloaderCard({
       setErrorPhase("download");
       updateState("error");
     }
-  }, [url, videoInfo, playlistQuality, updateState, refreshHistory, helpLang]);
+  }, [url, videoInfo, videoQuality, updateState, refreshHistory, helpLang]);
+
+  // Keep the auto-playlist ref pointing at the latest handler.
+  downloadPlaylistRef.current = handleDownloadPlaylist;
 
   // ─── Paste ─────────────────────────────────────────────────────────
   const handlePaste = async () => {
@@ -1841,34 +1879,72 @@ export default function DownloaderCard({
                   )}
                 >
                   <Search className="h-5 w-5" />
-                  Analyze & Download
+                  {helpLang === "tr" ? "Analiz Et ve İndir" : "Analyze & Download"}
                 </Button>
 
-                {/* Quality selector: visible immediately, even before analysis.
-                    The choice maps onto the closest real format at analyze time. */}
+                {/* Download mode selector — how much data does this use?
+                    Replaces the old per-pixel quality list; playlist links
+                    start downloading with this mode automatically. */}
                 <div className="mt-4 pt-3 border-t border-border/20">
                   <p className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-medium text-center mb-2.5">
                     {helpLang === "tr"
-                      ? "Tercih edilen kalite"
-                      : "Preferred quality"}
+                      ? "İndirme modu — ne kadar internet yer?"
+                      : "Download mode — how much data?"}
                   </p>
-                  <div className="flex flex-wrap justify-center gap-1.5">
-                    {QUALITY_PRESETS.map((p) => (
-                      <button
-                        key={p.id}
-                        onClick={() => setVideoQuality(p.id)}
-                        title={p.desc}
-                        className={cn(
-                          "px-3 py-1.5 rounded-md text-xs font-medium border transition-all duration-150 cursor-pointer active:scale-[0.97]",
-                          videoQuality === p.id
-                            ? "bg-primary/10 border-primary/40 text-primary"
-                            : "text-muted-foreground/70 hover:text-foreground hover:bg-muted/80 border-border/20 hover:border-border/50",
-                        )}
-                      >
-                        {p.label}
-                      </button>
-                    ))}
+                  <div className="grid grid-cols-3 gap-2">
+                    {DOWNLOAD_MODES.map((m) => {
+                      const active = videoQuality === m.id;
+                      const est = estimateSizeMb(
+                        m.id,
+                        helpLang === "tr" ? null : null,
+                        1,
+                      );
+                      void est;
+                      return (
+                        <button
+                          key={m.id}
+                          onClick={() => setVideoQuality(m.id)}
+                          title={helpLang === "tr" ? m.descTr : m.descEn}
+                          className={cn(
+                            "flex flex-col items-center gap-1 px-2 py-3 rounded-xl border text-center transition-all duration-150 cursor-pointer active:scale-[0.97]",
+                            active
+                              ? "bg-primary/10 border-primary/40 ring-1 ring-primary/20"
+                              : "border-border/30 bg-background hover:border-border/60 hover:bg-muted/60",
+                          )}
+                        >
+                          <span className="text-lg leading-none">{m.emoji}</span>
+                          <span
+                            className={cn(
+                              "text-xs font-bold",
+                              active ? "text-primary" : "text-foreground",
+                            )}
+                          >
+                            {helpLang === "tr" ? m.label : m.labelEn}
+                          </span>
+                          {m.recommended && (
+                            <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-600 dark:text-emerald-400">
+                              {helpLang === "tr" ? "Önerilen" : "Recommended"}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
+                  <p className="mt-2 text-center text-[11px] leading-relaxed text-muted-foreground/80">
+                    {(() => {
+                      const mode =
+                        DOWNLOAD_MODES.find((m) => m.id === videoQuality) ??
+                        DOWNLOAD_MODES[0];
+                      return helpLang === "tr" ? mode.descTr : mode.descEn;
+                    })()}
+                  </p>
+                  {videoQuality === "audio" && (
+                    <p className="mt-1 text-center text-[10px] text-muted-foreground/60">
+                      {helpLang === "tr"
+                        ? "🎧 Ses modu: dosya .m4a olarak iner — her oynatıcıda açılır"
+                        : "🎧 Audio mode: saved as .m4a — plays everywhere"}
+                    </p>
+                  )}
                 </div>
                 <p className="text-xs text-center text-muted-foreground/70 mt-3">
                   {helpLang === "tr" ? "YouTube, TikTok, Twitter/X, Instagram, Vimeo ve 1000+ site destekler" : "Supports YouTube, TikTok, Twitter/X, Instagram, Vimeo, and 1000+ more"}
@@ -2143,10 +2219,20 @@ export default function DownloaderCard({
                       className="w-full h-12 gap-2 text-base font-medium transition-shadow shadow-md shadow-primary/20"
                     >
                       <Download className="h-5 w-5" />
-                      {helpLang === "tr" ? "İndir" : "Download"}{" "}
-                      {videoInfo.best_format_id === selectedFormat
-                        ? "(Best Quality)"
-                        : ""}
+                      {helpLang === "tr" ? "İndir" : "Download"}
+                      {(() => {
+                        // Rough data-usage hint on the button: users asked
+                        // to understand how much a download will "eat".
+                        const mb = estimateSizeMb(
+                          videoQuality,
+                          videoInfo.duration,
+                          1,
+                        );
+                        if (!mb) return "";
+                        return helpLang === "tr"
+                          ? ` (~${mb} MB)`
+                          : ` (~${mb} MB)`;
+                      })()}
                     </Button>
                   </>
                 )}

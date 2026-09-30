@@ -19,6 +19,11 @@ import {
   hasServer as serverConfigured,
 } from "./ytdlp";
 
+// Download-event WebSocket client (EXE only). Import has zero side effects
+// outside Electron: the singleton auto-starts only when window.vidfetch
+// (the preload bridge) exists.
+import { downloadSocket } from "./download-socket-client";
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type PluginData = Record<string, any>;
 
@@ -165,6 +170,8 @@ function getYtDlp(): YtDlpPluginInterface {
 export interface DesktopBridge {
   isDesktop: boolean;
   getVideoInfo(options: { url: string; isPlaylist?: boolean }): Promise<YtDlpResult>;
+  /** Download-event WebSocket endpoint + session token (null = IPC-only mode). */
+  getSocketInfo?(): Promise<{ url: string; token: string } | null>;
   startDownload(options: { url: string; formatId: string; isPlaylist?: boolean }): Promise<{ success: boolean; workId?: string; error?: string }>;
   cancelDownload(options: { token: string }): Promise<{ success: boolean }>;
   openFile(options: { filePath: string }): Promise<{ success: boolean }>;
@@ -334,43 +341,47 @@ export async function startDownload(
     return null;
   }
 
-  // Desktop (EXE) path — events arrive through the preload bridge.
+  // Desktop (EXE) path — download status arrives over the WebSocket
+  // (primary, TCP-reliable, observable in DevTools) with the classic IPC
+  // listeners attached as a fallback: main.cjs routes each event through
+  // exactly one channel — WS when the renderer socket is attached, IPC
+  // otherwise — so double registration can never double-fire.
   if (Desktop?.isDesktop) {
     try {
       const offs: Array<() => void> = [];
       if (onProgress) {
         let lastEmit = 0;
-        offs.push(
-          Desktop.onProgress((data) => {
-            const now = Date.now();
-            if (now - lastEmit < 100) return;
-            lastEmit = now;
-            onProgress({
-              percent: (data.percent as number) ?? 0,
-              speed: (data.speed as string) ?? "0",
-              eta: (data.eta as string) ?? "--:--",
-              item: data.item as number | undefined,
-              itemCount: data.itemCount as number | undefined,
-              fileName: data.fileName as string | undefined,
-            });
-          }),
-        );
+        const emit = (data: PluginData) => {
+          const now = Date.now();
+          if (now - lastEmit < 100) return;
+          lastEmit = now;
+          onProgress({
+            percent: (data.percent as number) ?? 0,
+            speed: (data.speed as string) ?? "0",
+            eta: (data.eta as string) ?? "--:--",
+            item: data.item as number | undefined,
+            itemCount: data.itemCount as number | undefined,
+            fileName: data.fileName as string | undefined,
+          });
+        };
+        offs.push(downloadSocket.on("vidfetch:progress", emit));
+        offs.push(Desktop.onProgress(emit));
       }
       if (onComplete) {
-        offs.push(
-          Desktop.onComplete((data) => {
-            offs.forEach((off) => off());
-            onComplete({ uri: (data.uri as string) ?? "", fileName: (data.fileName as string) ?? "" });
-          }),
-        );
+        const emit = (data: PluginData) => {
+          offs.forEach((off) => off());
+          onComplete({ uri: (data.uri as string) ?? "", fileName: (data.fileName as string) ?? "" });
+        };
+        offs.push(downloadSocket.on("vidfetch:complete", emit));
+        offs.push(Desktop.onComplete(emit));
       }
       if (onError) {
-        offs.push(
-          Desktop.onError((data) => {
-            offs.forEach((off) => off());
-            onError((data.error as string) ?? "Download failed");
-          }),
-        );
+        const emit = (data: PluginData) => {
+          offs.forEach((off) => off());
+          onError((data.error as string) ?? "Download failed");
+        };
+        offs.push(downloadSocket.on("vidfetch:error", emit));
+        offs.push(Desktop.onError(emit));
       }
       const res = await Desktop.startDownload({ url, formatId, isPlaylist });
       if (!res.success) {

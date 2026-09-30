@@ -14,6 +14,7 @@ const path = require("path");
 const fs = require("fs");
 const fsp = fs.promises;
 const { spawn } = require("child_process");
+const { startDownloadSocketServer } = require("./download-socket.cjs");
 
 // ── Low-RAM build flags ──────────────────────────────────────────────
 // Must run before app ready. Largest single win for a downloader whose UI
@@ -496,8 +497,19 @@ function newestSubdir(dir) {
 }
 
 function sendToAll(channel, payload) {
-  for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send(channel, payload);
+  // Primary delivery: WebSocket (TCP reliability + observable in DevTools
+  // Network panel as "vidfetch-downloads" frames). Fallback delivery:
+  // classic webContents.send for the brief window before the renderer's
+  // socket connects, and whenever the socket is down — so an event can only
+  // be lost if BOTH channels fail at the same instant.
+  let wsDelivered = false;
+  if (downloadSocket) {
+    wsDelivered = downloadSocket.broadcast(channel, payload);
+  }
+  if (!wsDelivered) {
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send(channel, payload);
+    }
   }
 }
 
@@ -663,6 +675,12 @@ ipcMain.handle("vidfetch:resetLocation", () => {
 
 // ── App lifecycle ────────────────────────────────────────────────────
 
+// Download-event WebSocket server (main → renderer status updates).
+// Started before the window so the renderer can connect immediately after
+// the preload bridge hands it the URL + token. If it cannot start (port
+// exhaustion, sandbox oddities), sendToAll silently stays IPC-only.
+let downloadSocket = null;
+
 // Single instance: a second launch just focuses the existing window instead
 // of doubling the whole memory footprint (Chromium + renderer ≈ 150 MB+).
 const gotLock = app.requestSingleInstanceLock();
@@ -678,7 +696,28 @@ if (!gotLock) {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  try {
+    downloadSocket = startDownloadSocketServer();
+    await downloadSocket.ready;
+    console.log(
+      `[vidfetch] download-event WebSocket listening on 127.0.0.1:${downloadSocket.port}`,
+    );
+  } catch (e) {
+    console.warn("[vidfetch] WebSocket server unavailable — staying IPC-only:", e);
+    downloadSocket = null;
+  }
+
+  // Expose URL + token to the renderer through the contextIsolated bridge.
+  // The renderer connects with ws://127.0.0.1:<port>/?token=<token>.
+  ipcMain.handle("vidfetch:getSocketInfo", () => {
+    if (!downloadSocket || !downloadSocket.port) return null;
+    return {
+      url: `ws://127.0.0.1:${downloadSocket.port}`,
+      token: downloadSocket.token,
+    };
+  });
+
   protocol.handle("app", (request) => {
     // The app is loaded at "app://index.html" where "index.html" is the HOST,
     // not the path — parse properly and resolve against DIST_DIR.
@@ -713,7 +752,8 @@ app.on("window-all-closed", () => {
 });
 
 // Before quitting: stop every active yt-dlp child so nothing is orphaned
-// holding file handles + buffers (Windows keeps the .part files locked).
+// holding file handles + buffers (Windows keeps the .part files locked),
+// then tear down the WebSocket server.
 app.on("before-quit", () => {
   for (const child of activeDownloads.values()) {
     try {
@@ -721,4 +761,8 @@ app.on("before-quit", () => {
     } catch {}
   }
   activeDownloads.clear();
+  if (downloadSocket) {
+    downloadSocket.close().catch(() => {});
+    downloadSocket = null;
+  }
 });

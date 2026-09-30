@@ -22,9 +22,11 @@ directories:
 files:
   - dist/**/*
   - electron/main.cjs
+  - electron/download-socket.cjs
   - electron/preload.cjs
   - "!**/*.map"
-  - "!**/node_modules/**"
+# NOTE: no "!node_modules/**" exclusion here — main.cjs requires("ws") at
+# startup and electron-builder must bundle the production ws dependency.
 
 # The yt-dlp + ffmpeg engine and the optional bot-check plugin live here.
 # They MUST be real files on disk (Windows cannot spawn executables from
