@@ -73,12 +73,12 @@ export default function SettingsTab() {
     <div className="mx-auto max-w-2xl space-y-4 p-4">
       {/* ── App Info ── */}
       <FlatCard interactive className="space-y-3 text-center">
-        <div className="mx-auto flex size-16 items-center justify-center rounded-2xl bg-[#6cb4ee]">
+        <div className="mx-auto flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-[#6cb4ee] to-[#4a90d9] shadow-lg shadow-[#6cb4ee]/25">
           <Sparkles className="size-7 text-[#0d0f12]" />
         </div>
         <h2 className="text-xl font-bold text-[#e8e8e8]">VidFetch</h2>
         <p className="text-xs text-[#8e8e93]">
-          v2.3.3 · On-device video downloader
+          v2.4.0 · On-device video downloader
         </p>
         <div className="grid grid-cols-3 gap-3 pt-2">
           {[

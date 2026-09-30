@@ -15,6 +15,30 @@ const fs = require("fs");
 const fsp = fs.promises;
 const { spawn } = require("child_process");
 
+// ── Low-RAM build flags ──────────────────────────────────────────────
+// Must run before app ready. Largest single win for a downloader whose UI
+// is static content: Chromium's GPU/compositor processes are eliminated
+// (each costs ~80–150 MB). On-device yt-dlp does the heavy work, not the
+// GPU — software rasterization of this simple dark UI is imperceptible.
+// The user can override with VIDFETCH_GPU=1.
+if (process.env.VIDFETCH_GPU !== "1") {
+  app.disableHardwareAcceleration();
+}
+// Same-size exit after window close on non-macOS (see window-all-closed).
+app.commandLine.appendSwitch("enable-features", "NetworkServiceInProcess");
+// V8 heap ceiling for the main + renderer: a downloader never needs the
+// default ~4 GB heap budget. Lower ceilings → V8 schedules GC earlier and
+// the committed (reserved) pages stay small.
+app.commandLine.appendSwitch("js-flags", "--max-old-space-size=256");
+// Cap the number of raster/pool threads Chromium spawns (4+ threads each
+// carry per-thread buffers on low-RAM machines).
+app.commandLine.appendSwitch("renderer-process-limit", "2");
+// Process-per-site-instance keeps everything in one renderer for this
+// single-origin app (app://index.html only). Fewer child processes = fewer
+// idle heaps. (Chromium caps this anyway; the switch makes the intent
+// explicit.)
+app.commandLine.appendSwitch("process-per-site");
+
 // Privileged custom scheme so the app can load via app:// (this makes the
 // absolute /assets/... paths Vite generates resolve correctly, which plain
 // file:// loading cannot do).
@@ -165,6 +189,33 @@ function youtubeMitigationArgs() {
 
 // ── Video info (yt-dlp --dump-single-json) ───────────────────────────
 
+/**
+ * Spawn yt-dlp and collect its stdout JSON. Chunks are buffered in an array
+ * and joined once at the end — repeated `string += chunk` concatenation is
+ * O(n²) and briefly doubles peak memory on multi-MB playlist JSON. stderr is
+ * capped (it is only ever used for error messages).
+ */
+function collectJson(args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(YTDLP_EXE, args, { windowsHide: true });
+    const chunks = [];
+    let stderr = "";
+    child.stdout.on("data", (d) => chunks.push(d));
+    child.stderr.on("data", (d) => {
+      if (stderr.length < 64 * 1024) stderr += d.toString();
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve(Buffer.concat(chunks).toString("utf-8"));
+        chunks.length = 0; // drop the raw buffers right away
+      } else {
+        reject(new Error(stderr.trim() || `yt-dlp exited with code ${code}`));
+      }
+    });
+  });
+}
+
 function mapFormat(f) {
   let resolution = "unknown";
   if (f.resolution && f.resolution !== "audio only") resolution = f.resolution;
@@ -220,17 +271,7 @@ async function getVideoInfo(url, isPlaylist) {
   }
   args.push(url);
 
-  const out = await new Promise((resolve, reject) => {
-    const child = spawn(YTDLP_EXE, args, { windowsHide: true });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (d) => (stdout += d.toString()));
-    child.stderr.on("data", (d) => (stderr += d.toString()));
-    child.on("error", reject);
-    child.on("close", (code) =>
-      code === 0 ? resolve(stdout) : reject(new Error(stderr.trim() || `yt-dlp exited with code ${code}`)),
-    );
-  }).catch(async (err) => {
+  const out = await collectJson(args).catch(async (err) => {
     // Automatic bot-check fallback: rotate the player client — the user
     // never sees the wall unless every client fails.
     if (!isBotCheckError(err.message)) throw err;
@@ -240,17 +281,7 @@ async function getVideoInfo(url, isPlaylist) {
       );
       retryArgs.push("--extractor-args", `youtube:player_client=${client}`);
       try {
-        return await new Promise((resolve, reject) => {
-          const child = spawn(YTDLP_EXE, retryArgs, { windowsHide: true });
-          let stdout = "";
-          let stderr = "";
-          child.stdout.on("data", (d) => (stdout += d.toString()));
-          child.stderr.on("data", (d) => (stderr += d.toString()));
-          child.on("error", reject);
-          child.on("close", (code) =>
-            code === 0 ? resolve(stdout) : reject(new Error(stderr.trim() || `yt-dlp exited with code ${code}`)),
-          );
-        });
+        return await collectJson(retryArgs);
       } catch {
         // try the next client
       }
@@ -468,15 +499,25 @@ function createWindow() {
   const win = new BrowserWindow({
     width: 1100,
     height: 750,
+    minWidth: 640,
+    minHeight: 480,
     autoHideMenuBar: true,
     backgroundColor: "#0b0b0f",
     title: "VidFetch",
+    show: false, // no white flash — shown once on ready-to-show
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
       preload: path.join(__dirname, "preload.cjs"),
+      backgroundThrottling: true, // timers idle when minimized → less CPU/RAM
+      spellcheck: false, // no spell-dictionary worker memory
+      enableWebSQL: false,
+      v8CacheOptions: "code", // reuse the V8 code cache → cheaper startup
+      // webSecurity stays default (true): the app:// scheme is privileged and
+      // local-only, no remote content is loaded.
     },
   });
+  win.once("ready-to-show", () => win.show());
   win.loadURL("app://index.html");
 }
 
@@ -614,6 +655,21 @@ ipcMain.handle("vidfetch:resetLocation", () => {
 
 // ── App lifecycle ────────────────────────────────────────────────────
 
+// Single instance: a second launch just focuses the existing window instead
+// of doubling the whole memory footprint (Chromium + renderer ≈ 150 MB+).
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    const [win] = BrowserWindow.getAllWindows();
+    if (win) {
+      if (win.isMinimized()) win.restore();
+      win.focus();
+    }
+  });
+}
+
 app.whenReady().then(() => {
   protocol.handle("app", (request) => {
     // The app is loaded at "app://index.html" where "index.html" is the HOST,
@@ -646,4 +702,15 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
+});
+
+// Before quitting: stop every active yt-dlp child so nothing is orphaned
+// holding file handles + buffers (Windows keeps the .part files locked).
+app.on("before-quit", () => {
+  for (const child of activeDownloads.values()) {
+    try {
+      child.kill();
+    } catch {}
+  }
+  activeDownloads.clear();
 });

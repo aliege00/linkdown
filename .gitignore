@@ -55,6 +55,11 @@ android/.idea/
 pwabuild-output/
 output/
 
+# Electron builder output + locally downloaded engine binaries
+# (CI downloads yt-dlp.exe/ffmpeg.exe fresh in the release workflow)
+release/
+native-tools/
+
 # Temp
 tmp/
 temp/

@@ -704,7 +704,7 @@ const PlaylistPanel = memo(function PlaylistPanel({
       <Button
         onClick={onDownloadAll}
         size="lg"
-        className="w-full h-12 gap-2 text-base font-medium shadow-md shadow-primary/20"
+        className="w-full h-12 gap-2 text-base font-medium transition-shadow shadow-md shadow-primary/20"
       >
         <Download className="h-5 w-5" />
         Download all ({count})
@@ -1802,7 +1802,7 @@ export default function DownloaderCard({
               title="Paste from clipboard"
               aria-label="Paste from clipboard"
             >
-              <ClipboardPaste className="h-4.5 w-4.5" />
+              <ClipboardPaste className="h-5 w-5" />
               <kbd className="absolute -top-1.5 -right-1.5 hidden sm:inline-flex items-center justify-center h-4 min-w-[1.25rem] px-1 rounded-[3px] text-[9px] font-mono font-semibold bg-muted text-muted-foreground/60 border border-border/40 shadow-sm">
                 {pasteShortcut}
               </kbd>
@@ -1824,7 +1824,7 @@ export default function DownloaderCard({
                   disabled={!url.trim()}
                   size="lg"
                   className={cn(
-                    "w-full h-12 gap-2 text-base font-medium transition-all active:scale-[0.98]",
+                    "w-full h-12 gap-2 text-base font-medium transition-shadow active:scale-[0.98]",
                     url.trim() && "shadow-md shadow-primary/20",
                   )}
                 >
@@ -1922,10 +1922,10 @@ export default function DownloaderCard({
                 </div>
                 <div className="text-center">
                   <p className="font-medium text-foreground">
-                    Extracting video info
+                    {helpLang === "tr" ? "Video bilgisi alınıyor" : "Extracting video info"}
                   </p>
                   <p className="text-sm text-muted-foreground mt-1">
-                    Analyzing video&hellip;
+                    {helpLang === "tr" ? "Analiz ediliyor…" : "Analyzing video…"}
                   </p>
                 </div>
                 <div className="w-full max-w-xs bg-muted rounded-full h-1.5 overflow-hidden">
@@ -2123,7 +2123,7 @@ export default function DownloaderCard({
                       onClick={handleDownload}
                       disabled={!selectedFormat}
                       size="lg"
-                      className="w-full h-12 gap-2 text-base font-medium shadow-md shadow-primary/20"
+                      className="w-full h-12 gap-2 text-base font-medium transition-shadow shadow-md shadow-primary/20"
                     >
                       <Download className="h-5 w-5" />
                       Download{" "}

@@ -1,25 +1,70 @@
-appId: com.vidfetch.desktop
+# VidFetch — Windows EXE packaging (electron-builder)
+#
+# Produces TWO artifacts on a windows-latest CI runner:
+#   • NSIS installer  → VidFetch-Setup-<version>.exe
+#   • Portable EXE    → VidFetch-v<version>-portable.exe
+#
+# RAM-first packaging choices:
+#   • compression: maximum — smaller EXE → fewer pages touched at startup.
+#   • native tools ship ONCE via extraResources (asar'dan spawn edilemez:
+#     Windows CreateProcess real-file ister) — no duplicate copies anywhere.
+#   • NSIS per-machine: no per-user scheduler/services; onedir disabled.
+appId: com.vidfetch.downloader
 productName: VidFetch
-electronVersion: "43.2.0"
+copyright: Copyright © 2026 VidFetch
 
 directories:
-  output: pwabuild-output
+  output: release
+  buildResources: build
 
+# "dir" would skip compression; we package from the same tree electron-builder
+# assembles, so files/files include rules stay identical for CI and local use.
 files:
   - dist/**/*
-  - electron/**/*
+  - electron/main.cjs
+  - electron/preload.cjs
+  - "!**/*.map"
+  - "!**/node_modules/**"
 
-# Ship the yt-dlp + ffmpeg binaries alongside the app. They are downloaded
-# during the GitHub Actions build (see build-exe.yml) into native-tools/.
+# The yt-dlp + ffmpeg engine and the optional bot-check plugin live here.
+# They MUST be real files on disk (Windows cannot spawn executables from
+# inside an asar), so they land in <install>/resources/native-tools — exactly
+# the first candidate path main.cjs checks via process.resourcesPath.
 extraResources:
   - from: native-tools
     to: native-tools
+    filter:
+      - "**/*"
 
 asar: true
-npmRebuild: false
+# Deliberately NO asarUnpack: spawn() works fine from inside an asar and
+# unpacking would duplicate ~90 MB of binaries on disk and in page cache.
+compression: maximum
 
 win:
+  icon: build/icon.ico
+  # No code-signing cert in this project: CI runs with
+  # CSC_IDENTITY_AUTO_DISCOVERY=false, so signing is skipped automatically
+  # while rcedit still embeds the icon + version metadata into the EXEs.
   target:
-    - portable
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
 
-artifactName: VidFetch-${version}-windows-portable.${ext}
+nsis:
+  oneClick: false
+  perMachine: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: VidFetch
+  uninstallDisplayName: VidFetch ${version}
+  artifactName: VidFetch-Setup-${version}.${ext}
+
+portable:
+  artifactName: VidFetch-${version}-portable.${ext}
+
+# Build from the repo root; electron-builder detects package.json "main".
+npmRebuild: false
+buildDependenciesFromSource: false

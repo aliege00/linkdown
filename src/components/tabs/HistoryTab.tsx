@@ -76,8 +76,11 @@ export default function HistoryTab() {
         ) : (
           <ul className="mt-3 divide-y divide-[#262930]">
             {history.map((record) => (
-              <li key={record.id} className="flex items-center gap-3 py-3">
-                <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[#6cb4ee]/10">
+              <li
+                key={record.id}
+                className="group flex items-center gap-3 rounded-xl px-1 py-3 transition-colors hover:bg-[#1e2026]/60"
+              >
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[#6cb4ee]/10 transition-colors group-hover:bg-[#6cb4ee]/20">
                   {record.kind === "playlist" ? (
                     <ListVideo className="size-4 text-[#6cb4ee]" />
                   ) : (
@@ -94,7 +97,7 @@ export default function HistoryTab() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="size-8 text-[#8e8e93]"
+                  className="size-8 text-[#8e8e93] transition-colors hover:text-[#6cb4ee]"
                   onClick={() => copyLink(record)}
                 >
                   <Copy className="size-4" />
