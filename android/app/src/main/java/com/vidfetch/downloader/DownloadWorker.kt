@@ -136,6 +136,15 @@ class DownloadWorker(
                 if (!isPlaylist) addOption("--no-playlist")
                 addOption("--no-warnings")
                 addOption("--no-cache-dir")
+                // ── Download speed ─────────────────────────────
+                // Merged (bestvideo+bestaudio) downloads and YouTube's
+                // DASH sources are split into fragments; fetching several
+                // in parallel plus large HTTP ranges substantially raises
+                // throughput on fast connections. yt-dlp caps these
+                // internally for servers that reject ranges, so they are
+                // safe defaults for every site.
+                addOption("--concurrent-fragments", "4")
+                addOption("--http-chunk-size", "10M")
                 // NOTE: --merge-output-format intentionally omitted.
                 // Forcing MP4 when the source uses VP9/AV1 codecs produces
                 // a container Android's MediaCodec cannot decode.  yt-dlp
@@ -411,6 +420,10 @@ class DownloadWorker(
                     if (!isPlaylist) addOption("--no-playlist")
                     addOption("--no-warnings")
                     addOption("--no-cache-dir")
+                    // Same speed flags as the primary request — retries
+                    // should be just as fast.
+                    addOption("--concurrent-fragments", "4")
+                    addOption("--http-chunk-size", "10M")
                     addOption("-o", outputTemplate)
                     retry.forEach { addOption(it) }
                 }

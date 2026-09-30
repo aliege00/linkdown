@@ -369,6 +369,14 @@ async function startDownload(url, formatId, isPlaylist) {
     "--newline",
     "--progress",
     "--no-warnings",
+    // ── Download speed ──────────────────────────────────────────────
+    // The MP4 selector merges bestvideo+bestaudio, and YouTube serves DASH
+    // media in fragments — parallel fragment fetches plus large HTTP ranges
+    // raise throughput on fast connections significantly. yt-dlp degrades
+    // gracefully for servers that reject range requests, so these are safe
+    // defaults for every site.
+    "--concurrent-fragments", "4",
+    "--http-chunk-size", "10M",
     ...youtubeMitigationArgs(),
   ];
   let outputTemplate;

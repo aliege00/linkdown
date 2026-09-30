@@ -15,9 +15,12 @@ android {
         // every previous fix appeared to "not work". CI stamps the real
         // code/name from the git tag (see build-apk.yml / release.yml);
         // these defaults only apply to bare local builds.
-        versionCode 12
-        versionName "2.4.0"
+        versionCode 13
+        versionName "2.5.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        // Ship only Turkish + English app resources — Capacitor pulls in
+        // every locale of every AndroidX library otherwise (~1–2 MB saved).
+        resourceConfigurations += ['en', 'tr']
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
@@ -28,6 +31,33 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    // ── ABI splits — HALVE the download size ─────────────────────
+    // The bundled yt-dlp engine ships a Python + FFmpeg runtime per ABI
+    // (~50 MB each). A universal APK packs FOUR copies (arm64, arm32, x86,
+    // x86_64) ≈ 195 MB, so every user downloads all four but uses one.
+    // With splits, each device downloads ONLY its own copy: the arm64 APK
+    // (99% of phones) drops to roughly 90 MB — a much faster install.
+    // versionCode gets *10 + abiIndex per split (see below) so codes stay
+    // strictly increasing across releases and unique within one.
+    splits {
+        abi {
+            enable true
+            reset()
+            include 'arm64-v8a', 'armeabi-v7a', 'x86_64'
+            universalApk false
+        }
+    }
+}
+
+applicationVariants.all { variant ->
+    variant.outputs.all { output ->
+        def abi = output.getFilter(com.android.build.OutputFile.ABI)
+        if (abi != null) {
+            def abiCode = abi == 'arm64-v8a' ? 1 : (abi == 'armeabi-v7a' ? 2 : 3)
+            output.versionCodeOverride = variant.versionCode * 10 + abiCode
         }
     }
 }

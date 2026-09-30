@@ -170,23 +170,39 @@ export function filterFormats(formats: FormatLike[]): FilteredFormats {
 
 /**
  * Strict MP4 format selector for yt-dlp.
- * Forces: bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]
- * Falls back to combined progressive MP4.
+ *
+ * IMPORTANT (verified by an end-to-end download test): the old chain had
+ * two bugs that produced SILENT files on many videos:
+ *   1. `[acodec!=none]` on the bestvideo merge terms — video-only streams
+ *      have acodec=none BY DESIGN (audio comes from the merged bestaudio),
+ *      so the filter eliminated every merge candidate and the chain fell
+ *      through to single-file fallbacks.
+ *   2. The last-resort `best[ext=mp4]` can match a VIDEO-ONLY mp4 (4K
+ *      videos have no progressive/H.264 mp4 at all) — downloading it
+ *      completed with a video that has no audio track.
+ *
+ * New rules: merge terms never filter on acodec; single-file fallbacks
+ * REQUIRE an audio codec. On a 4K video this now resolves to the highest
+ * available H.264 stream (e.g. 1080p60 f299) + AAC audio, merged to MP4.
  */
 export const MP4_FORMAT_SELECTOR =
-  "bestvideo[ext=mp4][vcodec^=avc1][acodec!=none]+bestaudio[ext=m4a]/" +
-  "bestvideo[ext=mp4][acodec!=none]+bestaudio[ext=m4a]/" +
-  "best[ext=mp4][vcodec^=avc1]/best[ext=mp4]/mp4";
+  "bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/" +
+  "bestvideo[ext=mp4]+bestaudio[ext=m4a]/" +
+  "bestvideo[vcodec^=avc1]+bestaudio/" +
+  "bestvideo+bestaudio/" +
+  "best[ext=mp4][acodec!=none]/best[ext=mp4]/mp4";
 
 /**
- * Strict MP4 format selector with height cap.
+ * Strict MP4 format selector with height cap. Same audio-guarantee rule as
+ * MP4_FORMAT_SELECTOR: no acodec filter on merge terms; single-file
+ * fallbacks must contain an audio track.
  */
 export function mp4FormatWithHeight(maxHeight: number): string {
   return (
-    `bestvideo[ext=mp4][vcodec^=avc1][height<=${maxHeight}][acodec!=none]+bestaudio[ext=m4a]/` +
-    `bestvideo[ext=mp4][height<=${maxHeight}][acodec!=none]+bestaudio[ext=m4a]/` +
-    `best[ext=mp4][height<=${maxHeight}]/` +
-    `bestvideo[height<=${maxHeight}]+bestaudio/best[height<=${maxHeight}]`
+    `bestvideo[ext=mp4][vcodec^=avc1][height<=${maxHeight}]+bestaudio[ext=m4a]/` +
+    `bestvideo[ext=mp4][height<=${maxHeight}]+bestaudio[ext=m4a]/` +
+    `bestvideo[height<=${maxHeight}]+bestaudio/` +
+    `best[ext=mp4][height<=${maxHeight}][acodec!=none]/best[height<=${maxHeight}]`
   );
 }
 
@@ -207,18 +223,19 @@ export function buildFormatSelector(
   ffmpegAvailable: boolean,
 ): string {
   if (isAudioOnly) {
-    return ffmpegAvailable ? MP3_FORMAT_SELECTOR : "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio";
+    return MP3_FORMAT_SELECTOR;
   }
 
   if (selectedFormatId === "best") {
     return MP4_FORMAT_SELECTOR;
   }
 
-  // For a specific format, ensure it's progressive MP4
+  // For a specific format, prefer it merged with audio; the single-file
+  // fallbacks REQUIRE an audio codec so a silent file is impossible.
   if (ffmpegAvailable) {
-    return `${selectedFormatId}[acodec!=none]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]`;
+    return `${selectedFormatId}+bestaudio/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4][acodec!=none]/best[ext=mp4]`;
   }
-  return `${selectedFormatId}[ext=mp4][acodec!=none]/best[ext=mp4]/mp4`;
+  return `${selectedFormatId}[ext=mp4][acodec!=none]/best[ext=mp4][acodec!=none]/best[ext=mp4]/mp4`;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────

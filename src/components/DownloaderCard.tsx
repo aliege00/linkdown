@@ -618,18 +618,23 @@ const PlaylistPanel = memo(function PlaylistPanel({
   quality,
   onQuality,
   onDownloadAll,
+  lang,
 }: {
   count: number;
   entries: PlaylistEntry[];
   quality: string;
   onQuality: (id: string) => void;
   onDownloadAll: () => void;
+  lang: HelpLang;
 }) {
+  const tr = lang === "tr";
   return (
     <div className="space-y-4">
       {/* Quality presets — one choice applies to every video */}
       <div className="text-left">
-        <p className="text-sm font-medium text-foreground mb-3">Quality</p>
+        <p className="text-sm font-medium text-foreground mb-3">
+          {tr ? "Kalite" : "Quality"}
+        </p>
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
           {PLAYLIST_PRESETS.map((p) => (
             <button
@@ -654,11 +659,13 @@ const PlaylistPanel = memo(function PlaylistPanel({
       {/* Playlist entries */}
       <div className="text-left">
         <p className="text-sm font-medium text-foreground mb-2">
-          Videos ({count})
+          {tr ? `Videolar (${count})` : `Videos (${count})`}
         </p>
         {entries.length === 0 ? (
           <p className="text-sm text-muted-foreground py-4 text-center border border-border/30 rounded-lg bg-background/50">
-            Reading playlist… press Download all to grab every video.
+            {tr
+              ? "Liste okunuyor… Tüm videoları indirmek için Tümünü indir'e bas."
+              : "Reading playlist… press Download all to grab every video."}
           </p>
         ) : (
           <>
@@ -707,10 +714,12 @@ const PlaylistPanel = memo(function PlaylistPanel({
         className="w-full h-12 gap-2 text-base font-medium transition-shadow shadow-md shadow-primary/20"
       >
         <Download className="h-5 w-5" />
-        Download all ({count})
+        {tr ? `Tümünü indir (${count})` : `Download all (${count})`}
       </Button>
       <p className="text-xs text-center text-muted-foreground/70 -mt-2">
-        Saves every video into one playlist folder in Downloads/VidFetch
+        {tr
+          ? "Her video tek bir liste klasörüne kaydedilir (Downloads/VidFetch)"
+          : "Saves every video into one playlist folder in Downloads/VidFetch"}
       </p>
     </div>
   );
@@ -736,6 +745,7 @@ const NativeToolsPanel = memo(function NativeToolsPanel({
   onSetCookiesBrowser,
   onPickCookieFile,
   onClearCookieFile,
+  lang,
 }: {
   isDesktop: boolean;
   downloadLocation: DownloadLocation | null;
@@ -752,7 +762,9 @@ const NativeToolsPanel = memo(function NativeToolsPanel({
   onSetCookiesBrowser: (browser: string) => void;
   onPickCookieFile: () => void;
   onClearCookieFile: () => void;
+  lang: HelpLang;
 }) {
+  const tr = lang === "tr";
   return (
     <div className="mt-6 mx-auto max-w-2xl">
       {/* Download location — changeable via the system folder picker */}
@@ -764,7 +776,7 @@ const NativeToolsPanel = memo(function NativeToolsPanel({
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">
-                Download location
+                {tr ? "İndirme konumu" : "Download location"}
               </p>
               <p className="text-sm font-semibold truncate">
                 {downloadLocation?.uri ? downloadLocation.name : "Downloads/VidFetch"}
@@ -782,7 +794,7 @@ const NativeToolsPanel = memo(function NativeToolsPanel({
               ) : (
                 <FolderCog className="h-3.5 w-3.5" />
               )}
-              Change
+              {tr ? "Değiştir" : "Change"}
             </Button>
             {downloadLocation?.uri && (
               <Button
@@ -792,14 +804,13 @@ const NativeToolsPanel = memo(function NativeToolsPanel({
                 onClick={onResetLocation}
               >
                 <RefreshCw className="h-3.5 w-3.5" />
-                Reset
+                {tr ? "Sıfırla" : "Reset"}
               </Button>
             )}
           </div>
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-sm font-semibold flex items-center gap-2">
+          <div className="flex items-center justify-between mb-2">              <p className="text-sm font-semibold flex items-center gap-2">
               <FolderOpen className="h-4 w-4 text-primary" />
-              Recent downloads
+              {tr ? "Son indirmeler" : "Recent downloads"}
               {savedDownloads.length > 0 && (
                 <span className="text-xs font-normal text-muted-foreground">
                   ({savedDownloads.length})
@@ -807,9 +818,10 @@ const NativeToolsPanel = memo(function NativeToolsPanel({
               )}
             </p>
           </div>
-          {savedDownloads.length === 0 ? (
-            <p className="text-sm text-muted-foreground/80 text-center py-4">
-              Videos you download will appear here.
+          {savedDownloads.length === 0 ? (              <p className="text-sm text-muted-foreground/80 text-center py-4">
+              {lang === "tr"
+                ? "İndirdiğin videolar burada görünecek."
+                : "Videos you download will appear here."}
             </p>
           ) : (
             <ul className="divide-y divide-border/40">
@@ -834,7 +846,7 @@ const NativeToolsPanel = memo(function NativeToolsPanel({
                     onClick={() => onOpenFile(dl.uri)}
                   >
                     <FolderOpen className="h-3.5 w-3.5" />
-                    Open
+                    {tr ? "Aç" : "Open"}
                   </Button>
                 </li>
               ))}
@@ -2051,6 +2063,7 @@ export default function DownloaderCard({
                     quality={playlistQuality}
                     onQuality={setPlaylistQuality}
                     onDownloadAll={handleDownloadPlaylist}
+                    lang={helpLang}
                   />
                 )}
 
@@ -2060,7 +2073,7 @@ export default function DownloaderCard({
                     {/* Format selector */}
                     <div className="text-left">
                       <p className="text-sm font-medium text-foreground mb-3">
-                        Choose quality
+                        {helpLang === "tr" ? "Kalite seç" : "Choose quality"}
                       </p>
 
                       {grouped && (
@@ -2069,7 +2082,9 @@ export default function DownloaderCard({
                           {grouped.video.length > 0 && (
                             <div>
                               <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-2 font-medium">
-                                Video + Audio
+                                {helpLang === "tr"
+                                  ? "Video + Ses"
+                                  : "Video + Audio"}
                               </p>
                               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                                 {grouped.video.slice(0, 9).map((f) => (
@@ -2092,7 +2107,7 @@ export default function DownloaderCard({
                           {grouped.audioOnly.length > 0 && (
                             <div>
                               <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-2 font-medium">
-                                Audio Only
+                                {helpLang === "tr" ? "Sadece Ses" : "Audio Only"}
                               </p>
                               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                                 {grouped.audioOnly.slice(0, 6).map((f) => (
@@ -2108,11 +2123,13 @@ export default function DownloaderCard({
                             </div>
                           )}
 
-                          {grouped.video.length === 0 &&
+                          {                            grouped.video.length === 0 &&
                             grouped.audioOnly.length === 0 &&
                             grouped.videoOnly.length === 0 && (
                               <p className="text-sm text-muted-foreground">
-                                No downloadable formats found for this video.
+                                {helpLang === "tr"
+                                  ? "Bu video için indirilebilir format bulunamadı."
+                                  : "No downloadable formats found for this video."}
                               </p>
                             )}
                         </div>
@@ -2126,7 +2143,7 @@ export default function DownloaderCard({
                       className="w-full h-12 gap-2 text-base font-medium transition-shadow shadow-md shadow-primary/20"
                     >
                       <Download className="h-5 w-5" />
-                      Download{" "}
+                      {helpLang === "tr" ? "İndir" : "Download"}{" "}
                       {videoInfo.best_format_id === selectedFormat
                         ? "(Best Quality)"
                         : ""}
@@ -2368,6 +2385,7 @@ export default function DownloaderCard({
           onSetCookiesBrowser={handleSetCookiesBrowser}
           onPickCookieFile={handlePickCookieFile}
           onClearCookieFile={handleClearCookieFile}
+          lang={helpLang}
         />
       )}
       {/* Clipboard Monitor Notification */}

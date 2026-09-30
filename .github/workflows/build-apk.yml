@@ -88,29 +88,43 @@ jobs:
         run: npx cap sync android
 
       # ── Build APK ──────────────────────────────────────────────────
-      - name: Build debug APK
+      - name: Build split APKs (one per ABI — ~55% smaller downloads)
         working-directory: android
         run: ./gradlew assembleDebug
 
       # ── Find the APK ───────────────────────────────────────────────
-      - name: Locate APK file
+      - name: Locate APK files
         id: apk
         run: |
-          APK_PATH=$(find android/app/build/outputs/apk/debug -name "*.apk" | head -1)
-          if [ -z "$APK_PATH" ]; then
-            echo "❌ No APK found!"
+          # ABI splits produce arm64-v8a / armeabi-v7a / x86_64 APKs — rename
+          # them so users can pick the right one; arm64-v8a is the 99% case.
+          mkdir -p apk-out
+          i=0
+          for f in android/app/build/outputs/apk/debug/*-*.apk; do
+            [ -e "$f" ] || continue
+            case "$f" in
+              *arm64-v8a*)   NAME="VidFetch-arm64.apk" ;;
+              *armeabi-v7a*) NAME="VidFetch-arm32.apk" ;;
+              *x86_64*)      NAME="VidFetch-x86_64.apk" ;;
+              *)             NAME="VidFetch-universal.apk" ;;
+            esac
+            cp "$f" "apk-out/$NAME"
+            i=$((i+1))
+            echo "Found: $NAME ($(du -h "$f" | cut -f1))"
+          done
+          if [ "$i" -eq 0 ]; then
+            echo "❌ No APKs found!"
             exit 1
           fi
-          echo "path=$APK_PATH" >> "$GITHUB_OUTPUT"
-          echo "filename=$(basename "$APK_PATH")" >> "$GITHUB_OUTPUT"
-          echo "✅ APK found: $APK_PATH"
+          echo "dir=apk-out" >> "$GITHUB_OUTPUT"
+          echo "✅ $i split APKs ready"
 
       # ── Upload artifact (always) ───────────────────────────────────
-      - name: Upload APK artifact
+      - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
           name: vidfetch-${{ github.ref_name || 'debug' }}
-          path: ${{ steps.apk.outputs.path }}
+          path: apk-out/*.apk
           retention-days: 14
           if-no-files-found: error
 
@@ -124,7 +138,7 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
-          files: ${{ steps.apk.outputs.path }}
+          files: apk-out/*.apk
           body: |
             ## VidFetch ${{ github.ref_name }}
 
