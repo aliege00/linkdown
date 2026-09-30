@@ -177,9 +177,12 @@ jobs:
         run: npm run icon
 
       - name: Package EXE (NSIS + portable)
-        run: npx electron-builder --config electron-builder.yml --win nsis portable
+        # --publish never: the publish job below uploads ALL artifacts (APK +
+        # EXEs) in one release. Without it electron-builder sees the v* tag and
+        # tries to publish itself, which fails on the missing GH_TOKEN.
+        run: npx electron-builder --config electron-builder.yml --win nsis portable --publish never
         env:
-          # Skip code signing (no cert in this project) and updater metadata
+          # Skip code signing (no cert in this project)
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
       - name: List release output
