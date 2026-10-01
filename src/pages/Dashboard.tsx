@@ -36,7 +36,7 @@ export default function Dashboard() {
             <div className="min-w-0">
               <h1 className="truncate text-sm font-bold tracking-tight">VidFetch</h1>
               <p className="truncate text-[11px] text-[#8e8e93]">
-                v2.6.1 · {user?.name || "Guest"}
+                v2.6.2 · {user?.name || "Guest"}
               </p>
             </div>
             {/* Desktop-only inline nav (the bottom bar is a touch pattern) */}

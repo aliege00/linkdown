@@ -78,11 +78,11 @@ export default function SettingsTab() {
         </div>
         <h2 className="text-xl font-bold text-[#e8e8e8]">VidFetch</h2>
         <p className="text-xs text-[#8e8e93]">
-          v2.6.1 · On-device video downloader
+          v2.6.2 · On-device video downloader
         </p>
         <div className="grid grid-cols-3 gap-3 pt-2">
           {[
-            { label: "Motor", value: "yt-dlp" },
+            { label: "Motor", value: "Cihaz içi" },
             { label: "Platform", value: "1000+" },
             { label: "Ücret", value: "Ücretsiz" },
           ].map((s) => (
@@ -100,17 +100,9 @@ export default function SettingsTab() {
       {/* ── Description ── */}
       <FlatCard interactive>
         <p className="text-center text-xs leading-relaxed text-[#8e8e93]">
-          VidFetch,{" "}
-          <a
-            href="https://github.com/yt-dlp/yt-dlp"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="font-medium text-[#6cb4ee] hover:underline"
-          >
-            yt-dlp
-          </a>{" "}
-          motorunu doğrudan cihazınızda çalıştırır. Sunucu, bulut veya hesap
-          yoktur. 1000+ site desteklenir — sınırsız, anahtarsız indirme.
+          VidFetch, indirme motorunu doğrudan cihazınızda çalıştırır. Sunucu,
+          bulut veya hesap yoktur. 1000+ site desteklenir — sınırsız,
+          anahtarsız indirme.
         </p>
       </FlatCard>
 

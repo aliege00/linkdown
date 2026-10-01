@@ -36,7 +36,6 @@ import { ClipboardNotification } from "@/components/ClipboardNotification";
 import { explainError } from "@/lib/error-help";
 import { normalizeVideoUrl } from "@/lib/url";
 import { postDownloadCleanup } from "@/lib/auto-cleanup";
-import EngineSwitcher, { type EngineId, getSavedEngine, saveEngine } from "@/components/EngineSwitcher";
 import { mp4FormatWithHeight, MP4_FORMAT_SELECTOR, MP3_FORMAT_SELECTOR, filterFormats, type FormatLike } from "@/lib/format-enforce";
 import {
   DOWNLOAD_MODES,
@@ -55,6 +54,7 @@ import {
   AlertCircle,
   Check,
   CheckCircle2,
+  Cpu,
   ChevronDown,
   ClipboardPaste,
   Clock,
@@ -1146,6 +1146,11 @@ export default function DownloaderCard({
   // Download mode (Best / Data Saver / Audio). "data" is the default —
   // the user explicitly asked for low-data downloads with small files.
   const [videoQuality, setVideoQuality] = useState<DownloadModeId>("data");
+  // Precise video quality (Gelişmiş seçenekler): "auto" follows the mode
+  // chip; otherwise an explicit height cap (1080/720/480).
+  const [preciseQuality, setPreciseQuality] = useState<"auto" | 1080 | 720 | 480>("auto");
+  // Gelişmiş seçenekler disclosure state
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [playlistQuality, setPlaylistQuality] = useState<string>("best");
   const [playlistSummary, setPlaylistSummary] = useState<{
     saved: number;
@@ -1193,12 +1198,6 @@ export default function DownloaderCard({
   // Whether the visible error came from analyzing the URL or starting the
   // download — used to pick the error box's kicker label.
   const [errorPhase, setErrorPhase] = useState<"analyze" | "download">("analyze");
-  // Active download engine (persisted to localStorage)
-  const [activeEngine, setActiveEngine] = useState<EngineId>(() => getSavedEngine());
-  const handleEngineChange = useCallback((engine: EngineId) => {
-    setActiveEngine(engine);
-    saveEngine(engine);
-  }, []);
   const nativeAvailable = isNativeAvailable();
   // Show the right paste shortcut on the button badge (⌘V on Mac, Ctrl+V
   // everywhere else).
@@ -1398,13 +1397,17 @@ export default function DownloaderCard({
         }
 
         // Audio mode downloads the best audio track directly; Best/Data
-        // map onto the closest real format for the mode's height cap.
+        // map onto the closest real format for the mode's height cap —
+        // unless the user pinned an exact quality (1080p/720p/480p) in
+        // Gelişmiş seçenekler, which overrides the mode's cap.
         setSelectedFormat(
           videoQuality === "audio"
             ? "bestaudio"
-            : videoQuality === "data"
-              ? mp4FormatWithHeight(480)
-              : MP4_FORMAT_SELECTOR,
+            : preciseQuality !== "auto"
+              ? mp4FormatWithHeight(preciseQuality)
+              : videoQuality === "data"
+                ? mp4FormatWithHeight(480)
+                : MP4_FORMAT_SELECTOR,
         );
         updateState("loaded");
         scrollToResults();
@@ -1422,7 +1425,7 @@ export default function DownloaderCard({
         updateState("error");
       }
     },
-    [updateState, videoQuality, helpLang],
+    [updateState, videoQuality, preciseQuality, helpLang],
   );
 
   const handleAnalyze = useCallback(() => runAnalyze(url), [url, runAnalyze]);
@@ -1892,7 +1895,13 @@ export default function DownloaderCard({
                       return (
                         <button
                           key={m.id}
-                          onClick={() => setVideoQuality(m.id)}
+                          onClick={() => {
+                            setVideoQuality(m.id);
+                            // A new mode pick means the user is re-deciding
+                            // quality — clear a previously pinned 1080p/720p/
+                            // 480p so it can't silently override the chip.
+                            setPreciseQuality("auto");
+                          }}
                           title={helpLang === "tr" ? m.descTr : m.descEn}
                           className={cn(
                             "flex flex-col items-center gap-1 px-2 py-3 rounded-xl border text-center transition-all duration-150 cursor-pointer active:scale-[0.97]",
@@ -1939,9 +1948,129 @@ export default function DownloaderCard({
                   {helpLang === "tr" ? "YouTube, TikTok, Twitter/X, Instagram, Vimeo ve 1000+ site destekler" : "Supports YouTube, TikTok, Twitter/X, Instagram, Vimeo, and 1000+ more"}
                 </p>
 
-                {/* Engine Switcher */}
+                {/* ── Gelişmiş seçenekler (engine + exact quality) ── */}
                 <div className="mt-4 pt-3 border-t border-border/20">
-                  <EngineSwitcher value={activeEngine} onChange={handleEngineChange} />
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvanced((v) => !v)}
+                    className="flex w-full items-center justify-center gap-1.5 text-[11px] font-medium text-muted-foreground/70 hover:text-foreground transition-colors cursor-pointer"
+                  >
+                    <Settings2 className="h-3.5 w-3.5" />
+                    {helpLang === "tr" ? "Gelişmiş seçenekler" : "Advanced options"}
+                    <ChevronDown
+                      className={cn(
+                        "h-3.5 w-3.5 transition-transform duration-200",
+                        showAdvanced && "rotate-180",
+                      )}
+                    />
+                  </button>
+
+                  {showAdvanced && (
+                    <div className="mt-3 space-y-4 rounded-xl border border-border/30 bg-muted/20 p-3">
+                      {/* ── Engine picker ── */}
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-medium mb-2">
+                          {helpLang === "tr" ? "Motor" : "Engine"}
+                        </p>
+                        <div className="grid grid-cols-1 gap-2">
+                          {(
+                            [
+                              {
+                                id: "device" as const,
+                                icon: Cpu,
+                                label: helpLang === "tr"
+                                  ? "Cihaz içi motor"
+                                  : "On-device engine",
+                                desc: helpLang === "tr"
+                                  ? "Hızlı, sınırsız, tamamen cihazında çalışır — 1000+ site"
+                                  : "Fast, unlimited, fully on-device — 1000+ sites",
+                                recommended: true,
+                              },
+                            ]
+                          ).map((e) => {
+                            const Icon = e.icon;
+                            return (
+                              <div
+                                key={e.id}
+                                className="flex items-center gap-3 p-3 rounded-lg border border-primary/50 bg-primary/5 ring-1 ring-primary/20"
+                              >
+                                <Icon className="h-4 w-4 shrink-0 text-primary" />
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs font-semibold text-primary">
+                                      {e.label}
+                                    </span>
+                                    {e.recommended && (
+                                      <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-600 dark:text-emerald-400">
+                                        {helpLang === "tr" ? "Önerilen" : "Recommended"}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[10px] text-muted-foreground/70 leading-relaxed">
+                                    {e.desc}
+                                  </p>
+                                </div>
+                                <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" />
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* ── Exact video quality ── */}
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-medium mb-2">
+                          {helpLang === "tr"
+                            ? "Video kalitesi (tam seçim)"
+                            : "Video quality (exact)"}
+                        </p>
+                        <div className="grid grid-cols-4 gap-2">
+                          {(
+                            [
+                              { id: "auto" as const, label: helpLang === "tr" ? "Otomatik" : "Auto" },
+                              { id: 1080 as const, label: "1080p" },
+                              { id: 720 as const, label: "720p" },
+                              { id: 480 as const, label: "480p" },
+                            ]
+                          ).map((q) => {
+                            const active = preciseQuality === q.id;
+                            return (
+                              <button
+                                key={String(q.id)}
+                                type="button"
+                                onClick={() => setPreciseQuality(q.id)}
+                                className={cn(
+                                  "flex flex-col items-center gap-0.5 px-2 py-2.5 rounded-lg border text-center transition-all duration-150 cursor-pointer active:scale-[0.97]",
+                                  active
+                                    ? "border-primary/50 bg-primary/5 ring-1 ring-primary/20"
+                                    : "border-border/40 bg-background hover:border-border/70 hover:bg-muted/50",
+                                )}
+                              >
+                                <span
+                                  className={cn(
+                                    "text-xs font-bold",
+                                    active ? "text-primary" : "text-foreground",
+                                  )}
+                                >
+                                  {q.label}
+                                </span>
+                                {q.id === "auto" && (
+                                  <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-600 dark:text-emerald-400">
+                                    {helpLang === "tr" ? "Önerilen" : "Recommended"}
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground/60">
+                          {helpLang === "tr"
+                            ? "Otomatik: yukarıdaki indirme moduna uyar. Belirli bir kalite seçersen modun üstüne geçer."
+                            : "Auto: follows the download mode above. Picking an exact quality overrides it."}
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Format note — always MP4/MP3 enforced */}

@@ -59,7 +59,7 @@ export default function Landing() {
   const faqs = [
     {
       q: "How does VidFetch work?",
-      a: "Paste any video URL from YouTube, TikTok, Twitter/X, Instagram, Vimeo, and thousands of other sites. The built-in yt-dlp engine extracts the video and saves it straight to your device. No sign-ups required.",
+      a: "Paste any video URL from YouTube, TikTok, Twitter/X, Instagram, Vimeo, and thousands of other sites. The built-in engine extracts the video and saves it straight to your device. No sign-ups required.",
     },
     {
       q: "What sites are supported?",
@@ -157,7 +157,7 @@ export default function Landing() {
               className="gap-1.5 px-4 py-1.5 text-xs font-normal border-primary/20 bg-primary/5 text-primary"
             >
               <Sparkles className="h-3 w-3" />
-              Powered by yt-dlp
+              100% ücretsiz · Sınırsız
             </Badge>
           </motion.div>
 
@@ -249,7 +249,7 @@ export default function Landing() {
                 icon: Smartphone,
                 title: "Engine on your device",
                 description:
-                  "The yt-dlp engine is built into the Android and Windows apps. No server, no API key, no setup.",
+                  "The download engine is built into the Android and Windows apps. No server, no API key, no setup.",
                 step: "01",
               },
               {
@@ -313,7 +313,7 @@ export default function Landing() {
               Over 1,000 platforms
             </h2>
             <p className="mt-3 text-muted-foreground max-w-xl mx-auto">
-              Powered by yt-dlp &mdash; the most comprehensive video extraction engine.
+              The most comprehensive video extraction support available.
             </p>
           </motion.div>
 
@@ -330,7 +330,7 @@ export default function Landing() {
               { icon: Image, label: "Reddit", desc: "Videos in posts", color: "text-orange-500" },
               { icon: Globe, label: "Dailymotion", desc: "User uploads", color: "text-blue-500" },
               { icon: Video, label: "VK", desc: "Social videos", color: "text-blue-400" },
-              { icon: Zap, label: "1000+ more", desc: "Any site yt-dlp supports", color: "text-primary" },
+              { icon: Zap, label: "1000+ more", desc: "Any site with a video", color: "text-primary" },
             ].map((item, i) => (
               <motion.div
                 key={i}
@@ -398,7 +398,7 @@ export default function Landing() {
               {
                 icon: Crown,
                 title: "Best quality possible",
-                desc: "yt-dlp extracts the highest quality available — up to 4K, 60fps, with proper audio.",
+                desc: "Extracts the highest quality available — up to 4K, 60fps, with proper audio.",
               },
               {
                 icon: Globe,
@@ -572,11 +572,11 @@ export default function Landing() {
               </p>
               <div className="mt-4 flex items-center gap-2">
                 <a
-                  href="https://github.com/yt-dlp/yt-dlp"
+                  href="https://github.com/aliege00/linkdown"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex h-8 w-8 items-center justify-center rounded-lg border border-border/40 text-muted-foreground hover:text-foreground hover:border-border/70 transition-colors"
-                  title="yt-dlp on GitHub"
+                  title="VidFetch on GitHub"
                 >
                   <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
                 </a>
@@ -603,8 +603,8 @@ export default function Landing() {
                   </button>
                 </li>
                 <li>
-                  <a href="https://github.com/yt-dlp/yt-dlp" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-                    yt-dlp docs
+                  <a href="https://github.com/aliege00/linkdown" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+                    GitHub
                   </a>
                 </li>
               </ul>
@@ -641,7 +641,7 @@ export default function Landing() {
                 {[
                   { label: "Privacy by design", desc: "No tracking, no logs" },
                   { label: "100% free", desc: "No limits, no API keys" },
-                  { label: "Open source engine", desc: "Powered by yt-dlp" },
+                  { label: "Open engine", desc: "No server, no account" },
                 ].map((item) => (
                   <li key={item.label}>
                     <p className="text-sm text-muted-foreground">{item.label}</p>
@@ -664,12 +664,12 @@ export default function Landing() {
             </p>
             <div className="flex items-center gap-4">
               <a
-                href="https://github.com/yt-dlp/yt-dlp"
+                href="https://github.com/aliege00/linkdown"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-xs text-muted-foreground hover:text-foreground transition-colors"
               >
-                yt-dlp
+                GitHub
               </a>
             </div>
           </div>

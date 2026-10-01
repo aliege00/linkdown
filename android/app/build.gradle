@@ -15,8 +15,8 @@ android {
         // every previous fix appeared to "not work". CI stamps the real
         // code/name from the git tag (see build-apk.yml / release.yml);
         // these defaults only apply to bare local builds.
-        versionCode 15
-        versionName "2.6.1"
+        versionCode 16
+        versionName "2.6.2"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         // Ship only Turkish + English app resources — Capacitor pulls in
         // every locale of every AndroidX library otherwise (~1–2 MB saved).
