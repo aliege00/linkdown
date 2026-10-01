@@ -71,8 +71,12 @@ class DownloadSocketClient {
       this.info = null;
     }
     if (!this.info) {
-      // Main process is IPC-only (WS server failed to start) — stay idle
-      // and retry occasionally in case it comes up later.
+      // Main process is IPC-only right now (WS server failed to start or is
+      // restarting) — retry occasionally in case it comes up later. The
+      // state MUST leave "connecting" here: start() refuses to run while
+      // connecting, so leaving it set would deadlock the retry timer and
+      // permanently kill the socket after a single failed info fetch.
+      this.state = "reconnecting";
       this.scheduleReconnect();
       return;
     }

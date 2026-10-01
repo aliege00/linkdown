@@ -6,7 +6,7 @@
 #   • Manual (workflow_dispatch) → build + release with custom options
 #
 # Builds BOTH deliverables:
-#   • Android APK  (ubuntu-latest)
+#   • Android APK  (ubuntu-latest) — ONE universal APK, all ABIs
 #   • Windows EXE  (windows-latest) — NSIS installer + portable, RAM-tuned
 # ──────────────────────────────────────────────────────────────────────
 
@@ -74,20 +74,17 @@ jobs:
 
       # ── Stamp versionCode/versionName from the git tag ────────────
       # Android refuses to install an APK whose versionCode is not strictly
-      # greater than the installed one. The repo had versionCode 1 pinned
-      # through nine releases, so users could never update in place and kept
-      # testing stale builds. Derive an ever-increasing code from the tag.
+      # greater than the installed one. Derive an ever-increasing code from
+      # the tag. Only stamp the defaultConfig line — there is no ABI-split
+      # versionCode override anymore (single universal APK).
       - name: Stamp Android version from tag
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
           VERSION="${TAG#v}"
-          # versionCode: major*10000 + minor*100 + patch (v2.3.2 -> 20302)
+          # versionCode: major*10000 + minor*100 + patch (v2.6.1 -> 20601)
           IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
           MAJOR=${MAJOR:-0}; MINOR=${MINOR:-0}; PATCH=${PATCH:-0}
           CODE=$((MAJOR * 10000 + MINOR * 100 + PATCH))
-          # Only stamp the defaultConfig line (`versionCode 20500`), never the
-          # ABI-split override below (`variant.versionCode * 10 + abiCode`) —
-          # the loose pattern used to corrupt that line and break the build.
           sed -i "s/versionCode [0-9][0-9]*/versionCode $CODE/" android/app/build.gradle
           sed -i "s/versionName \"[^\"]*\"/versionName \"$VERSION\"/" android/app/build.gradle
           echo "Stamped versionCode=$CODE versionName=$VERSION"
@@ -99,34 +96,25 @@ jobs:
       - name: Sync Capacitor
         run: npx cap sync android
 
-      - name: Build split APKs (one per ABI — ~55% smaller downloads)
+      # universalApk=true also emits per-ABI splits, but we ship ONLY the
+      # universal APK: one file, installs on every device, zero confusion.
+      - name: Build single universal APK
         working-directory: android
         run: ./gradlew assembleDebug
 
-      - name: Find APKs
+      - name: Find APK
         id: apk
         run: |
-          # ABI splits produce arm64-v8a / armeabi-v7a / x86_64 APKs. Rename
-          # them so users can pick the right one; arm64-v8a is the 99% case.
           mkdir -p apk-out
-          i=0
-          for f in android/app/build/outputs/apk/debug/*-*.apk; do
-            [ -e "$f" ] || continue
-            case "$f" in
-              *arm64-v8a*)   NAME="VidFetch-arm64.apk" ;;
-              *armeabi-v7a*) NAME="VidFetch-arm32.apk" ;;
-              *x86_64*)      NAME="VidFetch-x86_64.apk" ;;
-              *)             NAME="VidFetch-universal.apk" ;;
-            esac
-            cp "$f" "apk-out/$NAME"
-            i=$((i+1))
-            echo "Found: $NAME ($(du -h "$f" | cut -f1))"
-          done
-          if [ "$i" -eq 0 ]; then
-            echo "❌ No APKs found!"
+          UNIVERSAL=$(ls android/app/build/outputs/apk/debug/*universal*.apk 2>/dev/null | head -n 1)
+          if [ -z "$UNIVERSAL" ]; then
+            echo "❌ Universal APK not found!"
+            ls -la android/app/build/outputs/apk/debug/ || true
             exit 1
           fi
-          echo "count=$i" >> "$GITHUB_OUTPUT"
+          cp "$UNIVERSAL" apk-out/VidFetch.apk
+          echo "Found: VidFetch.apk ($(du -h "$UNIVERSAL" | cut -f1))"
+          echo "✅ Single universal APK ready (arm64 + arm32 + x86_64)"
 
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
@@ -244,18 +232,13 @@ jobs:
           name: release-exe
           path: ./artifacts
 
-      - name: Rename APKs with version
+      - name: Rename APK with version
         run: |
-          # The split APKs arrive as VidFetch-arm64.apk etc.; stamp the
-          # version into each name (VidFetch-v2.5.0-arm64.apk).
+          # The universal APK arrives as VidFetch.apk; stamp the version into
+          # the name (VidFetch-v2.6.1.apk).
           VERSION="${{ steps.version.outputs.tag }}"
-          for f in ./artifacts/VidFetch-*.apk; do
-            [ -e "$f" ] || continue
-            BASE=$(basename "$f" .apk)          # VidFetch-arm64
-            SUFFIX="${BASE#VidFetch}"           # -arm64
-            mv "$f" "./artifacts/VidFetch-${VERSION}${SUFFIX}.apk"
-          done
-          echo "✅ Renamed APKs:"
+          mv ./artifacts/VidFetch.apk "./artifacts/VidFetch-${VERSION}.apk"
+          echo "✅ Renamed APK:"
           ls -la ./artifacts/*.apk
 
       - name: Create GitHub Release
@@ -267,19 +250,16 @@ jobs:
           prerelease: ${{ inputs.prerelease || false }}
           generate_release_notes: true
           files: |
-            ./artifacts/VidFetch-*arm64.apk
-            ./artifacts/VidFetch-*arm32.apk
-            ./artifacts/VidFetch-*x86_64.apk
+            ./artifacts/VidFetch-*.apk
             ./artifacts/VidFetch-Setup-*.exe
             ./artifacts/VidFetch-*-portable.exe
           body: |
             ## VidFetch ${{ steps.version.outputs.tag }}
 
             ### 📥 Downloads
-            - **Android:** pick your device's APK —
-              `*-arm64.apk` (all modern phones, ~%55 smaller),
-              `*-arm32.apk` (older devices),
-              `*-x86_64.apk` (emulators/Chromebooks)
+            - **Android:** `VidFetch-*.apk` — ONE file for every device
+              (arm64, arm32, x86_64; phones, tablets, emulators, Chromebooks).
+              No need to figure out which build matches your phone.
             - **Windows installer:** `VidFetch-Setup-*.exe` — recommended
             - **Windows portable:** `VidFetch-*-portable.exe` — no install, single file
 
@@ -290,7 +270,7 @@ jobs:
             See the commit history and release notes for details.
 
             ### Requirements
-            - Android 8.0 (API 26) or higher, ~50 MB free storage (APK)
+            - Android 8.0 (API 26) or higher, ~200 MB free storage (APK)
             - Windows 10/11 64-bit, ~200 MB free disk space (EXE)
 
             ### Install (Windows)

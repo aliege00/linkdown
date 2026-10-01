@@ -75,8 +75,9 @@ jobs:
           IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
           MAJOR=${MAJOR:-0}; MINOR=${MINOR:-0}; PATCH=${PATCH:-0}
           CODE=$((MAJOR * 10000 + MINOR * 100 + PATCH))
-          # Only stamp the defaultConfig line (`versionCode 20500`), never the
-          # ABI-split override below (`variant.versionCode * 10 + abiCode`).
+          # Only stamp the defaultConfig line (`versionCode 20500`), never
+          # anything else. There is no ABI-split versionCode override anymore
+          # (single universal APK).
           sed -i "s/versionCode [0-9][0-9]*/versionCode $CODE/" android/app/build.gradle
           sed -i "s/versionName \"[^\"]*\"/versionName \"$VERSION\"/" android/app/build.gradle
           echo "Stamped versionCode=$CODE versionName=$VERSION"
@@ -90,36 +91,28 @@ jobs:
         run: npx cap sync android
 
       # ── Build APK ──────────────────────────────────────────────────
-      - name: Build split APKs (one per ABI — ~55% smaller downloads)
+      # universalApk=true in build.gradle also emits per-ABI splits, but we
+      # deliberately ship ONLY the universal APK: one file, installs on
+      # every device, zero "which one do I download?" confusion.
+      - name: Build single universal APK
         working-directory: android
         run: ./gradlew assembleDebug
 
       # ── Find the APK ───────────────────────────────────────────────
-      - name: Locate APK files
+      - name: Locate APK file
         id: apk
         run: |
-          # ABI splits produce arm64-v8a / armeabi-v7a / x86_64 APKs — rename
-          # them so users can pick the right one; arm64-v8a is the 99% case.
           mkdir -p apk-out
-          i=0
-          for f in android/app/build/outputs/apk/debug/*-*.apk; do
-            [ -e "$f" ] || continue
-            case "$f" in
-              *arm64-v8a*)   NAME="VidFetch-arm64.apk" ;;
-              *armeabi-v7a*) NAME="VidFetch-arm32.apk" ;;
-              *x86_64*)      NAME="VidFetch-x86_64.apk" ;;
-              *)             NAME="VidFetch-universal.apk" ;;
-            esac
-            cp "$f" "apk-out/$NAME"
-            i=$((i+1))
-            echo "Found: $NAME ($(du -h "$f" | cut -f1))"
-          done
-          if [ "$i" -eq 0 ]; then
-            echo "❌ No APKs found!"
+          UNIVERSAL=$(ls android/app/build/outputs/apk/debug/*universal*.apk 2>/dev/null | head -n 1)
+          if [ -z "$UNIVERSAL" ]; then
+            echo "❌ Universal APK not found!"
+            ls -la android/app/build/outputs/apk/debug/ || true
             exit 1
           fi
+          cp "$UNIVERSAL" apk-out/VidFetch.apk
+          echo "Found: VidFetch.apk ($(du -h "$UNIVERSAL" | cut -f1))"
           echo "dir=apk-out" >> "$GITHUB_OUTPUT"
-          echo "✅ $i split APKs ready"
+          echo "✅ Single universal APK ready (arm64 + arm32 + x86_64)"
 
       # ── Upload artifact (always) ───────────────────────────────────
       - name: Upload APK artifacts
@@ -131,17 +124,12 @@ jobs:
           if-no-files-found: error
 
       # ── Create Release + Upload asset (tags only) ──────────────────
-      # Rename split APKs with the version (tags only): VidFetch-v2.6.0-arm64.apk
-      - name: Rename APKs with version
+      # Name the single APK with the version (tags only): VidFetch-v2.6.1.apk
+      - name: Rename APK with version
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           VERSION="${GITHUB_REF#refs/tags/}"
-          for f in apk-out/VidFetch-*.apk; do
-            [ -e "$f" ] || continue
-            BASE=$(basename "$f" .apk)
-            SUFFIX="${BASE#VidFetch}"
-            mv "$f" "apk-out/VidFetch-${VERSION}${SUFFIX}.apk"
-          done
+          mv apk-out/VidFetch.apk "apk-out/VidFetch-${VERSION}.apk"
           ls -la apk-out/
 
       - name: Create GitHub Release
@@ -153,18 +141,20 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
-          files: apk-out/*.apk
+          files: apk-out/VidFetch-*.apk
           body: |
             ## VidFetch ${{ github.ref_name }}
 
             ### 📥 Download
-            Grab the APK below and install it on your Android device.
+            Grab **VidFetch-*.apk** below — ONE file that works on every
+            Android device (arm64, arm32, x86_64; emulators and Chromebooks
+            included). No need to pick a version for your phone.
 
             ### What's new
             See the commit history for details.
 
             ### Requirements
             - Android 8.0 (API 26) or higher
-            - ~50 MB free storage
+            - ~200 MB free storage
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

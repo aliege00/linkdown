@@ -33,20 +33,13 @@ import {
 import { saveToGallery, type GallerySaveResult } from "@/lib/gallery-save";
 import { useClipboardMonitor } from "@/hooks/use-clipboard-monitor";
 import { ClipboardNotification } from "@/components/ClipboardNotification";
-import { useDownloadManager } from "@/hooks/use-download-manager";
 import { explainError } from "@/lib/error-help";
 import { normalizeVideoUrl } from "@/lib/url";
-import { useBatchQueue, hasMultipleUrls, extractUrls } from "@/hooks/use-batch-queue";
 import { postDownloadCleanup } from "@/lib/auto-cleanup";
 import EngineSwitcher, { type EngineId, getSavedEngine, saveEngine } from "@/components/EngineSwitcher";
-import { mp4FormatWithHeight, MP4_FORMAT_SELECTOR, MP3_FORMAT_SELECTOR, buildFormatSelector, getMimeType, filterFormats, type FormatLike } from "@/lib/format-enforce";
-import {
-  pickFormatForPreset,
-  type QualityPresetId,
-} from "@/lib/format-pick";
+import { mp4FormatWithHeight, MP4_FORMAT_SELECTOR, MP3_FORMAT_SELECTOR, filterFormats, type FormatLike } from "@/lib/format-enforce";
 import {
   DOWNLOAD_MODES,
-  selectorForMode,
   estimateSizeMb,
   type DownloadModeId,
 } from "@/lib/download-modes";
@@ -1150,8 +1143,6 @@ export default function DownloaderCard({
   const [errorMsg, setErrorMsg] = useState("");
   const [videoInfo, setVideoInfo] = useState<YtDlpInfo | null>(null);
   const [selectedFormat, setSelectedFormat] = useState<string>("");
-  // Preferred quality picked BEFORE analysis — the analyze step maps it onto
-  // the closest real format once details arrive (see pickFormatForPreset).
   // Download mode (Best / Data Saver / Audio). "data" is the default —
   // the user explicitly asked for low-data downloads with small files.
   const [videoQuality, setVideoQuality] = useState<DownloadModeId>("data");
@@ -1185,8 +1176,6 @@ export default function DownloaderCard({
     },
   });
 
-  // ── Chunked Download Manager ──
-  const { task: downloadTask, formattedProgress, pause, resume, cancel } = useDownloadManager();
   const [downloadLocation, setDownloadLocation] = useState<DownloadLocation | null>(null);
   const [pickingFolder, setPickingFolder] = useState(false);
   const [ytSettings, setYtSettings] = useState<YouTubeSettings | null>(null);
@@ -1206,8 +1195,6 @@ export default function DownloaderCard({
   const [errorPhase, setErrorPhase] = useState<"analyze" | "download">("analyze");
   // Active download engine (persisted to localStorage)
   const [activeEngine, setActiveEngine] = useState<EngineId>(() => getSavedEngine());
-  // Batch queue for multiple URLs
-  const batchQueue = useBatchQueue();
   const handleEngineChange = useCallback((engine: EngineId) => {
     setActiveEngine(engine);
     saveEngine(engine);
@@ -1378,7 +1365,11 @@ export default function DownloaderCard({
         setVideoInfo(null);
         setSelectedFormat("");
         setPlaylistSummary(null);
-        setPlaylistQuality("best");
+        // Sync the playlist preset with the selected mode chip so the
+        // auto-download below and PlaylistPanel's quality row agree.
+        setPlaylistQuality(
+          videoQuality === "audio" ? "audio" : videoQuality === "data" ? "480p" : "best",
+        );
 
         // Playlist links SKIP the format-picker screen entirely and go
         // straight to downloading every video — the user asked for
@@ -1447,22 +1438,13 @@ export default function DownloaderCard({
     const cleanUrl = normalizeVideoUrl(url);
     if (!cleanUrl || !selectedFormat) return;
 
-    // Pre-validate: ensure the selected format exists in the filtered list
-    const safeFormats = groupFormats(videoInfo?.formats ?? []);
-    const allSafe = [...safeFormats.video, ...safeFormats.audioOnly];
-    const formatExists = allSafe.some((f) => f.format_id === selectedFormat);
-    if (!formatExists && allSafe.length > 0) {
-      // Selected format was filtered out (DASH/webm) — auto-pick best MP4
-      setSelectedFormat(safeFormats.video[0]?.format_id ?? safeFormats.audioOnly[0]?.format_id ?? "");
-      setErrorMsg(
-        helpLang === "tr"
-          ? "Seçilen format desteklenmiyor — MP4/MP3 olarak otomatik düzeltildi"
-          : "Selected format unsupported — auto-corrected to MP4/MP3"
-      );
-      setErrorPhase("analyze");
-      updateState("error");
-      return;
-    }
+    // NOTE: deliberately NO formatExists pre-validation here. selectedFormat
+    // is either a selector ("bestaudio", mp4FormatWithHeight(480), …) set by
+    // the mode chips or a real format ID picked from the filtered cards, and
+    // startDownload only ever receives the strict MP4/MP3 selectors below.
+    // The old pre-validation compared against raw format IDs, so it aborted
+    // EVERY mode-chip download (default Data Saver and Audio included) with
+    // a bogus "auto-corrected" error before the engine ever started.
 
     updateState("downloading");
     setErrorMsg("");
@@ -1479,9 +1461,20 @@ export default function DownloaderCard({
     // Determine if user selected audio-only
     const isAudioSelection = selectedFormat === "bestaudio" ||
       (picked && !picked.vcodec && !!picked.acodec);
-    const formatSpec = isAudioSelection
-      ? MP3_FORMAT_SELECTOR
-      : MP4_FORMAT_SELECTOR;
+    // A mode chip puts a strict yt-dlp SELECTOR into selectedFormat
+    // ("bestaudio", mp4FormatWithHeight(480), MP4_FORMAT_SELECTOR, …).
+    // Selectors always contain '[' or '/'; raw format IDs never do. Pass
+    // them through VERBATIM — mapping every selection onto
+    // MP4_FORMAT_SELECTOR here threw away the user's quality pick: Data
+    // Saver downloaded full HD instead of 480p and a quality picked from
+    // the format cards was ignored (the card's format_id maps to the same
+    // full-quality chain anyway).
+    const isSelector = /[[/]/.test(selectedFormat);
+    const formatSpec = isSelector
+      ? selectedFormat
+      : isAudioSelection
+        ? MP3_FORMAT_SELECTOR
+        : MP4_FORMAT_SELECTOR;
 
     const workId = await startDownload({
       url: cleanUrl,
@@ -1592,10 +1585,12 @@ export default function DownloaderCard({
     if (!cleanUrl || !videoInfo?.is_playlist) return;
 
     const total = videoInfo.count ?? videoInfo.entries?.length ?? 0;
-    // Playlist downloads honor the same download mode chips (Best / Data
-    // Saver / Audio) — Data Saver keeps mobile-data use low across every
-    // video in the list.
-    const modeSpec = selectorForMode(videoQuality);
+    // Honor the quality row shown in PlaylistPanel (Best/1080p/720p/480p/
+    // Audio). runAnalyze keeps playlistQuality in sync with the mode chips,
+    // and when the panel is visible the user's explicit pick wins.
+    const preset =
+      PLAYLIST_PRESETS.find((p) => p.id === playlistQuality) ?? PLAYLIST_PRESETS[0];
+    const modeSpec = preset.spec;
 
     updateState("downloading");
     setErrorMsg("");
@@ -1711,7 +1706,7 @@ export default function DownloaderCard({
       setErrorPhase("download");
       updateState("error");
     }
-  }, [url, videoInfo, videoQuality, updateState, refreshHistory, helpLang]);
+  }, [url, videoInfo, playlistQuality, updateState, refreshHistory, helpLang]);
 
   // Keep the auto-playlist ref pointing at the latest handler.
   downloadPlaylistRef.current = handleDownloadPlaylist;
@@ -1894,12 +1889,6 @@ export default function DownloaderCard({
                   <div className="grid grid-cols-3 gap-2">
                     {DOWNLOAD_MODES.map((m) => {
                       const active = videoQuality === m.id;
-                      const est = estimateSizeMb(
-                        m.id,
-                        helpLang === "tr" ? null : null,
-                        1,
-                      );
-                      void est;
                       return (
                         <button
                           key={m.id}

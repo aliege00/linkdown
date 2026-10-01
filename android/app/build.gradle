@@ -15,8 +15,8 @@ android {
         // every previous fix appeared to "not work". CI stamps the real
         // code/name from the git tag (see build-apk.yml / release.yml);
         // these defaults only apply to bare local builds.
-        versionCode 14
-        versionName "2.6.0"
+        versionCode 15
+        versionName "2.6.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         // Ship only Turkish + English app resources — Capacitor pulls in
         // every locale of every AndroidX library otherwise (~1–2 MB saved).
@@ -34,32 +34,18 @@ android {
         }
     }
 
-    // ── ABI splits — HALVE the download size ─────────────────────
-    // The bundled yt-dlp engine ships a Python + FFmpeg runtime per ABI
-    // (~50 MB each). A universal APK packs FOUR copies (arm64, arm32, x86,
-    // x86_64) ≈ 195 MB, so every user downloads all four but uses one.
-    // With splits, each device downloads ONLY its own copy: the arm64 APK
-    // (99% of phones) drops to roughly 90 MB — a much faster install.
-    // versionCode gets *10 + abiIndex per split (see below) so codes stay
-    // strictly increasing across releases and unique within one.
+    // ── ONE universal APK — every ABI in a single file ────────────
+    // Users kept asking which of the split APKs to download (arm64 vs
+    // arm32 vs x86_64 was confusing and picking the wrong one meant a
+    // device couldn't install at all). A single universal APK packs all
+    // three ABIs (~195 MB) so there is exactly ONE file to grab and it
+    // installs on every phone, tablet, emulator and Chromebook.
     splits {
         abi {
             enable true
             reset()
             include 'arm64-v8a', 'armeabi-v7a', 'x86_64'
-            universalApk false
-        }
-    }
-}
-
-// AGP 8 removed the bare `applicationVariants` project property — it must
-// be resolved through the android extension explicitly.
-android.applicationVariants.all { variant ->
-    variant.outputs.all { output ->
-        def abi = output.getFilter(com.android.build.OutputFile.ABI)
-        if (abi != null) {
-            def abiCode = abi == 'arm64-v8a' ? 1 : (abi == 'armeabi-v7a' ? 2 : 3)
-            output.versionCodeOverride = variant.versionCode * 10 + abiCode
+            universalApk true
         }
     }
 }
