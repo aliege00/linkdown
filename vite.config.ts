@@ -83,8 +83,12 @@ export default defineConfig({
       'react-dom',
       'react-dom/client',
       'react-router',
-      '@convex-dev/auth/react',
+      // NOTE: @convex-dev/auth/react was removed together with the login
+      // flow — leaving it here made Vite log
+      // "Failed to resolve dependency" on every dev start.
       'framer-motion',
+      'sonner',
+      'qrcode.react',
     ],
   },
   // Performance hints

@@ -36,7 +36,7 @@ export default function BottomTabBar({
   return (
     <nav
       aria-label="Sekmeler"
-      className="fixed bottom-0 left-1/2 z-50 rounded-2xl border border-[#2b2f36]/80 bg-[#17191e]/70 px-1.5 py-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.45)] backdrop-blur-md"
+      className="fixed bottom-0 left-1/2 z-50 rounded-[1.75rem] border border-[#2b2f36]/80 bg-[#17191e]/70 px-1.5 py-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.45)] backdrop-blur-md"
       style={{
         marginBottom: "calc(env(safe-area-inset-bottom) + 14px)",
         // translate3d (not translateX) keeps the island on its own layer.
@@ -44,6 +44,12 @@ export default function BottomTabBar({
         willChange: "transform",
       }}
     >
+      {/* Hairline highlight along the top edge — reads as glass, costs one
+          gradient (no extra blur pass, no repaint on scroll). */}
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-[#6cb4ee]/40 to-transparent"
+      />
       <div className="flex items-stretch gap-1">
         {TABS.map((tab) => {
           const isActive = active === tab.id;
@@ -55,17 +61,17 @@ export default function BottomTabBar({
               onClick={() => onChange(tab.id)}
               aria-current={isActive ? "page" : undefined}
               className={cn(
-                "flex items-center gap-2 rounded-xl px-4 py-2 transition-colors duration-150 active:scale-[0.97] cursor-pointer",
+                "flex min-h-11 items-center gap-2 rounded-[1.25rem] px-5 py-2 transition-colors duration-150 active:scale-[0.97] cursor-pointer",
                 isActive
-                  ? "bg-[#6cb4ee]/14 text-[#6cb4ee]"
-                  : "text-[#8e8e93] hover:text-[#c7c7cc]",
+                  ? "bg-[#6cb4ee]/14 text-[#6cb4ee] shadow-[0_0_18px_rgba(108,180,238,0.22)]"
+                  : "text-[#8e8e93] hover:bg-white/5 hover:text-[#c7c7cc]",
               )}
             >
               <Icon
-                className="size-4.5 shrink-0"
+                className="size-5 shrink-0"
                 strokeWidth={isActive ? 2.2 : 1.7}
               />
-              <span className="text-[12px] font-semibold whitespace-nowrap">
+              <span className="text-[13px] font-semibold whitespace-nowrap">
                 {tab.label}
               </span>
             </button>

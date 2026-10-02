@@ -27,19 +27,30 @@ export default function Dashboard() {
       {/* paddingTop = safe-area inset: the camera notch / status bar must not
           overlap the logo row on notched devices. */}
       <header
-        className="sticky top-0 z-40 border-b border-[#262930] bg-[#17191e]"
+        className="sticky top-0 z-40 border-b border-[#262930] bg-[#17191e]/90 backdrop-blur-md"
         style={{ paddingTop: "env(safe-area-inset-top)" }}
       >
         <div className="mx-auto flex max-w-2xl items-center justify-between px-4 py-3.5">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#6cb4ee] to-[#4a90d9] shadow-md shadow-[#6cb4ee]/20">
+            <div className="relative flex size-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#6cb4ee] to-[#4a90d9]">
               <Sparkles className="size-4.5 text-[#0d0f12]" />
+              {/* Soft accent halo — one static shadow layer, no animation. */}
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 rounded-xl shadow-[0_0_18px_rgba(108,180,238,0.35)]"
+              />
             </div>
             <div className="min-w-0">
               <h1 className="truncate text-sm font-bold tracking-tight">VidFetch</h1>
-              <p className="truncate text-[11px] text-[#8e8e93]">
-                {tab === "download" ? "v2.6.2" : "Yardım Merkezi & Hakkında"}
-              </p>
+              {tab === "download" ? (
+                <span className="mt-0.5 inline-flex items-center rounded-full border border-[#6cb4ee]/25 bg-[#6cb4ee]/10 px-1.5 py-px text-[10px] font-semibold text-[#6cb4ee]">
+                  v2.6.2
+                </span>
+              ) : (
+                <p className="truncate text-[11px] text-[#8e8e93]">
+                  Yardım Merkezi &amp; Hakkında
+                </p>
+              )}
             </div>
             {/* Desktop-only inline nav (the bottom island is a touch pattern) */}
             <nav className="ml-4 hidden items-center gap-1 sm:flex">

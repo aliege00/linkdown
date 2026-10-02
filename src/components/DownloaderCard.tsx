@@ -2053,7 +2053,7 @@ export default function DownloaderCard({
                           className={cn(
                             "flex flex-col items-center gap-1 px-2 py-3 rounded-xl border text-center transition-all duration-150 cursor-pointer active:scale-[0.97]",
                             active
-                              ? "bg-primary/10 border-primary/40 ring-1 ring-primary/20"
+                              ? "bg-primary/10 border-primary/40 ring-1 ring-primary/20 shadow-[0_0_16px_rgba(108,180,238,0.18)]"
                               : "border-border/30 bg-background hover:border-border/60 hover:bg-muted/60",
                           )}
                         >
@@ -2494,7 +2494,7 @@ export default function DownloaderCard({
                       onClick={handleDownload}
                       disabled={!selectedFormat}
                       size="lg"
-                      className="w-full h-12 gap-2 text-base font-medium transition-shadow shadow-md shadow-primary/20"
+                      className="w-full h-12 gap-2 text-base font-medium bg-gradient-to-r from-[#6cb4ee] to-[#4a90d9] text-[#0d0f12] hover:from-[#7dbdf0] hover:to-[#5a9ee2] shadow-lg shadow-[#6cb4ee]/25 transition-all active:scale-[0.99]"
                     >
                       <Download className="h-5 w-5" />
                       {helpLang === "tr" ? "İndir" : "Download"}

@@ -26,6 +26,7 @@ import {
 import { useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import DownloaderCard, { type PageState } from "@/components/DownloaderCard";
+import { isNativeAvailable } from "@/lib/ytdlp-native";
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
@@ -50,6 +51,9 @@ export default function Landing() {
   // downloaded (the DownloaderCard reports its page state up).
   const [heroState, setHeroState] = useState<PageState>("idle");
   const [footerOpen, setFooterOpen] = useState<number | null>(null);
+  // The engine only exists inside the APK/EXE. Saying so up front beats a
+  // dead-end error after the user presses Analyze.
+  const nativeEngine = isNativeAvailable();
 
   // ─── FAQ data ──────────────────────────────────────────────────────
   const faqs = [
@@ -196,6 +200,38 @@ export default function Landing() {
               onStateChange={setHeroState}
               initialUrl={initialUrl}
             />
+            {/* Engine status line */}
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.6 }}
+              className="mt-4 flex items-center justify-center gap-2 text-center text-[11px] text-muted-foreground"
+            >
+              <span
+                className={cn(
+                  "size-1.5 shrink-0 rounded-full",
+                  nativeEngine ? "bg-emerald-500" : "bg-amber-500",
+                )}
+              />
+              {nativeEngine ? (
+                <span>
+                  İndirme motoru bu cihazda çalışıyor — hepsi cihazında.
+                  {" "}
+                  <span className="text-muted-foreground/70">
+                    The download engine runs on your device.
+                  </span>
+                </span>
+              ) : (
+                <span>
+                  Tarayıcıda indirme motoru yok — Android APK / Windows EXE
+                  sürümünü indir.
+                  {" "}
+                  <span className="text-muted-foreground/70">
+                    There is no engine in the browser; get the app.
+                  </span>
+                </span>
+              )}
+            </motion.p>
           </motion.div>
         </div>
 
