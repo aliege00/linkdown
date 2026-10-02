@@ -1,9 +1,6 @@
 import { useState } from "react";
-import { useAuth } from "@/hooks/use-auth";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { Sparkles, LogOut } from "lucide-react";
-import { useNavigate } from "react-router";
-import { Button } from "@/components/ui/button";
+import { Sparkles } from "lucide-react";
 import BottomTabBar, { type TabId } from "@/components/BottomTabBar";
 import DownloaderCard from "@/components/DownloaderCard";
 import HistoryTab from "@/components/tabs/HistoryTab";
@@ -12,8 +9,6 @@ import { useRef } from "react";
 import { cn } from "@/lib/utils";
 
 export default function Dashboard() {
-  const { user, signOut } = useAuth();
-  const navigate = useNavigate();
   const [tab, setTab] = useState<TabId>("download");
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
@@ -36,7 +31,7 @@ export default function Dashboard() {
             <div className="min-w-0">
               <h1 className="truncate text-sm font-bold tracking-tight">VidFetch</h1>
               <p className="truncate text-[11px] text-[#8e8e93]">
-                v2.6.2 · {user?.name || "Guest"}
+                v2.6.2
               </p>
             </div>
             {/* Desktop-only inline nav (the bottom bar is a touch pattern) */}
@@ -60,18 +55,6 @@ export default function Dashboard() {
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <ThemeToggle />
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-9 rounded-xl text-[#8e8e93] transition-colors hover:bg-[#ff453a]/10 hover:text-[#ff453a]"
-              onClick={async () => {
-                await signOut();
-                navigate("/");
-              }}
-              title="Çıkış"
-            >
-              <LogOut className="size-4" />
-            </Button>
           </div>
         </div>
       </header>

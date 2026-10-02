@@ -8,7 +8,89 @@
 
   <!-- Primary Meta Tags -->
   <meta name="title" content="VidFetch - Free Video Downloader" />
-  <meta name="description" content="Free video downloader. Paste any video link and download instantly. No sign-ups, no limits." />
+  <meta name="description" content="VidFetch: video downloader app for Android and Windows. The download engine runs on your device — paste a link in the app, pick a quality, and download. No account needed." />
+
+  <!-- SEO: canonical + Open Graph + Twitter card -->
+  <!-- ASSUMPTION: canonical domain is https://vidfetch.app (same assumption as
+       LegalPage.tsx / WebDownloadCard.tsx / sitemap.xml). Update all together
+       if the real domain differs. -->
+  <link rel="canonical" href="https://vidfetch.app/" />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="VidFetch" />
+  <meta property="og:title" content="VidFetch — Video Downloader for Android & Windows" />
+  <meta property="og:description" content="The download engine runs on your device — paste a link in the app, pick a quality, and download. No account, no server." />
+  <meta property="og:url" content="https://vidfetch.app/" />
+  <!-- og:image uses the existing app icon (512×512) as the social share image -->
+  <meta property="og:image" content="https://vidfetch.app/icon-512.png" />
+  <meta property="og:image:width" content="512" />
+  <meta property="og:image:height" content="512" />
+  <meta property="og:image:alt" content="VidFetch app icon" />
+
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="VidFetch — Video Downloader for Android & Windows" />
+  <meta name="twitter:description" content="The download engine runs on your device — paste a link in the app, pick a quality, and download." />
+  <meta name="twitter:image" content="https://vidfetch.app/icon-512.png" />
+
+  <!-- FAQ structured data (JSON-LD). Keep the questions/answers in sync with
+       the `faqs` array in src/pages/Landing.tsx — this file is static so
+       crawlers can read it without executing the SPA. -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "How does VidFetch work?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Paste a video URL from YouTube, TikTok, Twitter/X, Instagram, Vimeo and thousands of other sites into the app. The built-in engine extracts the video and saves it straight to your device. No sign-ups required."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "What sites are supported?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Over 1,000 sites via the built-in yt-dlp engine, including YouTube, TikTok, Twitter/X, Instagram, Vimeo, Facebook, Reddit, Twitch, and Dailymotion. Support varies by site — some videos may be unavailable."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Do I need a server or an API key?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "No. There is no server — the phone or the desktop app IS the engine. Everything runs on your device; no API keys and no setup."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Is this service free?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes — the app is free, with no accounts and no API keys. Speed and availability depend on your connection and the source site."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Are there any file size limits?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "There is no artificial file-size cap. Downloads run on your device, so the practical limits are your free storage and what the source site allows."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Is my privacy protected?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. Everything happens on your device — videos are downloaded directly to your phone or PC. Nothing is ever uploaded to a server, and we don't log or track anything."
+        }
+      }
+    ]
+  }
+  </script>
 
   <!-- PWA / Android -->
   <meta name="theme-color" content="#4a7aff" />

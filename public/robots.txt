@@ -1,0 +1,8 @@
+# VidFetch — robots.txt
+# ASSUMPTION: canonical domain is https://vidfetch.app (same as index.html
+# canonical tag and sitemap.xml). Update together if the domain changes.
+
+User-agent: *
+Allow: /
+
+Sitemap: https://vidfetch.app/sitemap.xml

@@ -721,3 +721,10 @@ export async function setPoTokenProvider(url: string): Promise<void> {
 }
 
 export { formatDuration, formatSize } from "./format";
+
+/**
+ * True when the optional self-hosted yt-dlp HTTP server is configured via
+ * env (VITE_YTDLP_SERVER_URL). Re-exported so UI code can distinguish a
+ * web build WITH a server from a plain web build without touching ytdlp.ts.
+ */
+export { hasServer as hasYtdlpServer } from "./ytdlp";

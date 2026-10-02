@@ -64,6 +64,28 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # ── Release signing keystore (from GitHub Secrets) ────────────
+      # Same injection as release.yml. Fails fast when the secret is
+      # missing so PRs can't silently ship debug-signed APKs.
+      - name: Decode signing keystore
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          if [ -z "$SIGNING_KEY" ] || [ -z "$SIGNING_STORE_PASSWORD" ] || [ -z "$SIGNING_KEY_ALIAS" ] || [ -z "$SIGNING_KEY_PASSWORD" ]; then
+            echo "❌ Signing secrets missing. Required: SIGNING_KEY (base64 keystore),"
+            echo "   SIGNING_STORE_PASSWORD, SIGNING_KEY_ALIAS, SIGNING_KEY_PASSWORD."
+            echo "   See README.md → 'Release imzalama kurulumu' for the exact steps."
+            exit 1
+          fi
+          echo "$SIGNING_KEY" | base64 --decode > android/app/release.keystore
+          echo "SIGNING_STORE_FILE=$PWD/android/app/release.keystore" >> "$GITHUB_ENV"
+          echo "SIGNING_STORE_PASSWORD=$SIGNING_STORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "SIGNING_KEY_ALIAS=$SIGNING_KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "SIGNING_KEY_PASSWORD=$SIGNING_KEY_PASSWORD" >> "$GITHUB_ENV"
+
       # ── Stamp versionCode/versionName from the git tag (if any) ───
       # See release.yml — Android requires a strictly increasing
       # versionCode for in-place APK updates.
@@ -94,43 +116,55 @@ jobs:
       # universalApk=true in build.gradle also emits per-ABI splits, but we
       # deliberately ship ONLY the universal APK: one file, installs on
       # every device, zero "which one do I download?" confusion.
-      - name: Build single universal APK
+      - name: Build single universal release APK
         working-directory: android
-        run: ./gradlew assembleDebug
+        run: ./gradlew assembleRelease
 
       # ── Find the APK ───────────────────────────────────────────────
       - name: Locate APK file
         id: apk
         run: |
           mkdir -p apk-out
-          UNIVERSAL=$(ls android/app/build/outputs/apk/debug/*universal*.apk 2>/dev/null | head -n 1)
+          UNIVERSAL=$(ls android/app/build/outputs/apk/release/*universal*.apk 2>/dev/null | head -n 1)
           if [ -z "$UNIVERSAL" ]; then
-            echo "❌ Universal APK not found!"
-            ls -la android/app/build/outputs/apk/debug/ || true
+            echo "❌ Universal release APK not found!"
+            ls -la android/app/build/outputs/apk/release/ || true
             exit 1
           fi
           cp "$UNIVERSAL" apk-out/VidFetch.apk
           echo "Found: VidFetch.apk ($(du -h "$UNIVERSAL" | cut -f1))"
-          echo "dir=apk-out" >> "$GITHUB_OUTPUT"
-          echo "✅ Single universal APK ready (arm64 + arm32 + x86_64)"
+          echo "✅ Single universal SIGNED release APK ready (arm64 + arm32 + x86_64)"
 
-      # ── Upload artifact (always) ───────────────────────────────────
+      # ── Upload artifact (always)───────────────────────────────────
+      - name: Compute APK SHA-256
+        run: |
+          SHA=$(sha256sum apk-out/VidFetch.apk | awk '{print $1}')
+          echo "$SHA" > apk-out/SHA256.txt
+          echo "SHA-256: $SHA"
+
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
           name: vidfetch-${{ github.ref_name || 'debug' }}
-          path: apk-out/*.apk
+          path: |
+            apk-out/*.apk
+            apk-out/SHA256.txt
           retention-days: 14
           if-no-files-found: error
 
       # ── Create Release + Upload asset (tags only) ──────────────────
-      # Name the single APK with the version (tags only): VidFetch-v2.6.1.apk
+      # Versioned + stable-latest names; SHA-256 goes into the release notes.
       - name: Rename APK with version
+        id: rename
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           VERSION="${GITHUB_REF#refs/tags/}"
+          SHA=$(cat apk-out/SHA256.txt 2>/dev/null || sha256sum apk-out/VidFetch.apk | awk '{print $1}')
           mv apk-out/VidFetch.apk "apk-out/VidFetch-${VERSION}.apk"
+          cp "apk-out/VidFetch-${VERSION}.apk" apk-out/VidFetch-latest.apk
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
           ls -la apk-out/
+          echo "SHA-256: $SHA"
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -146,12 +180,26 @@ jobs:
             ## VidFetch ${{ github.ref_name }}
 
             ### 📥 Download
-            Grab **VidFetch-*.apk** below — ONE file that works on every
-            Android device (arm64, arm32, x86_64; emulators and Chromebooks
-            included). No need to pick a version for your phone.
+            - **Android:** `VidFetch-${{ github.ref_name }}.apk` — ONE file for
+              every device (arm64, arm32, x86_64; emulators and Chromebooks
+              included). **Signed release APK** — installs over any previous
+              version without uninstalling.
+            - Always-newest link:
+              https://github.com/aliege00/linkdown/releases/latest/download/VidFetch-latest.apk
+
+            ### 🔐 APK SHA-256
+            Verify your download (optional): `shasum -a 256 VidFetch-*.apk`
+            ```
+            ${{ steps.rename.outputs.sha256 }}
+            ```
 
             ### What's new
             See the commit history for details.
+
+            ### Install (Android)
+            1. Download the APK below
+            2. Allow "Install unknown apps" for your browser (Settings → Apps)
+            3. Open the APK and confirm
 
             ### Requirements
             - Android 8.0 (API 26) or higher

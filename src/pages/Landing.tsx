@@ -25,7 +25,6 @@ import {
 } from "lucide-react";
 import { useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
-import { useAuth } from "@/hooks/use-auth";
 import DownloaderCard, { type PageState } from "@/components/DownloaderCard";
 
 // ─── Helpers ──────────────────────────────────────────────────────────
@@ -41,17 +40,14 @@ const BUILD_TAG =
 
 export default function Landing() {
   const navigate = useNavigate();
-  const { isAuthenticated } = useAuth();
   // Supports re-downloading from the dashboard: /?url=<video link>
   const [searchParams] = useSearchParams();
   const initialUrl = searchParams.get("url") ?? undefined;
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
   const featuresRef = useRef<HTMLDivElement>(null);
-  // Mirrors the downloader card's page state so the hero scroll hint hides
-  // while a video is being analyzed / downloaded. The heavy downloader state
-  // itself lives inside <DownloaderCard>, so progress ticks and typing never
-  // re-render the marketing sections below.
+  // Hero scroll hint visibility: hides while a video is being analyzed /
+  // downloaded (the DownloaderCard reports its page state up).
   const [heroState, setHeroState] = useState<PageState>("idle");
   const [footerOpen, setFooterOpen] = useState<number | null>(null);
 
@@ -63,19 +59,19 @@ export default function Landing() {
     },
     {
       q: "What sites are supported?",
-      a: "Over 1,000 sites including YouTube, TikTok, Twitter/X, Instagram, Vimeo, Facebook, Reddit, Twitch, Dailymotion, and many more. If you can watch it online, we can probably download it.",
+      a: "Over 1,000 sites via the built-in yt-dlp engine, including YouTube, TikTok, Twitter/X, Instagram, Vimeo, Facebook, Reddit, Twitch, and Dailymotion. Support varies by site — some videos may be unavailable.",
     },
     {
       q: "Do I need a server or an API key?",
-      a: "No. There is no server — the phone or the desktop app IS the engine. Everything runs on your device, completely free and unlimited, with no API keys and no setup.",
+      a: "No. There is no server — the phone or the desktop app IS the engine. Everything runs on your device; no API keys and no setup.",
     },
     {
       q: "Is this service free?",
-      a: "Yes — 100% free and unlimited. No accounts, no API keys, no rate limits, no monthly caps. Your device does all the work.",
+      a: "Yes — the app is free, with no accounts and no API keys. Speed and availability depend on your connection and the source site.",
     },
     {
       q: "Are there any file size limits?",
-      a: "None at all. Since downloads run on your device, the only limit is your own storage space.",
+      a: "There is no artificial file-size cap. Downloads run on your device, so the practical limits are your free storage and what the source site allows.",
     },
     {
       q: "Is my privacy protected?",
@@ -113,15 +109,12 @@ export default function Landing() {
             >
               How it works
             </button>
-            {isAuthenticated ? (
-              <Button size="sm" onClick={() => navigate("/dashboard")}>
-                Dashboard
-              </Button>
-            ) : (
-              <Button size="sm" variant="outline" onClick={() => navigate("/auth")}>
-                Sign in
-              </Button>
-            )}
+            <Button
+              size="sm"
+              onClick={() => navigate("/dashboard")}
+            >
+              Uygulama
+            </Button>
           </nav>
           <div className="flex items-center gap-1">
             <ThemeToggle />
@@ -129,9 +122,9 @@ export default function Landing() {
               size="sm"
               variant="ghost"
               className="sm:hidden"
-              onClick={() => navigate(isAuthenticated ? "/dashboard" : "/auth")}
+              onClick={() => navigate("/dashboard")}
             >
-              {isAuthenticated ? "Dashboard" : "Sign in"}
+              Uygulama
             </Button>
           </div>
         </div>
@@ -157,7 +150,7 @@ export default function Landing() {
               className="gap-1.5 px-4 py-1.5 text-xs font-normal border-primary/20 bg-primary/5 text-primary"
             >
               <Sparkles className="h-3 w-3" />
-              100% ücretsiz · Sınırsız
+              Ücretsiz · Cihazında çalışır
             </Badge>
           </motion.div>
 
@@ -180,8 +173,9 @@ export default function Landing() {
             transition={{ delay: 0.3 }}
             className="mt-5 text-base sm:text-lg text-muted-foreground max-w-2xl mx-auto leading-relaxed"
           >
-            YouTube, TikTok, Twitter/X, Instagram &mdash; paste any video link,
-            pick your quality, and download. The engine runs right on your device.
+            YouTube, TikTok, Twitter/X, Instagram &mdash; paste a video link in
+            the app, pick your quality, and download. The engine runs right on
+            your device.
           </motion.p>
 
           {/* Downloader Card */}
@@ -256,14 +250,14 @@ export default function Landing() {
                 icon: Youtube,
                 title: "Paste & analyze",
                 description:
-                  "Paste any video URL. VidFetch's on-device engine extracts the metadata and available formats instantly.",
+                  "Paste a video URL. VidFetch's on-device engine extracts the metadata and available formats.",
                 step: "02",
               },
               {
                 icon: Download,
                 title: "Choose & download",
                 description:
-                  "Pick your preferred quality from 4K to audio-only. The video saves directly to your device.",
+                  "Pick from the qualities the source offers, from 4K down to audio-only. The video saves directly to your device.",
                 step: "03",
               },
             ].map((item, i) => (
@@ -392,18 +386,18 @@ export default function Landing() {
               },
               {
                 icon: Zap,
-                title: "Unlimited downloads",
-                desc: "No rate limits, no API keys, no monthly caps. Download as many videos as you want.",
+                title: "No account needed",
+                desc: "No accounts, no API keys. Downloads run on your device — the practical limits are your storage and the source site.",
               },
               {
                 icon: Crown,
-                title: "Best quality possible",
-                desc: "Extracts the highest quality available — up to 4K, 60fps, with proper audio.",
+                title: "Best quality available",
+                desc: "Extracts the best quality the source offers — up to 4K when available — with proper audio.",
               },
               {
                 icon: Globe,
                 title: "1000+ sites supported",
-                desc: "YouTube, TikTok, Twitter, Instagram, Vimeo, Facebook, Twitch, and thousands more.",
+                desc: "YouTube, TikTok, Twitter, Instagram, Vimeo, Facebook, Twitch, and many more via yt-dlp's extractor library.",
               },
               {
                 icon: Sparkles,
@@ -526,8 +520,8 @@ export default function Landing() {
             Ready to download?
           </h2>
           <p className="mt-4 text-muted-foreground">
-            No server. No API key. No limits. Paste a link and download from
-            1000+ sites, right on your device.
+            No server. No API key. Paste a link in the app and download from
+            supported sites, right on your device.
           </p>
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
             <Button
@@ -538,17 +532,6 @@ export default function Landing() {
               <Download className="h-4 w-4" />
               Start downloading
             </Button>
-            {!isAuthenticated && (
-              <Button
-                size="lg"
-                variant="outline"
-                onClick={() => navigate("/auth")}
-                className="gap-2"
-              >
-                <ArrowRight className="h-4 w-4" />
-                Create account
-              </Button>
-            )}
           </div>
         </motion.div>
       </section>
@@ -567,8 +550,8 @@ export default function Landing() {
                 <span className="text-base font-semibold tracking-tight">VidFetch</span>
               </div>
               <p className="text-sm text-muted-foreground leading-relaxed max-w-xs">
-                On-device video downloader. Paste any link, pick a quality,
-                and download — no server, no limits, completely free.
+                On-device video downloader. Paste a link, pick a quality,
+                and download in the app — no server, no account.
               </p>
               <div className="mt-4 flex items-center gap-2">
                 <a
@@ -634,21 +617,29 @@ export default function Landing() {
               </ul>
             </div>
 
-            {/* Info */}
+            {/* Legal */}
             <div>
-              <p className="text-sm font-semibold mb-3">Info</p>
+              <p className="text-sm font-semibold mb-3">Legal</p>
               <ul className="space-y-2">
-                {[
-                  { label: "Privacy by design", desc: "No tracking, no logs" },
-                  { label: "100% free", desc: "No limits, no API keys" },
-                  { label: "Open engine", desc: "No server, no account" },
-                ].map((item) => (
-                  <li key={item.label}>
-                    <p className="text-sm text-muted-foreground">{item.label}</p>
-                    <p className="text-xs text-muted-foreground/60 mt-0.5">{item.desc}</p>
-                  </li>
-                ))}
+                <li>
+                  <a href="/legal/privacy" onClick={(e) => { e.preventDefault(); navigate("/legal/privacy"); }} className="text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+                    Privacy Policy
+                  </a>
+                </li>
+                <li>
+                  <a href="/legal/terms" onClick={(e) => { e.preventDefault(); navigate("/legal/terms"); }} className="text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+                    Terms of Service
+                  </a>
+                </li>
+                <li>
+                  <a href="/legal/copyright" onClick={(e) => { e.preventDefault(); navigate("/legal/copyright"); }} className="text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+                    Copyright Notice
+                  </a>
+                </li>
               </ul>
+              <p className="text-xs text-muted-foreground/60 mt-4 leading-relaxed">
+                Privacy by design — downloads run on your device, no account.
+              </p>
             </div>
           </div>
 

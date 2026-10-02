@@ -72,6 +72,30 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # ── Release signing keystore (from GitHub Secrets) ────────────
+      # SIGNING_KEY is the base64-encoded .jks keystore; the passwords and
+      # alias arrive as plain secrets. The decoded file stays in the runner
+      # workspace and is never committed. Local builds skip this step and
+      # fall back to the debug key (see android/app/build.gradle).
+      - name: Decode signing keystore
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          if [ -z "$SIGNING_KEY" ] || [ -z "$SIGNING_STORE_PASSWORD" ] || [ -z "$SIGNING_KEY_ALIAS" ] || [ -z "$SIGNING_KEY_PASSWORD" ]; then
+            echo "❌ Signing secrets missing. Required: SIGNING_KEY (base64 keystore),"
+            echo "   SIGNING_STORE_PASSWORD, SIGNING_KEY_ALIAS, SIGNING_KEY_PASSWORD."
+            echo "   See README.md → 'Release imzalama kurulumu' for the exact steps."
+            exit 1
+          fi
+          echo "$SIGNING_KEY" | base64 --decode > android/app/release.keystore
+          echo "SIGNING_STORE_FILE=$PWD/android/app/release.keystore" >> "$GITHUB_ENV"
+          echo "SIGNING_STORE_PASSWORD=$SIGNING_STORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "SIGNING_KEY_ALIAS=$SIGNING_KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "SIGNING_KEY_PASSWORD=$SIGNING_KEY_PASSWORD" >> "$GITHUB_ENV"
+        
       # ── Stamp versionCode/versionName from the git tag ────────────
       # Android refuses to install an APK whose versionCode is not strictly
       # greater than the installed one. Derive an ever-increasing code from
@@ -98,29 +122,42 @@ jobs:
 
       # universalApk=true also emits per-ABI splits, but we ship ONLY the
       # universal APK: one file, installs on every device, zero confusion.
-      - name: Build single universal APK
+      # assembleRelease is SIGNED (signingConfig from the decoded keystore).
+      - name: Build single universal release APK
         working-directory: android
-        run: ./gradlew assembleDebug
+        run: ./gradlew assembleRelease
 
       - name: Find APK
         id: apk
         run: |
           mkdir -p apk-out
-          UNIVERSAL=$(ls android/app/build/outputs/apk/debug/*universal*.apk 2>/dev/null | head -n 1)
+          UNIVERSAL=$(ls android/app/build/outputs/apk/release/*universal*.apk 2>/dev/null | head -n 1)
           if [ -z "$UNIVERSAL" ]; then
-            echo "❌ Universal APK not found!"
-            ls -la android/app/build/outputs/apk/debug/ || true
+            echo "❌ Universal release APK not found!"
+            ls -la android/app/build/outputs/apk/release/ || true
             exit 1
           fi
           cp "$UNIVERSAL" apk-out/VidFetch.apk
           echo "Found: VidFetch.apk ($(du -h "$UNIVERSAL" | cut -f1))"
-          echo "✅ Single universal APK ready (arm64 + arm32 + x86_64)"
+          echo "✅ Single universal SIGNED release APK ready (arm64 + arm32 + x86_64)"
+
+      # ── SHA-256 checksum for the release notes ────────────────────
+      # Users can verify the APK they downloaded matches the one CI built
+      # (shasum -a 256 VidFetch-vX.Y.Z.apk). The value travels to the
+      # publish job inside the uploaded artifact as SHA256.txt.
+      - name: Compute APK SHA-256
+        run: |
+          SHA=$(sha256sum apk-out/VidFetch.apk | awk '{print $1}')
+          echo "$SHA" > apk-out/SHA256.txt
+          echo "SHA-256: $SHA"
 
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
           name: release-apk
-          path: apk-out/*.apk
+          path: |
+            apk-out/*.apk
+            apk-out/SHA256.txt
 
   # ── Windows EXE ─────────────────────────────────────────────────────
   # NSIS installer + portable EXE with the yt-dlp engine bundled. RAM is
@@ -233,13 +270,22 @@ jobs:
           path: ./artifacts
 
       - name: Rename APK with version
+        id: rename
         run: |
           # The universal APK arrives as VidFetch.apk; stamp the version into
-          # the name (VidFetch-v2.6.1.apk).
+          # the name (VidFetch-v2.6.3.apk).
           VERSION="${{ steps.version.outputs.tag }}"
           mv ./artifacts/VidFetch.apk "./artifacts/VidFetch-${VERSION}.apk"
+          # Stable-named copies so website links never change between
+          # releases: releases/latest/download/VidFetch-latest.apk etc.
+          cp "./artifacts/VidFetch-${VERSION}.apk" ./artifacts/VidFetch-latest.apk
+          cp ./artifacts/VidFetch-Setup-*.exe ./artifacts/VidFetch-Setup-latest.exe
+          cp ./artifacts/VidFetch-*-portable.exe ./artifacts/VidFetch-latest-portable.exe
+          SHA=$(cat ./artifacts/SHA256.txt 2>/dev/null || echo "")
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
           echo "✅ Renamed APK:"
           ls -la ./artifacts/*.apk
+          echo "SHA-256: $SHA"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -260,11 +306,20 @@ jobs:
             - **Android:** `VidFetch-*.apk` — ONE file for every device
               (arm64, arm32, x86_64; phones, tablets, emulators, Chromebooks).
               No need to figure out which build matches your phone.
+              **Now signed** — install over any previous version without
+              uninstalling.
             - **Windows installer:** `VidFetch-Setup-*.exe` — recommended
             - **Windows portable:** `VidFetch-*-portable.exe` — no install, single file
 
-            The Windows EXE ships the full yt-dlp + ffmpeg engine, runs 100%
-            on your PC (no server, no account) and is tuned for low RAM usage.
+            The Windows EXE ships the full download engine (yt-dlp + ffmpeg),
+            runs 100% on your PC (no server, no account) and is tuned for
+            low RAM usage.
+
+            ### 🔐 APK SHA-256
+            Verify your download (optional): `shasum -a 256 VidFetch-*.apk`
+            ```
+            ${{ steps.rename.outputs.sha256 }}
+            ```
 
             ### What's new
             See the commit history and release notes for details.
@@ -272,6 +327,11 @@ jobs:
             ### Requirements
             - Android 8.0 (API 26) or higher, ~200 MB free storage (APK)
             - Windows 10/11 64-bit, ~200 MB free disk space (EXE)
+
+            ### Install (Android)
+            1. Download the APK below
+            2. Allow "Install unknown apps" for your browser (Settings → Apps)
+            3. Open the APK and confirm
 
             ### Install (Windows)
             1. Download `VidFetch-Setup-*.exe`

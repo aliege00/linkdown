@@ -1,8 +1,13 @@
 /**
  * yt-dlp API Client
  *
- * Communicates with the self-hosted yt-dlp FastAPI server (yt-dlp-server/) to
- * extract video metadata and trigger downloads from 1000+ supported sites.
+ * Talks to an OPTIONAL self-hosted yt-dlp HTTP server (configurable via
+ * VITE_YTDLP_SERVER_URL, see hasServer() below) to extract video metadata
+ * and trigger downloads. The shipped Android APK and Windows EXE do NOT use
+ * this — they run the engine on-device via their native bridges; this module
+ * only serves an optional web-deployment setup where the operator runs their
+ * own yt-dlp server. The bundled yt-dlp-server/ folder was removed — see
+ * BUILD_GUIDE.md for what an operator must host themselves.
  *
  * Supports both single videos and playlists:
  *   - getVideoInfo(url, isPlaylist) returns is_playlist + entries for playlists

@@ -1,6 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router";
-import { useAuth } from "@/hooks/use-auth";
+import { useNavigate } from "react-router"; // kept: /chat navigation below
 import {
   Sparkles,
   Sparkle,
@@ -56,7 +55,6 @@ function CopyCommand({
 }
 
 export default function SettingsTab() {
-  const { signOut } = useAuth();
   const navigate = useNavigate();
   const [helpLang, setHelpLang] = useState<HelpLang>(() => {
     try {
@@ -273,21 +271,6 @@ export default function SettingsTab() {
           </TabsContent>
         </Tabs>
       </FlatCard>
-
-      {/* ── Sign Out ── */}
-      <div className="flex justify-center pb-4">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="gap-2 text-xs text-[#8e8e93]"
-          onClick={async () => {
-            await signOut();
-            navigate("/");
-          }}
-        >
-          Çıkış Yap
-        </Button>
-      </div>
     </div>
   );
 }

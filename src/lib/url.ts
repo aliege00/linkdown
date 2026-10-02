@@ -64,6 +64,12 @@ export function normalizeVideoUrl(raw: string): string {
     "https://www.youtube.com/",
   );
 
+  // Hard guarantee: only http/https URLs may leave this function. Every
+  // branch above either matched an https?:// token or prefixed https://,
+  // but this explicit check keeps the invariant true even if the parsing
+  // above is edited later (rejects ftp:, javascript:, data:, file:, …).
+  if (!/^https?:\/\//i.test(text)) return "";
+
   return text;
 }
 

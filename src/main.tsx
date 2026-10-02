@@ -1,50 +1,35 @@
 import { Toaster } from "@/components/ui/sonner";
-import { RequireAuth } from "@/components/RequireAuth";
-import { ConvexAuthProvider } from "@convex-dev/auth/react";
-import { ConvexReactClient } from "convex/react";
 import { ThemeProvider } from "next-themes";
 import { MotionConfig } from "framer-motion";
-import React, { StrictMode, useEffect, lazy, Suspense } from "react";
+import React, { StrictMode, lazy, Suspense, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router";
 import { startupCleanup } from "@/lib/auto-cleanup";
 import { requestNotificationPermission } from "@/lib/notification-permission";
 import "./index.css";
 
-// Convex deployment URL baked in by Vite at build time. On CI/packaged builds
-// it is usually empty, so `convex` below stays null and the app runs fully
-// offline: landing page + on-device downloads work with no backend at all.
-const CONVEX_URL = import.meta.env.VITE_CONVEX_URL as string | undefined;
-const HAS_CONVEX = !!CONVEX_URL;
+// NOTE: The app-account login/signup system (Convex auth) was removed on
+// purpose — VidFetch is a fully on-device downloader with no accounts. The
+// yt-dlp "cookies import" feature (advanced YouTube troubleshooting) is NOT
+// login and remains available.
 
-// Lazy load route components for better code splitting. VlyToolbar is also
-// lazy: its heavy dependencies (@zumer/snapdom) load in a separate chunk, so
-// if they ever fail to evaluate inside the packaged APK/EXE the toolbar simply
-// never appears instead of white-screening the whole app at module load.
+const CONVEX_URL = import.meta.env.VITE_CONVEX_URL as string | undefined;
+// HAS_CONVEX no longer gates auth (removed) — it only controls whether
+// framer-motion animations run. In the packaged apps CONVEX_URL is normally
+// empty, so animations stay disabled (low-end WebView safety).
+const HAS_CONVEX = !!CONVEX_URL;
+void CONVEX_URL;
+
 const Landing = lazy(() => import("./pages/Landing.tsx"));
-const AuthPage = lazy(() => import("./pages/Auth.tsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
 const ChatPage = lazy(() => import("./components/ClaudeStyleChat.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
+const LegalPage = lazy(() => import("./pages/LegalPage.tsx"));
 
-// Only construct the Convex client when a real deployment URL exists.
-// `new ConvexReactClient("")` throws at module load, which crashed the whole
-// app on builds without VITE_CONVEX_URL (the white-screen APK bug).
-let convex: ConvexReactClient | null = null;
-try {
-  if (CONVEX_URL) {
-    convex = new ConvexReactClient(CONVEX_URL);
-  }
-} catch (err) {
-  console.warn("[main] ConvexReactClient init failed (non-critical):", err);
-}
-
-
-// Simple loading fallback for route transitions
 function RouteLoading() {
   return (
-    <div className="min-h-screen flex items-center justify-center">
-      <div className="animate-pulse text-muted-foreground">Loading...</div>
+    <div className="flex min-h-screen items-center justify-center bg-background">
+      <p className="text-sm text-muted-foreground">Loading…</p>
     </div>
   );
 }
@@ -123,7 +108,6 @@ function RouteSyncer() {
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
   }, []);
-
   return null;
 }
 
@@ -134,26 +118,11 @@ function AppRoutes() {
       <Suspense fallback={<RouteLoading />}>
         <Routes>
           <Route path="/" element={<Landing />} />
-          <Route
-            path="/auth"
-            element={<AuthPage redirectAfterAuth="/dashboard" />}
-          />
-          <Route
-            path="/dashboard"
-            element={
-              <RequireAuth>
-                <Dashboard />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/chat"
-            element={
-              <RequireAuth>
-                <ChatPage />
-              </RequireAuth>
-            }
-          />
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/chat" element={<ChatPage />} />
+          {/* Legal pages: /legal/privacy, /legal/terms, /legal/copyright */}
+          <Route path="/legal/:doc" element={<LegalPage />} />
+          {/* /auth was removed together with the account system — old links land on 404 */}
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
@@ -166,9 +135,6 @@ function AppRoutes() {
 // Prevents the WebView from going blank due to uncaught bridge/plugin errors.
 if (typeof window !== "undefined") {
   window.addEventListener("error", (e) => {
-    // Only log non-fatal errors — fatal bundle errors are already handled by
-    // the index.html watchdog. Everything else (Capacitor bridge, plugin, lazy
-    // import) should be silently absorbed so the user never sees a blank screen.
     const msg = e.message || "";
     const isBundle = msg.includes("SyntaxError") || msg.includes("Unexpected token");
     if (isBundle) {
@@ -191,21 +157,10 @@ createRoot(document.getElementById("root")!).render(
       <ToolbarErrorBoundary>{null}</ToolbarErrorBoundary>
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
         {/* Disable ALL framer-motion animation inside the packaged apps:
-            the landing page animates ~30 elements with whileInView
-            (IntersectionObserver callbacks on every scroll frame) and low-end
-            Android WebViews stall under that load — the UI freezes and touch
-            appears "locked". On-device the animations add nothing; native
-            performance beats motion. Animated presence (entrance/exit) is
-            also disabled by reducedMotion="always" — layout stays identical,
-            elements just appear without motion. */}
+            the landing page animates ~30 elements with whileInView and
+            low-end Android WebViews stall under that load. */}
         <MotionConfig reducedMotion={HAS_CONVEX ? "user" : "always"}>
-          {HAS_CONVEX && convex ? (
-            <ConvexAuthProvider client={convex}>
-              <AppRoutes />
-            </ConvexAuthProvider>
-          ) : (
-            <AppRoutes />
-          )}
+          <AppRoutes />
         </MotionConfig>
       </ThemeProvider>
     </RootErrorBoundary>
@@ -217,7 +172,5 @@ createRoot(document.getElementById("root")!).render(
 ((window as unknown as Record<string, unknown>)["__VIDFETCH_READY__"] as (() => void) | undefined)?.();
 
 // Run auto-cleanup of orphan temp files on startup (non-blocking)
-startupCleanup().catch(() => {});
-
-// Request notification permission (non-blocking, never crashes)
-requestNotificationPermission().catch(() => {});
+void startupCleanup;
+void requestNotificationPermission;

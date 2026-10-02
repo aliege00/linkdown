@@ -5,79 +5,25 @@
 ```
 vidfetch/
 ├── src/                    # React frontend (Vite + TypeScript)
-│   ├── components/         # UI bileşenleri (DownloaderCard, ClipboardNotification)
-│   ├── hooks/              # React hook'ları (useDownloadManager, useClipboardMonitor)
-│   ├── lib/                # Yardımcı modüller (url, error-help, gallery-save)
-│   ├── pages/              # Sayfalar (Landing, Dashboard, Auth, NotFound)
-│   └── convex/             # Convex backend (auth, schema)
-├── yt-dlp-server/          # Python backend (FastAPI + yt-dlp)
-│   ├── main.py             # Ana sunucu
-│   ├── chunked_downloader.py  # Çok kanallı indirme motoru
-│   ├── resume_download.py  # Duraklat/devam et yöneticisi
-│   ├── auto_update.py      # Otomatik güncelleme
-│   └── requirements.txt    # Python bağımlılıkları
-├── android-media/          # Android native kodlar
-│   ├── MediaStoreHelper.kt # Galeriye kaydetme (MediaStore API)
-│   ├── MediaStorePlugin.kt # Capacitor plugin bridge
-│   └── AndroidManifest-snippet.xml  # İzin bildirimleri
-└── android/                # Capacitor Android projesi (build sırasında oluşur)
+│   ├── components/         # UI bileşenleri (DownloaderCard, WebDownloadCard, ClipboardNotification)
+│   ├── components/ui/      # shadcn/ui bileşenleri
+│   ├── components/tabs/    # Dashboard sekmeleri (DownloadsTab, SettingsTab, …)
+│   ├── hooks/              # React hook'ları (useDownloadManager, useClipboardMonitor, …)
+│   ├── lib/                # Yardımcı modüller (url, error-help, ytdlp-native, download-modes, …)
+│   └── pages/              # Sayfalar (Landing, Dashboard, Chat, LegalPage, NotFound)
+├── android/                # Capacitor Android projesi
+│   └── app/src/main/java/com/vidfetch/downloader/
+│       ├── DownloadBridge.kt   # Capacitor plugin (analiz/indirme/cookies köprüsü)
+│       ├── DownloadWorker.kt   # WorkManager foreground indirme servisi
+│       └── DownloadApp.kt      # yt-dlp + FFmpeg motor init
+├── android-media/          # MediaStore galeri kayıt yardımcıları (Kotlin)
+├── electron/               # Windows EXE kabuğu (main.cjs + preload.cjs)
+├── scripts/                # İkon üretimi ve E2E test yardımcıları
+└── .github/workflows/      # CI: build-apk.yml + release.yml
 ```
 
----
-
-## 🖥️ Backend (yt-dlp-server) — Sıfırdan Çalıştırma
-
-### Ön Koşullar
-
-```bash
-# Python 3.10+ kurulumu (Ubuntu/Debian)
-sudo apt update && sudo apt install -y python3 python3-pip python3-venv ffmpeg
-
-# macOS
-brew install python@3.12 ffmpeg
-```
-
-### Kurulum
-
-```bash
-cd yt-dlp-server
-
-# Sanal ortam oluştur
-python3 -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# Bağımlılıkları kur
-pip install -r requirements.txt
-
-# Sunucuyu çalıştır
-python main.py
-# veya
-uvicorn main:app --host 0.0.0.0 --port 8080 --reload
-```
-
-### Test
-
-```bash
-# Sağlık kontrolü
-curl http://localhost:8080/api/health
-
-# Video bilgisi çekme
-curl "http://localhost:8080/api/info?url=https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-
-# Chunked probe
-curl "http://localhost:8080/api/chunked/probe?url=https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-
-# Chunked indirme başlat
-curl "http://localhost:8080/api/chunked/download?url=https://www.youtube.com/watch?v=dQw4w9WgXcQ&output_name=test.mp4&threads=4"
-```
-
-### Docker ile Çalıştırma
-
-```bash
-cd yt-dlp-server
-docker build -t vidfetch-ytdlp .
-docker run -p 8080:8080 vidfetch-ytdlp
-```
+Not: Eski `src/convex/` backend'i ve `yt-dlp-server/` klasörü kaldırıldı — indirme
+tamamen cihazda (APK/EXE içindeki gömülü yt-dlp motoru) çalışır, sunucu gerekmez.
 
 ---
 
@@ -86,47 +32,27 @@ docker run -p 8080:8080 vidfetch-ytdlp
 ### Ön Koşullar
 
 ```bash
-# Node.js 20+ ve npm/bun kurulumu
-# macOS
-brew install node@20
-
-# Ubuntu
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
-
-# npm yerine bun (hızlı paket yöneticisi)
-npm install -g bun
+# Node.js 20+ ve npm
+node --version
 ```
 
 ### Kurulum ve Geliştirme
 
 ```bash
-# Proje kök dizininde
-bun install          # veya npm install
-
-# Geliştirme sunucusu (hot reload)
-bun dev              # veya npm run dev
-
-# Tarayıcıda aç: http://localhost:5173
+npm install
+npm run dev          # Tarayıcıda aç: http://localhost:5173
 ```
 
-### Typecheck
+Tarayıcıda indirme motoru YOKTUR — analiz/indirme denemesi kullanıcıyı
+uygulama indirme kartına yönlendirir. Tam deneyim için APK/EXE kurun.
+
+### Doğrulama Komutları
 
 ```bash
-bun tsc -b --noEmit
-```
-
-### Lint
-
-```bash
-bun lint
-```
-
-### Production Build
-
-```bash
-bun run build        # Vite production build
-bun run preview      # Build'i önizle
+npm run typecheck    # tsc -b --noEmit
+npm test             # vitest
+npm run build        # Vite production build (dist/)
+node scripts/test-download-socket.cjs   # Electron WS E2E (yalnızca yerel test)
 ```
 
 ---
@@ -136,137 +62,78 @@ bun run preview      # Build'i önizle
 ### Ön Koşullar
 
 ```bash
-# Android SDK (SDK Manager veya Android Studio ile)
-# JAVA_HOME ayarla (JDK 17+)
+# Android SDK + JDK 17+ (Android Studio ile)
 export JAVA_HOME=/path/to/jdk-17
 export ANDROID_HOME=/path/to/android-sdk
-
-# Capacitor CLI kurulumu
-npm install -g @capacitor/cli
 ```
 
 ### Build Adımları
 
 ```bash
-# 1. Frontend'i build et
-bun run build
-
-# 2. Capacitor'ı senkronize et
-npx cap sync android
-
-# 3. Android projesini aç (isteğe bağlı — Android Studio'da düzenlemek için)
-npx cap open android
-
-# 4. APK build et (komut satırından)
+npm run build              # 1. Frontend build
+npx cap sync android       # 2. Capacitor senkronizasyonu
 cd android
-./gradlew assembleDebug
-
-# APK çıktısı:
-# android/app/build/outputs/apk/debug/app-debug.apk
-
-# Release APK (imzalı)
-./gradlew assembleRelease
-# android/app/build/outputs/apk/release/app-release.apk
+./gradlew assembleRelease  # 3. Tek universal release APK
+# Çıktı: android/app/build/outputs/apk/release/app-universal-release.apk
 ```
 
-### CI/CD (GitHub Actions)
-
-Otomatik APK build için `.github/workflows/build-apk.yml` dosyası mevcut.
-Push veya PR'da otomatik build çalışır.
-
-```bash
-# Manuel tetikleme
-gh workflow run build-apk.yml
-```
+İmza ortam değişkenleri (`SIGNING_STORE_FILE`, `SIGNING_STORE_PASSWORD`,
+`SIGNING_KEY_ALIAS`, `SIGNING_KEY_PASSWORD`) tanımlı değilse build Android SDK'nın
+debug key'iyle imzalanır — **yalnızca geliştirme içindir**. Dağıtım imzalama kurulumu
+(keytool komutları + GitHub Secrets) için README → "Release imzalama kurulumu".
 
 ---
 
 ## 🖥️ Windows EXE Build
 
-### Ön Koşullar
-
 ```bash
-# Electron builder kurulumu
-npm install -g electron-builder
+npm run build
+npx electron-builder --config electron-builder.yml --win nsis portable --publish never
+# Çıktı: release/ klasöründe Setup + portable EXE'ler
 ```
 
-### Build
+---
 
-```bash
-# Frontend'i build et
-bun run build
+## 🚀 CI / Release
 
-# EXE'yi paketle
-npx electron-builder --config electron-builder.yml
+- `main`e push → build-apk.yml APK artifact'ı üretir.
+- `v*` tag push → build-apk.yml + release.yml çalışır, GitHub Release oluşturur:
+  - `VidFetch-vX.Y.Z.apk` (tek universal, imzalı) + `VidFetch-latest.apk`
+  - `VidFetch-Setup-vX.Y.Z.exe` + portable + `latest` kopyaları
+  - Release notlarına APK SHA-256 özeti otomatik yazılır.
 
-# Çıktı: dist_electron/ klasöründe .exe dosyası
-```
+Sitedeki indirme linkleri `releases/latest/download/...` sabit adlarına işaret eder;
+sürüm değişince site düzenlemesi gerekmez. İmzalama secret'ları ve tag akışı için
+README'ye bakın.
 
 ---
 
 ## 🔧 Çevresel Değişkenler
 
-### Frontend (.env)
-
-| Değişken | Açıklama |
-|---|---|
-| `VITE_CONVEX_URL` | Convex deployment URL (opsiyonel) |
-| `VITE_YTDLP_SERVER_URL` | yt-dlp sunucu URL'si (ör: `http://localhost:8080`) |
-
-### Backend (Python ortam değişkenleri)
-
-| Değişken | Varsayılan | Açıklama |
+| Değişken | Zorunlu | Açıklama |
 |---|---|---|
-| `HOST` | `0.0.0.0` | Sunucu bind adresi |
-| `PORT` | `8080` | Sunucu portu |
-| `DOWNLOAD_DIR` | `/tmp/vidfetch-downloads` | Geçici indirme klasörü |
-| `CLEANUP_AGE_SECONDS` | `1800` | Otomatik temizleme süresi (sn) |
-| `CHUNKED_DOWNLOAD_THREADS` | `8` | Paralel indirme thread sayısı |
-| `CHUNKED_DOWNLOAD_CHUNK_SIZE` | `4194304` | Parça boyutu (4 MB) |
-| `YTDLP_AUTO_UPDATE` | `1` | Otomatik güncelleme (0=kapat) |
-| `YTDLP_COOKIES_FILE` | — | YouTube cookies.txt yolu |
-| `YTDLP_PLAYER_CLIENT` | — | YouTube player client override |
+| `VITE_YTDLP_SERVER_URL` | Hayır | Yalnızca kendi yt-dlp sunucunuzu barındırıyorsanız. Tanımlıysa web build analiz/indirmeyi bu sunucuya yapar; tanımlı değilse web'de motor yok kartı gösterilir. |
 
----
-
-## 🧪 Hızlı Test Komutları
-
-```bash
-# Backend health check
-curl http://localhost:8080/api/health
-
-# Frontend typecheck
-bun tsc -b --noEmit
-
-# Python syntax check
-python3 -m py_compile yt-dlp-server/main.py
-python3 -m py_compile yt-dlp-server/chunked_downloader.py
-python3 -m py_compile yt-dlp-server/resume_download.py
-python3 -m py_compile yt-dlp-server/auto_update.py
-
-# Lint
-bun lint
-
-# Full build test
-bun run build
-```
+CI imzalama değişkenleri (`SIGNING_KEY`, `SIGNING_STORE_PASSWORD`, `SIGNING_KEY_ALIAS`,
+`SIGNING_KEY_PASSWORD`) GitHub Secrets'ta tutulur — repoya yazılmaz.
 
 ---
 
 ## 🐛 Sorun Giderme
 
-### "No download engine" hatası
-- APK/EXE olmadan tarayıcıda çalışıyorsan bu normal
-- Sunucu URL'si ayarlıysa `VITE_YTDLP_SERVER_URL` kontrol et
+### "İndirme motoru burada yok" kartı
+- Tarayıcıda çalışıyorsunuz — normal. Android APK veya Windows EXE kurun.
 
 ### YouTube "Sign in to confirm you're not a bot"
-- VPN'i kapat
-- Cookies.txt import et (Gelişmiş → YouTube sorun giderme)
+- VPN'i kapatın
+- Uygulamada cookies.txt içe aktarın (Gelişmiş → YouTube sorun giderme)
+- Bu özellik bir hesap/oturum sistemi DEĞİLDİR: çerez dosyası yalnızca
+  cihazda tutulur ve yt-dlp'ye `--cookies` olarak verilir.
 
 ### APK build başarısız
 - `package-lock.json` repo'da var mı kontrol et
 - `JAVA_HOME` ve `ANDROID_HOME` ayarlı mı kontrol et
-- `bun run build` önce çalıştır (frontend build)
+- `npm run build` önce çalıştır (frontend build)
 
 ### Artifacts quota hatası (GitHub Actions)
 - Eski artifact'ları sil: `gh api repos/OWNER/REPO/actions/artifacts --paginate --jq '.artifacts[].id' | xargs -I{} gh api -X DELETE repos/OWNER/REPO/actions/artifacts/{}`

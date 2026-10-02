@@ -33,6 +33,7 @@ import {
 import { saveToGallery, type GallerySaveResult } from "@/lib/gallery-save";
 import { useClipboardMonitor } from "@/hooks/use-clipboard-monitor";
 import { ClipboardNotification } from "@/components/ClipboardNotification";
+import WebDownloadCard from "./WebDownloadCard";
 import { explainError } from "@/lib/error-help";
 import { normalizeVideoUrl } from "@/lib/url";
 import { postDownloadCleanup } from "@/lib/auto-cleanup";
@@ -2162,6 +2163,9 @@ export default function DownloaderCard({
                 {errorMsg && (
                   <ErrorBox message={errorMsg} phase={errorPhase} lang={helpLang} />
                 )}
+                {/* Web builds have no download engine — point the user to
+                    the real app (APK/EXE) with stable latest-release links. */}
+                {!nativeAvailable && <WebDownloadCard lang={helpLang} />}
                 <div className="flex gap-2">
                   <Button onClick={handleAnalyze} variant="default" className="flex-1 gap-2 active:scale-[0.97]">
                     <RefreshCw className="h-4 w-4" />

@@ -1,274 +1,150 @@
-[![Build APK](https://github.com/aliege00/linkdown/actions/workflows/build-apk.yml/badge.svg)](https://github.com/aliege00/linkdown/actions/workflows/build-apk.yml) [![Build EXE](https://github.com/aliege00/linkdown/actions/workflows/build-exe.yml/badge.svg)](https://github.com/aliege00/linkdown/actions/workflows/build-exe.yml)
+# VidFetch
 
-## Overview
+[![Build APK](https://github.com/aliege00/linkdown/actions/workflows/build-apk.yml/badge.svg)](https://github.com/aliege00/linkdown/actions/workflows/build-apk.yml) [![Release](https://github.com/aliege00/linkdown/actions/workflows/release.yml/badge.svg)](https://github.com/aliege00/linkdown/actions/workflows/release.yml)
 
-This project uses the following tech stack:
-- Vite
-- Typescript
-- React Router v7 (all imports from `react-router` instead of `react-router-dom`)
-- React 19 (for frontend components)
-- Tailwind v4 (for styling)
-- Shadcn UI (for UI components library)
-- Lucide Icons (for icons)
-- Convex (for backend & database)
-- Convex Auth (for authentication)
-- Framer Motion (for animations)
-- Three js (for 3d models)
+VidFetch; indirme işini **cihazda** yapan bir video indiricidir. yt-dlp motoru uygulamanın
+içine gömülüdür — sunucu yok, hesap yok, oturum yok. İki dağıtım kanalı vardır:
 
-All relevant files live in the 'src' directory.
+- **Android APK** — Capacitor + yerleşik yt-dlp (Python runtime) + FFmpeg
+- **Windows EXE** — Electron (NSIS kurulum + portable), yt-dlp + ffmpeg paketli
 
-Use bun for the package manager.
+Web sitesi (bu repo) yalnızca vitrin + uygulamadır: tarayıcıda indirme motoru **çalışmaz**,
+site indirme linklerini gösterir.
 
-## Setup
+## 📥 İndirme
 
-This project is set up already and running on a cloud environment, as well as a convex development in the sandbox.
+Linkler her zaman **en son release'i** gösterir; sürüm değişince elle güncelleme gerekmez
+(CI her release'e sabit adlı kopya asset'ler yükler, aşağıdaki "Release süreci" bölümüne bakın):
 
-## Environment Variables
+| Platform | Link |
+|---|---|
+| Android APK | https://github.com/aliege00/linkdown/releases/latest/download/VidFetch-latest.apk |
+| Windows kurulum | https://github.com/aliege00/linkdown/releases/latest/download/VidFetch-Setup-latest.exe |
+| Windows portable | https://github.com/aliege00/linkdown/releases/latest/download/VidFetch-latest-portable.exe |
+| Tüm sürümler | https://github.com/aliege00/linkdown/releases |
 
-The project is set up with project specific CONVEX_DEPLOYMENT and VITE_CONVEX_URL environment variables on the client side.
+**Android kurulumu:** APK'yı indirin → tarayıcınıza "Bilinmeyen uygulamalar kur" izni verin
+(Ayarlar → Uygulamalar) → APK'yı açın. Bu izin, uygulamanın Play Store dışından
+dağıtıldığı için gereklidir.
 
-The convex server has a separate set of environment variables that are accessible by the convex backend.
+**SHA-256 doğrulama (isteğe bağlı):** Her release'in notlarında APK'nın SHA-256 özeti
+yazar. İndirdiğiniz dosyayı doğrulamak için:
 
-Currently, these variables include auth-specific keys: JWKS, JWT_PRIVATE_KEY, and SITE_URL.
-
-
-# Using Authentication (Important!)
-
-You must follow these conventions when using authentication.
-
-## Auth is already set up.
-
-All convex authentication functions are already set up. The auth currently uses email OTP and anonymous users, but can support more.
-
-The email OTP configuration is defined in `src/convex/auth/emailOtp.ts`. DO NOT MODIFY THIS FILE.
-
-Also, DO NOT MODIFY THESE AUTH FILES: `src/convex/auth.config.ts` and `src/convex/auth.ts`.
-
-## Using Convex Auth on the backend
-
-On the `src/convex/users.ts` file, you can use the `getCurrentUser` function to get the current user's data.
-
-## Using Convex Auth on the frontend
-
-The `/auth` page is already set up to use auth. Navigate to `/auth` for all log in / sign up sequences.
-
-You MUST use this hook to get user data. Never do this yourself without the hook:
-```typescript
-import { useAuth } from "@/hooks/use-auth";
-
-const { isLoading, isAuthenticated, user, signIn, signOut } = useAuth();
+```bash
+shasum -a 256 VidFetch-vX.Y.Z.apk   # macOS/Linux
+certutil -hashfile VidFetch-vX.Y.Z.apk SHA256   # Windows
 ```
 
-## Protected Routes
+## 🛠️ Geliştirme
 
-The starter `/dashboard` route is protected with `RequireAuth`, which sends
-signed-out users to `/auth?returnTo=<current route>`. Extend that page for the
-product's authenticated experience, and reuse `RequireAuth` when adding another
-protected route.
-
-## Auth Page
-
-The auth page is defined in `src/pages/Auth.tsx`. Send sign-in and sign-up actions
-to `/auth`.
-
-## Authorization
-
-You can perform authorization checks on the frontend and backend.
-
-On the frontend, you can use the `useAuth` hook to get the current user's data and authentication state.
-
-You should also be protecting queries, mutations, and actions at the base level, checking for authorization securely.
-
-## Adding a redirect after auth
-
-The `/auth` route in `src/main.tsx` redirects to `/dashboard` by default. If the
-product's main authenticated route is different, update `redirectAfterAuth` to
-that route. A validated same-origin `returnTo` query parameter takes priority so
-users can resume the protected page they originally requested. Never leave an
-authenticated product redirecting back to the public landing page.
-
-## Complete authenticated products
-
-When the requested product implies accounts, a workspace, a dashboard, or other
-signed-in functionality, the task is not complete with only a landing page and
-auth form. Build the main authenticated experience, protect its route, and verify
-that signing in reaches it.
-
-# Frontend Conventions
-
-You will be using the Vite frontend with React 19, Tailwind v4, and Shadcn UI.
-
-Generally, pages should be in the `src/pages` folder, and components should be in the `src/components` folder.
-
-Shadcn primitives are located in the `src/components/ui` folder and should be used by default.
-
-## Page routing
-
-Your page component should go under the `src/pages` folder.
-
-When adding a page, update the react router configuration in `src/main.tsx` to include the new route you just added.
-
-## Shad CN conventions
-
-Follow these conventions when using Shad CN components, which you should use by default.
-- Remember to use "cursor-pointer" to make the element clickable
-- For title text, use the "tracking-tight font-bold" class to make the text more readable
-- Always make apps MOBILE RESPONSIVE. This is important
-- AVOID NESTED CARDS. Try and not to nest cards, borders, components, etc. Nested cards add clutter and make the app look messy.
-- AVOID SHADOWS. Avoid adding any shadows to components. stick with a thin border without the shadow.
-- Avoid skeletons; instead, use the loader2 component to show a spinning loading state when loading data.
-
-
-## Landing Pages
-
-You must always create good-looking designer-level styles to your application. 
-- Make it well animated and fit a certain "theme", ie neo brutalist, retro, neumorphism, glass morphism, etc
-
-Use known images and emojis from online.
-
-If the user is logged in already, show the get started button to say "Dashboard" or "Profile" instead to take them there.
-
-## Responsiveness and formatting
-
-Make sure pages are wrapped in a container to prevent the width stretching out on wide screens. Always make sure they are centered aligned and not off-center.
-
-Always make sure that your designs are mobile responsive. Verify the formatting to ensure it has correct max and min widths as well as mobile responsiveness.
-
-- Always create sidebars for protected dashboard pages and navigate between pages
-- Always create navbars for landing pages
-- On these bars, the created logo should be clickable and redirect to the index page
-
-## Animating with Framer Motion
-
-You must add animations to components using Framer Motion. It is already installed and configured in the project.
-
-To use it, import the `motion` component from `framer-motion` and use it to wrap the component you want to animate.
-
-
-### Other Items to animate
-- Fade in and Fade Out
-- Slide in and Slide Out animations
-- Rendering animations
-- Button clicks and UI elements
-
-Animate for all components, including on landing page and app pages.
-
-## Three JS Graphics
-
-Your app comes with three js by default. You can use it to create 3D graphics for landing pages, games, etc.
-
-
-## Colors
-
-You can override colors in: `src/index.css`
-
-This uses the oklch color format for tailwind v4.
-
-Always use these color variable names.
-
-Make sure all ui components are set up to be mobile responsive and compatible with both light and dark mode.
-
-Set theme using `dark` or `light` variables at the parent className.
-
-## Styling and Theming
-
-When changing the theme, always change the underlying theme of the shad cn components app-wide under `src/components/ui` and the colors in the index.css file.
-
-Avoid hardcoding in colors unless necessary for a use case, and properly implement themes through the underlying shad cn ui components.
-
-When styling, ensure buttons and clickable items have pointer-click on them (don't by default).
-
-Always follow a set theme style and ensure it is tuned to the user's liking.
-
-## Toasts
-
-You should always use toasts to display results to the user, such as confirmations, results, errors, etc.
-
-Use the shad cn Sonner component as the toaster. For example:
-
-```
-import { toast } from "sonner"
-
-import { Button } from "@/components/ui/button"
-export function SonnerDemo() {
-  return (
-    <Button
-      variant="outline"
-      onClick={() =>
-        toast("Event has been created", {
-          description: "Sunday, December 03, 2023 at 9:00 AM",
-          action: {
-            label: "Undo",
-            onClick: () => console.log("Undo"),
-          },
-        })
-      }
-    >
-      Show Toast
-    </Button>
-  )
-}
+```bash
+npm install          # bağımlılıklar
+npm run dev          # Vite dev sunucusu (tarayıcı — indirme motoru yok, sadece arayüz)
+npm run typecheck    # tsc -b --noEmit
+npm test             # vitest
+npm run build        # üretim build'i (dist/)
 ```
 
-Remember to import { toast } from "sonner". Usage: `toast("Event has been created.")`
+Android build (yerel, debug imzalı — CI'daki release akışı aşağıda):
 
-## Dialogs
-
-Always ensure your larger dialogs have a scroll in its content to ensure that its content fits the screen size. Make sure that the content is not cut off from the screen.
-
-Ideally, instead of using a new page, use a Dialog instead. 
-
-# Using the Convex backend
-
-You will be implementing the convex backend. Follow your knowledge of convex and the documentation to implement the backend.
-
-## The Convex Schema
-
-You must correctly follow the convex schema implementation.
-
-The schema is defined in `src/convex/schema.ts`.
-
-Do not include the `_id` and `_creationTime` fields in your queries (it is included by default for each table).
-Do not index `_creationTime` as it is indexed for you. Never have duplicate indexes.
-
-
-## Convex Actions: Using CRUD operations
-
-When running anything that involves external connections, you must use a convex action with "use node" at the top of the file.
-
-You cannot have queries or mutations in the same file as a "use node" action file. Thus, you must use pre-built queries and mutations in other files.
-
-You can also use the pre-installed internal crud functions for the database:
-
-```ts
-// in convex/users.ts
-import { crud } from "convex-helpers/server/crud";
-import schema from "./schema.ts";
-
-export const { create, read, update, destroy } = crud(schema, "users");
-
-// in some file, in an action:
-const user = await ctx.runQuery(internal.users.read, { id: userId });
-
-await ctx.runMutation(internal.users.update, {
-  id: userId,
-  patch: {
-    status: "inactive",
-  },
-});
+```bash
+npm run build && npx cap sync android
+cd android && ./gradlew assembleRelease   # imza env'leri yoksa debug key'e düşer
 ```
 
+Windows EXE build:
 
-## Common Convex Mistakes To Avoid
+```bash
+npm run build && npx electron-builder --config electron-builder.yml --win nsis portable --publish never
+```
 
-When using convex, make sure:
-- Document IDs are referenced as `_id` field, not `id`.
-- Document ID types are referenced as `Id<"TableName">`, not `string`.
-- Document object types are referenced as `Doc<"TableName">`.
-- Keep schemaValidation to false in the schema file.
-- You must correctly type your code so that it passes the type checker.
-- You must handle null / undefined cases of your convex queries for both frontend and backend, or else it will throw an error that your data could be null or undefined.
-- Always use the `@/folder` path, with `@/convex/folder/file.ts` syntax for importing convex files.
-- This includes importing generated files like `@/convex/_generated/server`, `@/convex/_generated/api`
-- Remember to import functions like useQuery, useMutation, useAction, etc. from `convex/react`
-- NEVER have return type validators.
+## 🚀 Release süreci
+
+1. Versiyonları güncelleyin (`package.json`, `index.html` __VIDFETCH_BUILD__,
+   `android/app/build.gradle` — CI tag'den yeniden damgalar).
+2. Tag oluşturun ve push edin:
+
+   ```bash
+   git tag v2.6.3
+   git push origin main v2.6.3
+   ```
+
+3. İki workflow otomatik çalışır:
+   - **build-apk.yml** → tek universal, imzalı APK + `SHA256.txt`
+   - **release.yml** → APK + Windows EXE'ler (NSIS + portable) ve GitHub Release
+
+   Release notlarına APK'nın SHA-256 özeti otomatik yazılır.
+4. Her release'e üç **sabit adlı kopya** da yüklenir: `VidFetch-latest.apk`,
+   `VidFetch-Setup-latest.exe`, `VidFetch-latest-portable.exe`. Sitedeki ve README'deki
+   `releases/latest/download/...` linkleri bu kopyalara işaret eder — böylece sürüm
+   numarası değişince linkleri güncellemek gerekmez.
+
+APK dosya adı sürüm içerir: `VidFetch-v2.6.3.apk` (tek universal APK — arm64 + arm32 +
+x86_64 hepsi tek dosyada; ABI split yok). `versionCode` tag'den hesaplanır:
+`major*10000 + minor*100 + patch` (v2.6.3 → 20603).
+
+## 🔐 Release imzalama kurulumu
+
+Release APK'lar GitHub Secrets'tan okunan bir keystore ile imzalanır. **Keystore dosyasını
+ASLA repoya commit etmeyin** (`android/app/release.keystore` yalnızca CI runner'ında
+oluşturulur).
+
+### 1. Keystore oluşturun (tek seferlik, kendi makinenizde)
+
+```bash
+keytool -genkeypair -v -keystore release.keystore -alias vidfetch \
+  -keyalg RSA -keysize 2048 -validity 10000
+```
+
+> ⚠️ Bu keystore'u güvenli bir yerde yedekleyin. Kaybederseniz kullanıcılar eski
+> sürümün üzerine yeni sürümü kuramaz (imza değişir) — uygulamayı kaldırıp kurmak gerekir.
+
+### 2. Keystore'u base64'e çevirin
+
+```bash
+base64 -w0 release.keystore      # Linux (macOS: base64 -i release.keystore)
+```
+
+### 3. GitHub Secrets ekleyin
+
+Repo → Settings → Secrets and variables → Actions → New repository secret:
+
+| Secret | Değer |
+|---|---|
+| `SIGNING_KEY` | Yukarıdaki base64 çıktının tamamı |
+| `SIGNING_STORE_PASSWORD` | keytool sırasında girdiğiniz store parolası |
+| `SIGNING_KEY_ALIAS` | `vidfetch` (veya seçtiğiniz alias) |
+| `SIGNING_KEY_PASSWORD` | key parolası (store ile aynıysa onu girin) |
+
+Secret'lar eksikse CI bilinçli olarak **fail** eder — debug imzalı APK sessizce
+yayınlamaz. Yerel build'lerde env değişkenleri yoksa imza, SDK debug key'ine düşer
+(yalnızca geliştirme için).
+
+## 🔒 Güvenlik notları
+
+- **Electron:** `contextIsolation: true`, `nodeIntegration: false`; renderer ile native
+  köprü yalnızca `electron/preload.cjs` üzerinden geçer.
+- **URL doğrulama:** İndirme akışına giren linkler `src/lib/url.ts` içinde normalize
+  edilir; yalnızca `http://` ve `https://` şemaları kabul edilir (`ftp:`, `javascript:`
+  vb. reddedilir).
+- **Cookies import (login değildir):** "Gelişmiş → YouTube sorun giderme" ekranındaki
+  cookies.txt içe aktarma özelliği bir hesap/oturum sistemi değildir; kullanıcı kendi
+  tarayıcı çerez dosyasını cihaza seçer ve dosya yalnızca uygulamanın özel deposunda
+  (`filesDir`) tutularak yt-dlp'ye `--cookies` argümanıyla verilir. Sunucuya hiçbir şey
+  gönderilmez.
+
+## ⚖️ Yasal
+
+- [Gizlilik Politikası](https://vidfetch.app/legal/privacy) ·
+  [Kullanım Şartları](https://vidfetch.app/legal/terms) ·
+  [Telif Uyarısı](https://vidfetch.app/legal/copyright)
+  (site içi yollar: `/legal/privacy`, `/legal/terms`, `/legal/copyright`)
+
+VidFetch hiçbir içerik sunmaz/saklamaz; indirme cihazınızda gerçekleşir. Yalnızca hakkına
+sahip olduğunuz veya indirme izni verilen içerikleri indirin; platformların kullanım
+şartlarına uymak kullanıcı sorumluluğundadır. Bu README ve repodaki yasal sayfalar
+**hukuki danışmanlık değildir**.
+
+## 📄 Lisans
+
+Bu projenin lisansı için LICENSE dosyasına bakın.
