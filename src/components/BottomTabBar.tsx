@@ -1,21 +1,30 @@
-import { Download, History, Settings, type LucideIcon } from "lucide-react";
+import { Download, LifeBuoy, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type TabId = "download" | "help" | "about";
+export type TabId = "download" | "support";
 
 const TABS: { id: TabId; label: string; icon: LucideIcon }[] = [
-  { id: "download", label: "İndir", icon: Download },
-  { id: "help", label: "Geçmiş", icon: History },
-  { id: "about", label: "Ayarlar", icon: Settings },
+  { id: "download", label: "İndirme", icon: Download },
+  { id: "support", label: "Yardım", icon: LifeBuoy },
 ];
 
 /**
- * Fixed bottom navigation — plain CSS only.
+ * Floating bottom navigation — an ISLAND, not a full-width bar.
  *
- * Deliberately NO framer-motion layout animations and NO @capacitor/haptics:
- * both pull heavy JS into every tab switch and the haptics package is not a
- * declared dependency (dynamic import() fails at runtime on the APK).
- * A simple CSS transition gives the same active indicator without the cost.
+ * Design + performance notes:
+ *  • It is sized to its content (`w-fit` via the inline flex child) and
+ *    centered, so it no longer paints an opaque strip across the whole
+ *    bottom of the screen — content stays visible on both sides.
+ *  • Translucent (`/70`) with a small-area `backdrop-blur-md`. The blur is
+ *    the single most expensive effect here, so it is deliberately confined
+ *    to the island instead of a full-width bar.
+ *  • Own compositor layer (translate3d + will-change) so scrolling does not
+ *    force the blur to re-read on every frame.
+ *  • NO framer-motion and NO @capacitor/haptics: both pull heavy JS into
+ *    every tab switch, and the haptics package is not a declared dependency
+ *    (dynamic import() fails at runtime on the APK). A plain CSS transition
+ *    gives the same active state at no JS cost.
+ *  • `env(safe-area-inset-bottom)` keeps it above the gesture bar.
  */
 export default function BottomTabBar({
   active,
@@ -26,10 +35,16 @@ export default function BottomTabBar({
 }) {
   return (
     <nav
-      className="fixed bottom-0 left-0 right-0 z-50 border-t border-[#262930] bg-[#17191e] shadow-[0_-8px_24px_rgba(0,0,0,0.35)]"
-      style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+      aria-label="Sekmeler"
+      className="fixed bottom-0 left-1/2 z-50 rounded-2xl border border-[#2b2f36]/80 bg-[#17191e]/70 px-1.5 py-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.45)] backdrop-blur-md"
+      style={{
+        marginBottom: "calc(env(safe-area-inset-bottom) + 14px)",
+        // translate3d (not translateX) keeps the island on its own layer.
+        transform: "translate3d(-50%, 0, 0)",
+        willChange: "transform",
+      }}
     >
-      <div className="mx-auto flex max-w-lg items-stretch justify-around px-2">
+      <div className="flex items-stretch gap-1">
         {TABS.map((tab) => {
           const isActive = active === tab.id;
           const Icon = tab.icon;
@@ -38,26 +53,21 @@ export default function BottomTabBar({
               key={tab.id}
               type="button"
               onClick={() => onChange(tab.id)}
+              aria-current={isActive ? "page" : undefined}
               className={cn(
-                "relative flex flex-1 flex-col items-center gap-1 py-3 transition-colors duration-200 active:scale-[0.96]",
-                isActive ? "text-[#6cb4ee]" : "text-[#8e8e93] hover:text-[#c7c7cc]",
+                "flex items-center gap-2 rounded-xl px-4 py-2 transition-colors duration-150 active:scale-[0.97] cursor-pointer",
+                isActive
+                  ? "bg-[#6cb4ee]/14 text-[#6cb4ee]"
+                  : "text-[#8e8e93] hover:text-[#c7c7cc]",
               )}
             >
-              <span
-                className={cn(
-                  "absolute inset-x-3 top-0 h-0.5 rounded-full bg-[#6cb4ee] shadow-[0_0_8px_rgba(108,180,238,0.6)] transition-all duration-200",
-                  isActive ? "opacity-100 scale-x-100" : "opacity-0 scale-x-0",
-                )}
+              <Icon
+                className="size-4.5 shrink-0"
+                strokeWidth={isActive ? 2.2 : 1.7}
               />
-              <span
-                className={cn(
-                  "flex size-8 items-center justify-center rounded-xl transition-colors duration-200",
-                  isActive && "bg-[#6cb4ee]/12",
-                )}
-              >
-                <Icon className="size-6" strokeWidth={isActive ? 2.2 : 1.6} />
+              <span className="text-[12px] font-semibold whitespace-nowrap">
+                {tab.label}
               </span>
-              <span className="text-[11px] font-semibold">{tab.label}</span>
             </button>
           );
         })}

@@ -88,7 +88,12 @@ export default function Landing() {
       className="relative min-h-screen flex flex-col overflow-x-hidden"
     >
       {/* ═══ Navigation ═══ */}
-      <header className="absolute top-0 inset-x-0 z-40 border-b border-border/40 bg-background">
+      <header
+          className="absolute top-0 inset-x-0 z-40 border-b border-border/40 bg-background/85 backdrop-blur-md"
+          // Safe-area inset: the camera notch / status bar must not sit on
+          // top of the logo and nav row.
+          style={{ paddingTop: "env(safe-area-inset-top)" }}
+        >
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
           <div className="flex items-center gap-2.5">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
@@ -132,7 +137,7 @@ export default function Landing() {
 
       {/* ═══ Hero ═══ */}
       <motion.section
-        className="relative min-h-[90vh] flex flex-col items-center justify-center px-6 pt-24 pb-16"
+        className="relative min-h-[90vh] flex flex-col items-center justify-center px-6 pt-28 pb-16"
       >
         {/* Subtle background grid */}
         <div className="absolute inset-0 bg-subtle-grid pointer-events-none" />

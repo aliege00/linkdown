@@ -216,7 +216,12 @@ export default function LegalPage() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       {/* Header */}
-      <header className="sticky top-0 z-40 border-b border-border/40 bg-background/95 backdrop-blur">
+      <header
+        className="sticky top-0 z-40 border-b border-border/40 bg-background/95 backdrop-blur"
+        // Safe-area inset so the camera notch / status bar never covers the
+        // header row (same treatment as Landing + Dashboard).
+        style={{ paddingTop: "env(safe-area-inset-top)" }}
+      >
         <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-3">
           <Button
             variant="ghost"

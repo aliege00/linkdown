@@ -9,21 +9,28 @@ import { useRef } from "react";
 import { cn } from "@/lib/utils";
 
 export default function Dashboard() {
+  // Two tabs only, as the user asked:
+  //   1) İndirme  — paste → analyze → download (+ its own history)
+  //   2) Yardım   — help center + about + settings (engines, language…)
   const [tab, setTab] = useState<TabId>("download");
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
 
   const NAV: { id: TabId; label: string }[] = [
-    { id: "download", label: "İndir" },
-    { id: "help", label: "Geçmiş" },
-    { id: "about", label: "Ayarlar" },
+    { id: "download", label: "İndirme" },
+    { id: "support", label: "Yardım & Hakkında" },
   ];
 
   return (
     <div className="min-h-screen bg-[#0d0f12] text-[#e8e8e8]">
       {/* ── Top Bar (sticky, small, never blocks scroll) ── */}
-      <header className="sticky top-0 z-40 border-b border-[#262930] bg-[#17191e]">
-        <div className="mx-auto flex max-w-2xl items-center justify-between px-4 py-3">
+      {/* paddingTop = safe-area inset: the camera notch / status bar must not
+          overlap the logo row on notched devices. */}
+      <header
+        className="sticky top-0 z-40 border-b border-[#262930] bg-[#17191e]"
+        style={{ paddingTop: "env(safe-area-inset-top)" }}
+      >
+        <div className="mx-auto flex max-w-2xl items-center justify-between px-4 py-3.5">
           <div className="flex min-w-0 items-center gap-3">
             <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#6cb4ee] to-[#4a90d9] shadow-md shadow-[#6cb4ee]/20">
               <Sparkles className="size-4.5 text-[#0d0f12]" />
@@ -31,10 +38,10 @@ export default function Dashboard() {
             <div className="min-w-0">
               <h1 className="truncate text-sm font-bold tracking-tight">VidFetch</h1>
               <p className="truncate text-[11px] text-[#8e8e93]">
-                v2.6.2
+                {tab === "download" ? "v2.6.2" : "Yardım Merkezi & Hakkında"}
               </p>
             </div>
-            {/* Desktop-only inline nav (the bottom bar is a touch pattern) */}
+            {/* Desktop-only inline nav (the bottom island is a touch pattern) */}
             <nav className="ml-4 hidden items-center gap-1 sm:flex">
               {NAV.map((t) => (
                 <button
@@ -42,7 +49,7 @@ export default function Dashboard() {
                   type="button"
                   onClick={() => setTab(t.id)}
                   className={cn(
-                    "rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors",
+                    "rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer",
                     tab === t.id
                       ? "bg-[#6cb4ee]/15 text-[#6cb4ee]"
                       : "text-[#8e8e93] hover:text-[#e8e8e8]",
@@ -60,19 +67,25 @@ export default function Dashboard() {
       </header>
 
       {/* ── Active Tab (normal document flow — body scrolls, WebView-safe) ── */}
-      <main className="pb-24">
+      {/* pb clears the floating island bar (56px + 14px + safe-area inset). */}
+      <main className="pb-28">
         {tab === "download" && (
-          <DownloaderCard
-            inputRef={inputRef}
-            resultsRef={resultsRef}
-            className="mx-auto max-w-2xl px-4 pt-4"
-          />
+          <>
+            <DownloaderCard
+              inputRef={inputRef}
+              resultsRef={resultsRef}
+              className="mx-auto max-w-2xl px-4 pt-4"
+              showInlineHistory={false}
+            />
+            {/* History belongs to the download section: same place the files
+                were saved, same flow (analyze again with one tap). */}
+            <HistoryTab />
+          </>
         )}
-        {tab === "help" && <HistoryTab />}
-        {tab === "about" && <SettingsTab />}
+        {tab === "support" && <SettingsTab />}
       </main>
 
-      {/* ── Bottom Nav (fixed, always visible) ── */}
+      {/* ── Bottom Nav (floating island, never full width) ── */}
       <BottomTabBar active={tab} onChange={setTab} />
     </div>
   );

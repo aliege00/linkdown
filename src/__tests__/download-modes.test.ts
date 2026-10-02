@@ -3,6 +3,7 @@ import {
   DOWNLOAD_MODES,
   selectorForMode,
   approxMbPerMinute,
+  approxMbPerMinuteForHeight,
   estimateSizeMb,
   type DownloadModeId,
 } from "@/lib/download-modes";
@@ -181,5 +182,28 @@ describe("DownloadModeId", () => {
   it("only accepts the three documented ids", () => {
     const ids: DownloadModeId[] = ["best", "data", "audio"];
     expect(ids).toHaveLength(DOWNLOAD_MODES.length);
+  });
+});
+
+// ─── Height-based estimate (pinned 1080p/720p/480p) ────────────────────
+
+describe("approxMbPerMinuteForHeight", () => {
+  it("grows with the pinned height", () => {
+    const q = [480, 720, 1080].map(approxMbPerMinuteForHeight);
+    expect(q[0]).toBeLessThan(q[1]);
+    expect(q[1]).toBeLessThan(q[2]);
+  });
+
+  it("matches the documented bitrate guesses", () => {
+    expect(approxMbPerMinuteForHeight(480)).toBe(7);
+    expect(approxMbPerMinuteForHeight(720)).toBe(12);
+    expect(approxMbPerMinuteForHeight(1080)).toBe(25);
+  });
+
+  it("caps heights above 1080p and floors very small ones", () => {
+    expect(approxMbPerMinuteForHeight(2160)).toBe(
+      approxMbPerMinuteForHeight(1080),
+    );
+    expect(approxMbPerMinuteForHeight(240)).toBe(4);
   });
 });

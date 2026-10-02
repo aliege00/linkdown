@@ -84,6 +84,23 @@ export function approxMbPerMinute(mode: DownloadModeId): number {
 }
 
 /**
+ * Approximate MB per minute for a PINNED exact height (the 1080p/720p/480p
+ * picks in "Gelişmiş seçenekler"). Without this the estimate kept using the
+ * mode chip even after the user pinned a quality, so the MB number never moved.
+ *
+ * Bitrate guesses (H.264 progressive): 480p ≈ 950 kbps, 720p ≈ 1600 kbps,
+ * 1080p ≈ 3300 kbps → MB/min ≈ (kbps × 60) / 8000.
+ */
+export function approxMbPerMinuteForHeight(height: number): number {
+  if (height <= 360) return 4; // ~540 kbps
+  if (height <= 480) return 7; // ~950 kbps
+  if (height <= 720) return 12; // ~1600 kbps
+  return 25; // 1080p ≈ 3300 kbps; anything taller is capped here because
+  //            only progressive MP4 is offered and yt-dlp rarely exposes
+  //            reliable sizes for 4K progressive streams.
+}
+
+/**
  * Estimate the download size in MB for a video/playlist.
  * @param durationSeconds single video duration (or AVERAGE entry duration
  *                        for playlists — analyzed flat entries carry it)

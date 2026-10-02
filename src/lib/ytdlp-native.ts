@@ -88,6 +88,14 @@ export interface YtDlpInfo {
   count?: number | null;
   /** the videos inside the playlist (when is_playlist) */
   entries?: PlaylistEntry[];
+  /** Which resolver produced this info ("cobalt" for the HTTP engine). */
+  engine?: "ondevice" | "cobalt" | "server";
+  /**
+   * Direct media URL when an HTTP resolver (Cobalt) produced the stream.
+   * The bytes are still downloaded by the on-device engine — this is only
+   * the resolved file URL, so progress/background save keep working.
+   */
+  direct_url?: string;
 }
 
 /** A single video inside a playlist. */

@@ -40,7 +40,8 @@ import { postDownloadCleanup } from "@/lib/auto-cleanup";
 import { mp4FormatWithHeight, MP4_FORMAT_SELECTOR, MP3_FORMAT_SELECTOR, filterFormats, type FormatLike } from "@/lib/format-enforce";
 import {
   DOWNLOAD_MODES,
-  estimateSizeMb,
+  approxMbPerMinute,
+  approxMbPerMinuteForHeight,
   type DownloadModeId,
 } from "@/lib/download-modes";
 import {
@@ -49,6 +50,19 @@ import {
   clearDownloadHistory,
   type DownloadRecord,
 } from "@/lib/history";
+import {
+  loadEngineConfig,
+  planEngines,
+  lastResortEngine,
+  engineLabel,
+  type EngineAttempt,
+} from "@/lib/engines";
+import {
+  resolveWithCobalt,
+  infoFromCobalt,
+  cobaltVideoQuality,
+  COBALT_FORMAT_ID,
+} from "@/lib/cobalt";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowDownToLine,
@@ -1127,6 +1141,7 @@ export default function DownloaderCard({
   onStateChange,
   initialUrl,
   className,
+  showInlineHistory = true,
 }: {
   /** Focus target for the URL input (driven from the page nav / CTA). */
   inputRef: RefObject<HTMLInputElement | null>;
@@ -1138,6 +1153,12 @@ export default function DownloaderCard({
   initialUrl?: string;
   /** Optional wrapper classes so hosts (Dashboard tab) can control layout. */
   className?: string;
+  /**
+   * Show the compact history card inside this component. Hosts that render
+   * the full HistoryTab next to the card turn this off so the same list is
+   * not shown twice on one screen.
+   */
+  showInlineHistory?: boolean;
 }) {
   const [url, setUrl] = useState(initialUrl ?? "");
   const [state, setState] = useState<PageState>("idle");
@@ -1376,10 +1397,79 @@ export default function DownloaderCard({
         // "playlist link → download all, no extra step".
         const isPlaylist = looksLikePlaylist(cleanUrl);
 
-        const result = await getVideoInfo(cleanUrl, isPlaylist);
+        // ── Engine routing ──────────────────────────────────────────
+        // Try the engines in order (Cobalt first only for the sites it
+        // handles better, when the user configured an instance). Any
+        // failure falls through to the on-device engine, so enabling
+        // Cobalt can never break a link that used to download.
+        const engineCfg = loadEngineConfig();
+        const plan = planEngines(cleanUrl, {
+          isPlaylist,
+          mode: engineCfg.mode,
+          native: nativeAvailable,
+        });
+        const tried: EngineAttempt[] = [];
+        let result: YtDlpInfo | null = null;
+        let lastError = "";
 
-        if (!result.success) {
-          setErrorMsg(result.error);
+        for (const engine of plan) {
+          tried.push(engine);
+          if (engine === "cobalt") {
+            const res = await resolveWithCobalt({
+              instance: engineCfg.instance,
+              token: engineCfg.token || undefined,
+              url: cleanUrl,
+              audioOnly: videoQuality === "audio",
+              mode: videoQuality,
+              precise: preciseQuality,
+            });
+            if (res.ok) {
+              const q = cobaltVideoQuality(videoQuality, preciseQuality);
+              result = infoFromCobalt(cleanUrl, res, {
+                audioOnly: videoQuality === "audio",
+                requestedQuality: q === "max" ? "1080" : q,
+              });
+              break;
+            }
+            lastError = res.message;
+            continue;
+          }
+          const nativeResult = await getVideoInfo(cleanUrl, isPlaylist);
+          if (nativeResult.success) {
+            result = nativeResult;
+            break;
+          }
+          lastError = nativeResult.error;
+        }
+
+        // Last resort: the on-device engine was blocked (e.g. a bot check)
+        // and Cobalt is configured but was not tried for this site yet.
+        if (!result) {
+          const rescue = lastResortEngine(cleanUrl, tried, engineCfg.mode);
+          if (rescue === "cobalt") {
+            tried.push("cobalt");
+            const res = await resolveWithCobalt({
+              instance: engineCfg.instance,
+              token: engineCfg.token || undefined,
+              url: cleanUrl,
+              audioOnly: videoQuality === "audio",
+              mode: videoQuality,
+              precise: preciseQuality,
+            });
+            if (res.ok) {
+              const q = cobaltVideoQuality(videoQuality, preciseQuality);
+              result = infoFromCobalt(cleanUrl, res, {
+                audioOnly: videoQuality === "audio",
+                requestedQuality: q === "max" ? "1080" : q,
+              });
+            } else {
+              lastError = res.message;
+            }
+          }
+        }
+
+        if (!result) {
+          setErrorMsg(lastError);
           setErrorPhase("analyze");
           updateState("error");
           return;
@@ -1401,14 +1491,18 @@ export default function DownloaderCard({
         // map onto the closest real format for the mode's height cap —
         // unless the user pinned an exact quality (1080p/720p/480p) in
         // Gelişmiş seçenekler, which overrides the mode's cap.
+        // A Cobalt result already carries ONE resolved stream, so its own
+        // format id is preselected instead of a selector.
         setSelectedFormat(
-          videoQuality === "audio"
-            ? "bestaudio"
-            : preciseQuality !== "auto"
-              ? mp4FormatWithHeight(preciseQuality)
-              : videoQuality === "data"
-                ? mp4FormatWithHeight(480)
-                : MP4_FORMAT_SELECTOR,
+          result.engine === "cobalt"
+            ? COBALT_FORMAT_ID
+            : videoQuality === "audio"
+              ? "bestaudio"
+              : preciseQuality !== "auto"
+                ? mp4FormatWithHeight(preciseQuality)
+                : videoQuality === "data"
+                  ? mp4FormatWithHeight(480)
+                  : MP4_FORMAT_SELECTOR,
         );
         updateState("loaded");
         scrollToResults();
@@ -1426,7 +1520,7 @@ export default function DownloaderCard({
         updateState("error");
       }
     },
-    [updateState, videoQuality, preciseQuality, helpLang],
+    [updateState, videoQuality, preciseQuality, helpLang, nativeAvailable],
   );
 
   const handleAnalyze = useCallback(() => runAnalyze(url), [url, runAnalyze]);
@@ -1474,14 +1568,21 @@ export default function DownloaderCard({
     // the format cards was ignored (the card's format_id maps to the same
     // full-quality chain anyway).
     const isSelector = /[[/]/.test(selectedFormat);
-    const formatSpec = isSelector
-      ? selectedFormat
-      : isAudioSelection
-        ? MP3_FORMAT_SELECTOR
-        : MP4_FORMAT_SELECTOR;
+    // An HTTP resolver (Cobalt) hands us an already-resolved media URL:
+    // download THAT file instead of re-running the page extractor. "best"
+    // matches the single format a direct URL exposes; the native side maps
+    // an empty format to "best" as well.
+    const directUrl = videoInfo?.direct_url;
+    const formatSpec = directUrl
+      ? "best"
+      : isSelector
+        ? selectedFormat
+        : isAudioSelection
+          ? MP3_FORMAT_SELECTOR
+          : MP4_FORMAT_SELECTOR;
 
     const workId = await startDownload({
-      url: cleanUrl,
+      url: directUrl || cleanUrl,
       formatId: formatSpec,
       onProgress: (progress) => {
         // Auto-complete when we hit 100%
@@ -1787,11 +1888,56 @@ export default function DownloaderCard({
       : downloadProgress.percent;
   const isPlaylistDownload = !!downloadProgress.itemCount;
 
+  // ─── Size for the CURRENT selection ────────────────────────────────
+  // The old estimate only read the download-mode chip, so picking a quality
+  // (a format card or the pinned 1080p/720p/480p) left the MB number frozen.
+  // Priority now:
+  //   1. the exact size the engine reported for the selected format
+  //   2. audio mode  → 1 MB/min
+  //   3. pinned exact height → height-based estimate
+  //   4. the mode chip (best / data)
+  const selectedFormatMeta = useMemo(() => {
+    if (!videoInfo || !selectedFormat) return null;
+    return (
+      videoInfo.formats.find((f) => f.format_id === selectedFormat) ?? null
+    );
+  }, [videoInfo, selectedFormat]);
+
+  // Total download size in bytes, plus whether it is an exact engine value
+  // (no "~" prefix) or a bitrate-based estimate.
+  const { totalBytes, sizeExact } = useMemo(() => {
+    if (selectedFormatMeta?.filesize) {
+      return { totalBytes: selectedFormatMeta.filesize, sizeExact: true };
+    }
+    const duration = videoInfo?.duration;
+    if (!duration || duration <= 0) {
+      return { totalBytes: null, sizeExact: false };
+    }
+    const mbPerMinute =
+      videoQuality === "audio"
+        ? approxMbPerMinute("audio")
+        : preciseQuality !== "auto"
+          ? approxMbPerMinuteForHeight(preciseQuality)
+          : approxMbPerMinute(videoQuality);
+    return {
+      totalBytes: Math.round((duration / 60) * mbPerMinute) * 1024 * 1024,
+      sizeExact: false,
+    };
+  }, [selectedFormatMeta, videoInfo, videoQuality, preciseQuality]);
+
+  // Live "downloaded / total" during the download itself. The native bridge
+  // reports percent/speed/eta but not byte counts, so the downloaded amount is
+  // derived from the percentage — hence the "≈" in the UI.
+  const downloadedBytes =
+    totalBytes != null
+      ? Math.round((overallPercent / 100) * totalBytes)
+      : null;
+
   // ─── Page render ───────────────────────────────────────────────────
   return (
     <div className={className}>
       {/* On-device download history — works in every build */}
-      {history.length > 0 && (
+      {showInlineHistory && history.length > 0 && (
         <DownloadHistoryCard
           history={history}
           lang={helpLang}
@@ -2223,6 +2369,16 @@ export default function DownloaderCard({
                     <h3 className="font-semibold text-foreground line-clamp-2 leading-snug">
                       {videoInfo.title}
                     </h3>
+                    {/* Which resolver actually produced this result */}
+                    {videoInfo.engine && (
+                      <Badge
+                        variant="outline"
+                        className="mt-1.5 gap-1 border-border/40 px-1.5 py-0 text-[10px] font-normal text-muted-foreground"
+                      >
+                        <Cpu className="h-2.5 w-2.5" />
+                        {engineLabel(videoInfo.engine as EngineAttempt, helpLang)}
+                      </Badge>
+                    )}
                     <div className="flex flex-wrap items-center gap-2 mt-2 text-sm text-muted-foreground">
                       <span className="flex items-center gap-1">
                         <User className="h-3.5 w-3.5" />
@@ -2342,19 +2498,15 @@ export default function DownloaderCard({
                     >
                       <Download className="h-5 w-5" />
                       {helpLang === "tr" ? "İndir" : "Download"}
-                      {(() => {
-                        // Rough data-usage hint on the button: users asked
-                        // to understand how much a download will "eat".
-                        const mb = estimateSizeMb(
-                          videoQuality,
-                          videoInfo.duration,
-                          1,
-                        );
-                        if (!mb) return "";
-                        return helpLang === "tr"
-                          ? ` (~${mb} MB)`
-                          : ` (~${mb} MB)`;
-                      })()}
+                      {totalBytes != null && (
+                        <span className="font-mono text-sm font-normal opacity-90">
+                          {sizeExact
+                            ? ` (${formatSize(totalBytes)})`
+                            : ` (~${Math.round(
+                                totalBytes / (1024 * 1024),
+                              )} MB)`}
+                        </span>
+                      )}
                     </Button>
                   </>
                 )}
@@ -2435,6 +2587,18 @@ export default function DownloaderCard({
                     </span>
                   </div>
                 </div>
+
+                {/* Downloaded / total — the byte count follows the quality the
+                    user actually picked, so it moves with the selection. */}
+                {downloadedBytes != null && totalBytes != null && (
+                  <p className="-mt-3 text-center text-xs tabular-nums text-muted-foreground">
+                    {sizeExact ? "" : "≈"}
+                    {formatSize(downloadedBytes)}
+                    {" / "}
+                    {sizeExact ? "" : "~"}
+                    {formatSize(totalBytes)}
+                  </p>
+                )}
 
                 {/* Linear progress bar */}
                 <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
