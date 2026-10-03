@@ -1,7 +1,7 @@
 {
   "name": "vite-template",
   "private": true,
-  "version": "2.6.2",
+  "version": "2.6.3",
   "description": "VidFetch - on-device video downloader (Android APK + Windows EXE)",
   "author": "VidFetch",
   "type": "module",

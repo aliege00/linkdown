@@ -5,6 +5,8 @@ import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.activity.result.ActivityResult
 import androidx.core.app.ActivityCompat
@@ -58,6 +60,47 @@ class DownloadBridge : Plugin() {
     }
 
     private var currentWorkId: UUID? = null
+
+    /**
+     * Main-thread Handler used to hop off Capacitor's plugin HandlerThread.
+     *
+     * Capacitor dispatches `@PluginMethod` calls on a background
+     * HandlerThread (see Bridge.callPluginMethod). Android APIs that assert
+     * the main thread — LiveData.observeForever, ActivityCompat
+     * .requestPermissions, anything touching a View — throw
+     * IllegalStateException there, which the JS bridge wraps into a
+     * RuntimeException and the app dies with. Every such call must be
+     * wrapped in runOnMain { … }.
+     */
+    private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
+
+    /**
+     * WorkManager LiveData sources currently observed via observeForever,
+     * kept so handleOnDestroy() can detach them. Without this the observers
+     * (and through them this plugin instance) leak for the app's lifetime.
+     */
+    private val activeObservers =
+        mutableListOf<Pair<androidx.lifecycle.LiveData<WorkInfo?>, androidx.lifecycle.Observer<WorkInfo?>>>()
+
+    /**
+     * Runs [block] on the Android main (UI) thread, immediately when the
+     * caller is already there.
+     */
+    private fun runOnMain(block: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) block()
+        else mainHandler.post(block)
+    }
+
+    /** Detaches every forever-observer before the plugin goes away. */
+    override fun handleOnDestroy() {
+        runOnMain {
+            for ((liveData, observer) in activeObservers) {
+                liveData.removeObserver(observer)
+            }
+            activeObservers.clear()
+        }
+        super.handleOnDestroy()
+    }
 
     // ── Extract Video Info ─────────────────────────────────────────
 
@@ -393,7 +436,10 @@ class DownloadBridge : Plugin() {
                 workRequest
             )
 
-        // Observe progress and emit events to web UI
+        // Observe progress and emit events to web UI. Must happen on the
+        // main thread — startDownload() itself runs on Capacitor's plugin
+        // background HandlerThread, and LiveData.observeForever asserts the
+        // main thread (IllegalStateException → app crash).
         observeWork(workRequest.id)
 
         val result = JSObject().apply {
@@ -634,6 +680,16 @@ class DownloadBridge : Plugin() {
     // ── Observe WorkManager Progress ───────────────────────────────
 
     private fun observeWork(workId: UUID) {
+        // observeForever() must be called on the main thread: Capacitor runs
+        // startDownload() on a background HandlerThread and LiveData throws
+        // "Cannot invoke observeForever on a background thread" there.
+        runOnMain {
+            attachWorkObserver(workId)
+        }
+    }
+
+    /** Attaches the progress observer. MUST be called on the main thread. */
+    private fun attachWorkObserver(workId: UUID) {
         // Observe via a standalone LiveData + observer and REMOVE the observer
         // once the work reaches a terminal state. Without this, every download
         // registers a new observerForever that is never cleaned up — observers
@@ -670,6 +726,7 @@ class DownloadBridge : Plugin() {
                         put("fileCount", out.getInt(DownloadWorker.KEY_FILE_COUNT, 0))
                     })
                     liveData.removeObserver(observer)
+                    activeObservers.remove(liveData to observer)
                 }
                 WorkInfo.State.FAILED, WorkInfo.State.CANCELLED -> {
                     // Surface the actual error message from the worker
@@ -688,11 +745,13 @@ class DownloadBridge : Plugin() {
                         put("error", errorMsg)
                     })
                     liveData.removeObserver(observer)
+                    activeObservers.remove(liveData to observer)
                 }
                 else -> { /* ignore */ }
             }
         }
         liveData.observeForever(observer)
+        activeObservers.add(liveData to observer)
     }
 
     // ── Helpers ────────────────────────────────────────────────────
@@ -722,6 +781,13 @@ class DownloadBridge : Plugin() {
     private fun requestNotificationPermissionIfNeeded() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
         val act = activity ?: return
+        // Permission dialogs are Activity/UI work: startDownload() runs on a
+        // background thread, and requestPermissions off the main thread is
+        // both unsafe and rejected on newer Android versions.
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            runOnMain { requestNotificationPermissionIfNeeded() }
+            return
+        }
         if (ContextCompat.checkSelfPermission(
                 context, Manifest.permission.POST_NOTIFICATIONS
             ) == PackageManager.PERMISSION_GRANTED
