@@ -2,10 +2,10 @@
  * HelpCenter — the full bilingual help center (bot check, common errors,
  * tips, AI assistant).
  *
- * Moved OUT of the settings tab onto its own route (/help): the settings
- * screen is about engines and storage, while this is reference material
- * people read on its own. Keeping them together made the tab a 3-screen
- * scroll on a phone.
+ * Rendered inline at the TOP of the "Yardım" tab (SettingsTab), because
+ * that is the tab people open expecting help: previously it lived on its
+ * own /help route, reachable only through a card at the bottom of a screen
+ * full of engine settings.
  */
 
 import { useState } from "react";

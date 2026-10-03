@@ -22,7 +22,6 @@ const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
 const ChatPage = lazy(() => import("./components/ClaudeStyleChat.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 const LegalPage = lazy(() => import("./pages/LegalPage.tsx"));
-const HelpPage = lazy(() => import("./pages/HelpPage.tsx"));
 
 function RouteLoading() {
   return (
@@ -118,8 +117,8 @@ function AppRoutes() {
           <Route path="/" element={<Landing />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/chat" element={<ChatPage />} />
-          {/* Help center: moved out of the settings tab onto its own page */}
-          <Route path="/help" element={<HelpPage />} />
+          {/* The help center is rendered inline in the "Yardım" tab of the
+              dashboard, so /help is no longer a route of its own. */}
           {/* Legal pages: /legal/privacy, /legal/terms, /legal/copyright */}
           <Route path="/legal/:doc" element={<LegalPage />} />
           {/* /auth was removed together with the account system — old links land on 404 */}

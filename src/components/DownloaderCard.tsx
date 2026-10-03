@@ -56,6 +56,7 @@ import {
   DOWNLOAD_MODES,
   approxMbPerMinute,
   approxMbPerMinuteForHeight,
+  dataModeSelector,
   type DownloadModeId,
 } from "@/lib/download-modes";
 import {
@@ -189,6 +190,9 @@ const PLAYLIST_PRESETS = [
     id: "480p",
     label: "480p",
     desc: "SD MP4",
+    // Explicit height pick: stays the plain 480p cap. The bitrate-stepping
+    // Data Saver selector is only for the "Veri Dostu" mode chip, where
+    // "smaller file" is the whole point.
     spec: mp4FormatWithHeight(480),
   },
   { id: "audio", label: "Audio", desc: "MP3", spec: MP3_FORMAT_SELECTOR },
@@ -1680,7 +1684,7 @@ export default function DownloaderCard({
               : preciseQuality !== "auto"
                 ? mp4FormatWithHeight(preciseQuality)
                 : videoQuality === "data"
-                  ? mp4FormatWithHeight(480)
+                  ? dataModeSelector(480)
                   : MP4_FORMAT_SELECTOR,
         );
         updateState("loaded");

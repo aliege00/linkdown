@@ -60,6 +60,19 @@ export const DOWNLOAD_MODES: DownloadMode[] = [
  * format-enforce.ts: merge terms never filter on acodec (video-only streams
  * have none by design), single-file fallbacks REQUIRE an audio codec so a
  * silent download is impossible.
+ *
+ * DATA_MODE_BITRATE_CAPS is what makes "use less internet" real rather than
+ * cosmetic: a 1080p source has SEVERAL streams under 480p (360p, 240p,
+ * 144p …) and yt-dlp's `best…[height<=480]` chain always picks the TALLEST
+ * of them — the 480p one — even when it is 4× the bytes of the 360p stream
+ * sitting right next to it. Adding progressive bitrate caps BEFORE the
+ * height-only terms lets yt-dlp step down to a genuinely smaller stream
+ * when the site offers one, while the old terms stay in the chain as
+ * fallbacks so nothing ever fails to download.
+ *
+ * Caps are in kbps and deliberately generous for 480p-class video: they
+ * only bite on the low-bitrate ladder, they do not degrade a normal 480p
+ * stream (which is typically 500–1200 kbps).
  */
 export function selectorForMode(mode: DownloadModeId): string {
   if (mode === "audio") {
@@ -67,12 +80,51 @@ export function selectorForMode(mode: DownloadModeId): string {
     // raw mp3 conversion it does NOT re-encode (no quality loss, no extra CPU).
     return "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio";
   }
-  const cap = mode === "data" ? "[height<=480]" : "";
+  if (mode === "data") return dataModeSelector();
   return (
-    `bestvideo[ext=mp4][vcodec^=avc1]${cap}+bestaudio[ext=m4a]/` +
-    `bestvideo[ext=mp4]${cap}+bestaudio[ext=m4a]/` +
-    `bestvideo${cap}+bestaudio/` +
-    `best[ext=mp4]${cap}[acodec!=none]/best${cap}[acodec!=none]/best[ext=mp4]/best`
+    "bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/" +
+    "bestvideo[ext=mp4]+bestaudio[ext=m4a]/" +
+    "bestvideo+bestaudio/" +
+    "best[ext=mp4][acodec!=none]/best[acodec!=none]/best[ext=mp4]/best"
+  );
+}
+
+/**
+ * Bitrate caps (kbps) tried, in order, before the height-only fallbacks.
+ *
+ * Every entry is a PREFERRED step, not a requirement: if a site has no
+ * stream under a given cap, yt-dlp simply falls through to the next term.
+ * The last two entries are deliberately generous so a genuinely
+ * low-bitrate 480p source (common on reposts/old uploads) still resolves
+ * without stepping down to 360p for no reason.
+ */
+export const DATA_MODE_BITRATE_CAPS = [600, 900, 1400] as const;
+
+/**
+ * The Data Saver selector: prefer the smallest stream that still looks
+ * decent, and only then fall back to the plain height-capped chain.
+ *
+ * Term order is the whole point:
+ *   1. bitrate-capped merge/single terms (≤600 → ≤900 → ≤1400 kbps)
+ *   2. the historical [height<=480] chain, unchanged
+ * so a source with a small 360p stream downloads that, while a source whose
+ * only ≤480p option is 480p@1.2Mbps still downloads the 480p it would have
+ * before.
+ */
+export function dataModeSelector(maxHeight = 480): string {
+  const h = `[height<=${maxHeight}]`;
+  const capped = DATA_MODE_BITRATE_CAPS.map(
+    (kbps) => `[tbr<=${kbps}]`,
+  ).join("");
+  return (
+    `bestvideo[ext=mp4][vcodec^=avc1]${h}${capped}+bestaudio[ext=m4a]/` +
+    `bestvideo[ext=mp4]${h}${capped}+bestaudio[ext=m4a]/` +
+    `bestvideo${h}${capped}+bestaudio/` +
+    `best[ext=mp4]${h}${capped}[acodec!=none]/` +
+    `bestvideo[ext=mp4][vcodec^=avc1]${h}+bestaudio[ext=m4a]/` +
+    `bestvideo[ext=mp4]${h}+bestaudio[ext=m4a]/` +
+    `bestvideo${h}+bestaudio/` +
+    `best[ext=mp4]${h}[acodec!=none]/best${h}[acodec!=none]/best[ext=mp4]/best`
   );
 }
 

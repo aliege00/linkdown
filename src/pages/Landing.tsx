@@ -37,6 +37,9 @@ const BUILD_TAG =
     ? window.__VIDFETCH_BUILD__ ?? null
     : null;
 
+/** The hosted web version — where the "Web" button in the app hands off to. */
+const SITE_URL = "https://vidfetch.app";
+
 // ─── Component ────────────────────────────────────────────────────────
 
 export default function Landing() {
@@ -54,6 +57,16 @@ export default function Landing() {
   // The engine only exists inside the APK/EXE. Saying so up front beats a
   // dead-end error after the user presses Analyze.
   const nativeEngine = isNativeAvailable();
+
+  // Top-right CTA is context-aware:
+  //   • in the packaged app the button reads "Web" and hands the user back
+  //     to the browser version (vidfetch.app) — inside the APK that button
+  //     used to say "Uygulama" and just navigated to /dashboard, i.e. to
+  //     the page they were already on.
+  //   • in the browser it keeps saying "Uygulama" and opens the dashboard.
+  const openWebVersion = () => {
+    window.open(SITE_URL, "_blank", "noopener,noreferrer");
+  };
 
   // ─── FAQ data ──────────────────────────────────────────────────────
   const faqs = [
@@ -120,9 +133,9 @@ export default function Landing() {
             </button>
             <Button
               size="sm"
-              onClick={() => navigate("/dashboard")}
+              onClick={() => (nativeEngine ? openWebVersion() : navigate("/dashboard"))}
             >
-              Uygulama
+              {nativeEngine ? "Web" : "Uygulama"}
             </Button>
           </nav>
           <div className="flex items-center gap-1">
@@ -131,9 +144,9 @@ export default function Landing() {
               size="sm"
               variant="ghost"
               className="sm:hidden"
-              onClick={() => navigate("/dashboard")}
+              onClick={() => (nativeEngine ? openWebVersion() : navigate("/dashboard"))}
             >
-              Uygulama
+              {nativeEngine ? "Web" : "Uygulama"}
             </Button>
           </div>
         </div>

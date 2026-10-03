@@ -119,7 +119,6 @@ describe("no hardcoded dark surfaces left in components", () => {
     "src/components/tabs/HistoryTab.tsx",
     "src/components/HelpCenter.tsx",
     "src/pages/Dashboard.tsx",
-    "src/pages/HelpPage.tsx",
   ];
 
   it.each(files)("%s uses theme tokens, not fixed dark colors", (file) => {
@@ -131,18 +130,26 @@ describe("no hardcoded dark surfaces left in components", () => {
   });
 });
 
-describe("help center lives on its own route", () => {
-  it("/help is registered", () => {
+describe("help center lives in the Yardım tab", () => {
+  it("is no longer a route of its own", () => {
     const main = readFileSync(resolve(__dirname, "../main.tsx"), "utf-8");
-    expect(main).toContain('path="/help"');
+    expect(main).not.toContain('path="/help"');
+    expect(main).not.toContain("HelpPage");
   });
 
-  it("the settings tab links to it instead of embedding the help tabs", () => {
+  it("is rendered inline at the top of the Yardım (settings) tab", () => {
     const settings = readFileSync(
       resolve(__dirname, "../components/tabs/SettingsTab.tsx"),
       "utf-8",
     );
-    expect(settings).toContain('navigate("/help")');
-    expect(settings).not.toContain("TabsContent");
+    expect(settings).toContain('import HelpCenter from "@/components/HelpCenter"');
+    // Rendered BEFORE the app-info card: the tab people open for help must
+    // show help, not engine settings.
+    expect(settings.indexOf("<HelpCenter />")).toBeGreaterThan(-1);
+    expect(settings.indexOf("<HelpCenter />")).toBeLessThan(
+      settings.indexOf("v2.6"),
+    );
+    // No dead "→ /help" navigation left behind.
+    expect(settings).not.toContain('navigate("/help")');
   });
 });
