@@ -138,9 +138,29 @@ jobs:
           SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
         run: |
           if [ -z "$SIGNING_KEY" ] || [ -z "$SIGNING_STORE_PASSWORD" ] || [ -z "$SIGNING_KEY_ALIAS" ] || [ -z "$SIGNING_KEY_PASSWORD" ]; then
-            echo "❌ Signing secrets missing. Required: SIGNING_KEY (base64 keystore),"
-            echo "   SIGNING_STORE_PASSWORD, SIGNING_KEY_ALIAS, SIGNING_KEY_PASSWORD."
-            echo "   See README.md → 'Release imzalama kurulumu' for the exact steps."
+            cat >&2 <<'MSG'
+          ❌ Signing secrets missing — this is the release job refusing to ship a
+             debug-signed APK. It fails on purpose, every time, until the four
+             secrets exist.
+
+          Fastest fix (one command on your own machine, needs JDK + gh CLI):
+             git clone https://github.com/aliege00/linkdown && cd linkdown
+             npm run setup:signing
+
+          It generates the keystore with keytool, uploads all four secrets and
+          verifies them. Then re-run: gh workflow run build-apk.yml --ref main
+
+          Doing it by hand:
+             keytool -genkeypair -v -keystore release.keystore -alias vidfetch \
+               -keyalg RSA -keysize 2048 -validity 10000 -storetype PKCS12
+             gh secret set SIGNING_KEY            -R aliege00/linkdown -b "$(base64 -w0 release.keystore)"
+             gh secret set SIGNING_STORE_PASSWORD -R aliege00/linkdown
+             gh secret set SIGNING_KEY_ALIAS      -R aliege00/linkdown -b vidfetch
+             gh secret set SIGNING_KEY_PASSWORD   -R aliege00/linkdown
+
+          NOTE: the CI identity that opens pull requests cannot read or write
+          Actions secrets, so this step has to be run by a repo admin.
+          MSG
             exit 1
           fi
           echo "$SIGNING_KEY" | base64 --decode > android/app/release.keystore
