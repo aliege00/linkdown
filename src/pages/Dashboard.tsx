@@ -22,12 +22,12 @@ export default function Dashboard() {
   ];
 
   return (
-    <div className="min-h-screen bg-[#0d0f12] text-[#e8e8e8]">
+    <div className="min-h-screen bg-background text-foreground">
       {/* ── Top Bar (sticky, small, never blocks scroll) ── */}
       {/* paddingTop = safe-area inset: the camera notch / status bar must not
           overlap the logo row on notched devices. */}
       <header
-        className="sticky top-0 z-40 border-b border-[#262930] bg-[#17191e]/90 backdrop-blur-md"
+        className="sticky top-0 z-40 border-b border-border/70 bg-card/85 backdrop-blur-md"
         style={{ paddingTop: "env(safe-area-inset-top)" }}
       >
         <div className="mx-auto flex max-w-2xl items-center justify-between px-4 py-3.5">
@@ -43,11 +43,11 @@ export default function Dashboard() {
             <div className="min-w-0">
               <h1 className="truncate text-sm font-bold tracking-tight">VidFetch</h1>
               {tab === "download" ? (
-                <span className="mt-0.5 inline-flex items-center rounded-full border border-[#6cb4ee]/25 bg-[#6cb4ee]/10 px-1.5 py-px text-[10px] font-semibold text-[#6cb4ee]">
+                <span className="mt-0.5 inline-flex items-center rounded-full border border-primary/25 bg-primary/10 px-1.5 py-px text-[10px] font-semibold text-primary">
                   v2.6.2
                 </span>
               ) : (
-                <p className="truncate text-[11px] text-[#8e8e93]">
+                <p className="truncate text-[11px] text-muted-foreground">
                   Yardım Merkezi &amp; Hakkında
                 </p>
               )}
@@ -62,8 +62,8 @@ export default function Dashboard() {
                   className={cn(
                     "rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer",
                     tab === t.id
-                      ? "bg-[#6cb4ee]/15 text-[#6cb4ee]"
-                      : "text-[#8e8e93] hover:text-[#e8e8e8]",
+                      ? "bg-primary/15 text-primary"
+                      : "text-muted-foreground hover:text-foreground",
                   )}
                 >
                   {t.label}
