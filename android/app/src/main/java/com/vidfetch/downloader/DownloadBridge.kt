@@ -371,10 +371,25 @@ class DownloadBridge : Plugin() {
 
         currentWorkId = workRequest.id
 
+        // ⚠️ ExistingWorkPolicy decision (the crash fix).
+        //
+        // This used to be REPLACE: every startDownload() call CANCELLED the
+        // download that was already running and started a new yt-dlp process
+        // in its place. Two yt-dlp processes then raced for the same output
+        // template, the same MediaStore rows and the same foreground-service
+        // notification — on a mid-range phone that is an ANR and a process
+        // death ("engine crashes the app"), not a slow download.
+        //
+        // APPEND_OR_REPLACE chains the job onto the running one: the engine
+        // executes downloads strictly one at a time (WorkManager runs one
+        // worker per unique chain), and if the previous job ended in FAILED /
+        // CANCELLED state it is replaced instead of blocking the queue
+        // forever. This is what makes the JS-side multi-link queue safe even
+        // if two calls arrive before the UI updates.
         WorkManager.getInstance(context)
             .enqueueUniqueWork(
                 DownloadWorker.UNIQUE_WORK_NAME,
-                ExistingWorkPolicy.REPLACE,
+                ExistingWorkPolicy.APPEND_OR_REPLACE,
                 workRequest
             )
 

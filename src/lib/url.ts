@@ -74,6 +74,52 @@ export function normalizeVideoUrl(raw: string): string {
 }
 
 /**
+ * Split point for pasted link lists: every `https?://` starts a new URL.
+ *
+ * The lookahead keeps the scheme attached to the chunk that follows it, so
+ * `normalizeVideoUrl()` sees a complete URL for each part. This is what makes
+ * ADJACENT links work — the case that broke the old whitespace-only regex:
+ *
+ *   "https://youtu.be/AAA?si=abchttps://youtu.be/BBB?si=def"
+ *
+ * …arrives with no space at all, because the first link ends with a query
+ * parameter and the next one is glued right after it.
+ */
+const SCHEME_BOUNDARY = /(?=https?:\/\/)/gi;
+
+/**
+ * Extract every valid video URL from a block of pasted text.
+ *
+ * Handles the three ways people actually paste link lists:
+ *   1. one per line
+ *   2. separated by spaces / commas inside a sentence
+ *   3. **glued together with no separator at all** (adjacent URLs)
+ *
+ * Each part still goes through `normalizeVideoUrl()`, so quotes, trailing
+ * punctuation and `m.youtube.com` normalization stay identical to the
+ * single-link path. Duplicates are collapsed (pasting the same link twice
+ * downloads it once); the caller gets a de-duplicated array in first-seen
+ * order.
+ */
+export function extractVideoUrls(text: string): string[] {
+  if (!text) return [];
+
+  const urls: string[] = [];
+  const seen = new Set<string>();
+
+  for (const chunk of text.replace(/\r\n?/g, "\n").split(SCHEME_BOUNDARY)) {
+    if (!chunk) continue;
+    const normalized = normalizeVideoUrl(chunk);
+    if (normalized && !seen.has(normalized)) {
+      seen.add(normalized);
+      urls.push(normalized);
+    }
+  }
+
+  return urls;
+}
+
+/**
  * Check if a URL looks like a video URL from a supported site.
  * Used by the clipboard monitor to filter clipboard content.
  */
