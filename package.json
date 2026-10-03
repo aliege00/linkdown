@@ -17,6 +17,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "node scripts/test-download-socket.cjs && node scripts/test-real-download.cjs && node scripts/test-real-selectors.cjs && node scripts/test-real-queue.cjs",
+    "test:perf": "node scripts/test-perf.cjs",
     "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",

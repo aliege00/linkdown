@@ -45,9 +45,66 @@
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 
-/* ── Flat dark theme (ChatGPT-style) ─────────────────────────────────────── */
+/* ── Light theme (default) ───────────────────────────────────────────────── */
 :root {
   --radius: 0.75rem;
+  /* `color-scheme` tells the browser to render native widgets (scrollbars,
+     form controls, the caret) in the matching scheme instead of the OS one. */
+  color-scheme: light;
+  --background: #f6f7f9;
+  --foreground: #17191e;
+  --card: #ffffff;
+  --card-foreground: #17191e;
+  --popover: #ffffff;
+  --popover-foreground: #17191e;
+  /* Deeper blue than the dark theme's #6cb4ee: the light one has to stay
+     readable as TEXT on white (contrast 4.6:1) and as a button fill. */
+  --primary: #1a6fc4;
+  --primary-foreground: #ffffff;
+  --secondary: #eceef1;
+  --secondary-foreground: #17191e;
+  --muted: #eceef1;
+  --muted-foreground: #5c6270;
+  --accent: #1a6fc4;
+  --accent-foreground: #ffffff;
+  --destructive: #d92d20;
+  --border: #dfe2e7;
+  --input: #dfe2e7;
+  --ring: #1a6fc4;
+  --chart-1: #1a6fc4;
+  --chart-2: #17915b;
+  --chart-3: #b25e09;
+  --chart-4: #d92d20;
+  --chart-5: #8b46c9;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #17191e;
+  --sidebar-primary: #1a6fc4;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eceef1;
+  --sidebar-accent-foreground: #17191e;
+  --sidebar-border: #dfe2e7;
+  --sidebar-ring: #1a6fc4;
+  /* Floating island: light mode needs a softer shadow and a darker glow,
+     otherwise a translucent white bar on a white page disappears. */
+  --island-shadow: 0 10px 30px rgba(15, 23, 42, 0.14);
+  --island-glow: rgba(26, 111, 196, 0.22);
+}
+
+/* Island entrance — rise + fade, one keyframe, compositor-only. */
+@keyframes island-rise {
+  from {
+    opacity: 0;
+    transform: translate3d(-50%, 14px, 0) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(-50%, 0, 0) scale(1);
+  }
+}
+
+/* ── Dark theme (ChatGPT-style) ──────────────────────────────────────────── */
+.dark {
+  color-scheme: dark;
   --background: #0d0f12;
   --foreground: #e8e8e8;
   --card: #17191e;
@@ -79,33 +136,8 @@
   --sidebar-accent-foreground: #e8e8e8;
   --sidebar-border: #262930;
   --sidebar-ring: #6cb4ee;
-}
-
-/* ── Dark theme (same as root — always dark) ─────────────────────────────── */
-.dark {
-  --background: #0d0f12;
-  --foreground: #e8e8e8;
-  --card: #17191e;
-  --card-foreground: #e8e8e8;
-  --popover: #17191e;
-  --popover-foreground: #e8e8e8;
-  --primary: #6cb4ee;
-  --primary-foreground: #0d0f12;
-  --secondary: #1e2026;
-  --secondary-foreground: #e8e8e8;
-  --muted: #1e2026;
-  --muted-foreground: #8e8e93;
-  --accent: #6cb4ee;
-  --accent-foreground: #0d0f12;
-  --destructive: #ff453a;
-  --border: #262930;
-  --input: #262930;
-  --ring: #6cb4ee;
-  --chart-1: #6cb4ee;
-  --chart-2: #34c759;
-  --chart-3: #ff9f0a;
-  --chart-4: #ff453a;
-  --chart-5: #bf5af2;
+  --island-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  --island-glow: rgba(108, 180, 238, 0.22);
 }
 
 /* ── Base reset ──────────────────────────────────────────────────────────── */
@@ -126,7 +158,13 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     line-height: 1.6;
-    background-color: #0d0f12;
+    /* Token-driven, NOT a hardcoded hex: the old `background-color:#0d0f12`
+       pinned the page dark forever, which is why switching to light mode
+       looked like it did nothing. */
+    background-color: var(--background);
+    color: var(--foreground);
+    /* Theme swap must not flash the wrong palette on long pages. */
+    transition: background-color 200ms ease, color 200ms ease;
   }
   button:not([disabled]),
   [role="button"]:not([disabled]) {
@@ -148,7 +186,7 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(142, 142, 147, 0.2);
+  background: color-mix(in srgb, var(--muted-foreground) 30%, transparent);
   border-radius: 2px;
 }
 
@@ -201,8 +239,10 @@ body,
   width: 100%;
   min-height: 100vh;
   min-height: 100dvh;
-  background-color: #0d0f12;
-  color: #e8e8e8;
+  /* Tokens, not literals — otherwise the document stays dark in light mode
+     while the components inside it repaint. */
+  background-color: var(--background);
+  color: var(--foreground);
 }
 
 body {
