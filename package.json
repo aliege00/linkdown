@@ -16,7 +16,7 @@
     "exe:portable": "npm run build && electron-builder --config electron-builder.yml --win portable",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "node scripts/test-download-socket.cjs && node scripts/test-real-download.cjs && node scripts/test-real-selectors.cjs",
+    "test:e2e": "node scripts/test-download-socket.cjs && node scripts/test-real-download.cjs && node scripts/test-real-selectors.cjs && node scripts/test-real-queue.cjs",
     "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",

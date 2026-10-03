@@ -456,6 +456,81 @@ export async function startDownload(
 }
 
 /**
+ * Download ONE link and resolve when it actually finishes.
+ *
+ * `startDownload()` resolves as soon as the engine accepted the job (it
+ * returns a workId and reports progress through global listeners), which is
+ * not awaitable — a queue cannot tell "still running" from "finished". This
+ * wrapper turns the event stream into a promise so the queue can await each
+ * link before starting the next one, and so a failure resolves as
+ * `{ ok: false }` instead of throwing into the caller.
+ *
+ * It never rejects: engine errors become a result object.
+ */
+export async function downloadOnce(options: StartDownloadOptions): Promise<{
+  ok: boolean;
+  fileName?: string;
+  uri?: string;
+  error?: string;
+}> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const cleanups: Array<() => void> = [];
+
+    // Hard safety net: a download that never reports a terminal event must
+    // not wedge the queue forever. 4 hours is far beyond any real download.
+    const timer = setTimeout(
+      () => finish({ ok: false, error: "Timed out waiting for the engine" }),
+      4 * 60 * 60 * 1000,
+    );
+
+    const finish = (result: { ok: boolean; fileName?: string; uri?: string; error?: string }) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      cleanups.forEach((off) => {
+        try {
+          off();
+        } catch {
+          /* listener already gone */
+        }
+      });
+      cleanups.length = 0;
+      resolve(result);
+    };
+
+    startDownload({
+      ...options,
+      onProgress: (p) => options.onProgress?.(p),
+      onComplete: (c) => {
+        options.onComplete?.(c);
+        finish({ ok: true, fileName: c.fileName, uri: c.uri });
+      },
+      onError: (e) => {
+        options.onError?.(e);
+        finish({ ok: false, error: e });
+      },
+    })
+      .then((workId) => {
+        // No engine at all (browser preview): the listeners above will never
+        // fire, so resolve immediately instead of hanging the queue.
+        if (!workId && !settled) {
+          finish({
+            ok: false,
+            error: "Download engine unavailable — use the Android app or the Windows app",
+          });
+        }
+      })
+      .catch((error) => {
+        console.error("[ytdlp-native] downloadOnce failed:", error);
+        finish({
+          ok: false,
+          error: error instanceof Error ? error.message : "Download failed",});
+    });
+  });
+}
+
+/**
  * Cancel an active download.
  */
 export async function cancelDownload(workId?: string): Promise<void> {

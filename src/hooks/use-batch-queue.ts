@@ -11,7 +11,7 @@
  */
 
 import { useCallback, useRef, useState } from "react";
-import { normalizeVideoUrl } from "@/lib/url";
+import { extractVideoUrls } from "@/lib/url";
 
 // ── Types ─────────────────────────────────────────────────────────────
 
@@ -45,26 +45,14 @@ export interface BatchQueueState {
 
 /**
  * Extract all valid video URLs from a text block.
- * Handles newline-separated, space-separated, and mixed formats.
+ *
+ * Delegates to `extractVideoUrls()` in lib/url so there is ONE parser: this
+ * hook used to use its own whitespace-based regex, which could not see two
+ * links glued together ("…si=abc" + "https://youtu.be/xyz") and silently
+ * treated them as a single broken URL.
  */
 export function extractUrls(text: string): string[] {
-  if (!text) return [];
-
-  const urlPattern = /https?:\/\/[^\s<>"')\]]+/gi;
-  const matches = text.match(urlPattern) ?? [];
-
-  const urls: string[] = [];
-  const seen = new Set<string>();
-
-  for (const raw of matches) {
-    const cleaned = normalizeVideoUrl(raw);
-    if (cleaned && !seen.has(cleaned)) {
-      seen.add(cleaned);
-      urls.push(cleaned);
-    }
-  }
-
-  return urls;
+  return extractVideoUrls(text);
 }
 
 /**
@@ -88,6 +76,28 @@ export function useBatchQueue() {
   const abortRef = useRef(false);
 
   /**
+   * Publish the queue snapshot to React.
+   *
+   * Declared BEFORE the callbacks that call it: as a hoisted function
+   * declaration below its callers it both tripped react-hooks/immutability
+   * and read stale state from the render that created those callbacks.
+   */
+  const updateState = useCallback(() => {
+    const items = [...queueRef.current];
+    setState((prev) => ({
+      ...prev,
+      items,
+      counts: {
+        total: items.length,
+        pending: items.filter((i) => i.status === "pending").length,
+        downloading: items.filter((i) => i.status === "downloading").length,
+        completed: items.filter((i) => i.status === "completed").length,
+        failed: items.filter((i) => i.status === "failed").length,
+      },
+    }));
+  }, []);
+
+  /**
    * Parse input text and populate the queue with detected URLs.
    */
   const parseInput = useCallback((text: string): number => {
@@ -104,7 +114,7 @@ export function useBatchQueue() {
     queueRef.current = [...queueRef.current, ...newItems];
     updateState();
     return newItems.length;
-  }, []);
+  }, [updateState]);
 
   /**
    * Start processing the queue. Calls the download function for each item.
@@ -169,7 +179,7 @@ export function useBatchQueue() {
     );
     setState((prev) => ({ ...prev, isProcessing: false, currentIndex: -1 }));
     updateState();
-  }, []);
+  }, [updateState]);
 
   /**
    * Clear all items from the queue.
@@ -192,18 +202,6 @@ export function useBatchQueue() {
   }, []);
 
   // ── Helpers ────────────────────────────────────────────────────────
-
-  function updateState() {
-    const items = [...queueRef.current];
-    const counts = {
-      total: items.length,
-      pending: items.filter((i) => i.status === "pending").length,
-      downloading: items.filter((i) => i.status === "downloading").length,
-      completed: items.filter((i) => i.status === "completed").length,
-      failed: items.filter((i) => i.status === "failed").length,
-    };
-    setState((prev) => ({ ...prev, items, counts }));
-  }
 
   return {
     state,

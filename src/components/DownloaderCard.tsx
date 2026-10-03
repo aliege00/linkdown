@@ -8,6 +8,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   getVideoInfo,
   startDownload,
+  downloadOnce,
   openFile,
   getDownloads,
   pickFolder,
@@ -35,7 +36,20 @@ import { useClipboardMonitor } from "@/hooks/use-clipboard-monitor";
 import { ClipboardNotification } from "@/components/ClipboardNotification";
 import WebDownloadCard from "./WebDownloadCard";
 import { explainError } from "@/lib/error-help";
-import { normalizeVideoUrl } from "@/lib/url";
+import { normalizeVideoUrl, extractVideoUrls } from "@/lib/url";
+import MultiLinkQueue from "@/components/MultiLinkQueue";
+import {
+  makeQueueItems,
+  runDownloadQueue,
+  summarize,
+  type QueueItem,
+  type QueueSummary,
+} from "@/lib/download-queue";
+import {
+  buildQualityOptions,
+  defaultQualityOption,
+  type QualityOption,
+} from "@/lib/quality-options";
 import { postDownloadCleanup } from "@/lib/auto-cleanup";
 import { mp4FormatWithHeight, MP4_FORMAT_SELECTOR, MP3_FORMAT_SELECTOR, filterFormats, type FormatLike } from "@/lib/format-enforce";
 import {
@@ -1242,6 +1256,171 @@ export default function DownloaderCard({
   );
   const refreshHistory = useCallback(() => setHistory(getDownloadHistory()), []);
 
+  // ── Multi-link queue ──────────────────────────────────────────────
+  // Links parsed out of the paste box (adjacent links included). The queue
+  // runs them strictly one after another — firing them all at once is what
+  // made the engine crash the app.
+  //
+  // Selection is tracked by URL, not by generated id: ids are regenerated on
+  // every keystroke, so an id-keyed selection would reset (or duplicate)
+  // itself while the user is still typing.
+  const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
+  const [queueSelected, setQueueSelected] = useState<Set<string>>(new Set());
+  const [queueRunning, setQueueRunning] = useState(false);
+  const [queueSummary, setQueueSummary] = useState<QueueSummary>(() => summarize([]));
+  const [batchQualities, setBatchQualities] = useState<QualityOption[]>([]);
+  const [batchSelector, setBatchSelector] = useState("");
+  const [batchProbing, setBatchProbing] = useState(false);
+  const queueAbortRef = useRef({ aborted: false });
+
+  /** Re-parse the paste box into queue rows (never blocks typing). */
+  const syncLinksFromInput = useCallback((raw: string) => {
+    const found = extractVideoUrls(raw);
+    setQueueItems((prev) => makeQueueItems(found, prev));
+    // Newly detected links start ticked; links the user unticked stay unticked.
+    setQueueSelected((prev) => {
+      const next = new Set(prev);
+      let changed = next.size > 0 && found.length === 0;
+      for (const url of found) {
+        if (!next.has(url)) {
+          next.add(url);
+          changed = true;
+        }
+      }
+      if (found.length === 0 && prev.size > 0) next.clear();
+      return changed ? next : prev;
+    });
+  }, []);
+
+  const hasBatch = queueItems.length > 1;
+
+  const toggleQueueItem = useCallback((itemUrl: string) => {
+    setQueueSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(itemUrl)) next.delete(itemUrl);
+      else next.add(itemUrl);
+      return next;
+    });
+  }, []);
+
+  const selectAllQueueItems = useCallback(() => {
+    setQueueSelected(new Set(queueItems.map((i) => i.url)));
+  }, [queueItems]);
+
+  const clearQueueSelection = useCallback(() => setQueueSelected(new Set()), []);
+
+  const clearQueueList = useCallback(() => {
+    setQueueItems([]);
+    setQueueSelected(new Set());
+    setQueueSummary(summarize([]));
+    setBatchQualities([]);
+    setBatchSelector("");
+  }, []);
+
+  const startBatchQueue = useCallback(async () => {
+    const chosen = new Set(queueSelected);
+    if (chosen.size === 0 || queueRunning) return;
+
+    queueAbortRef.current = { aborted: false };
+    setQueueRunning(true);
+    setBatchProbing(true);
+
+    // Quality list comes from the FIRST selected link's real formats — a 360p
+    // clip never shows a fake 1080p chip.
+    let selector = batchSelector;
+    const firstUrl = normalizeVideoUrl(
+      queueItems.find((i) => chosen.has(i.url))?.url ?? "",
+    );
+    try {
+      if (firstUrl) {
+        const info = await getVideoInfo(firstUrl, false);
+        if (info.success) {
+          const options = buildQualityOptions(info.formats as YtDlpFormat[]);
+          setBatchQualities(options);
+          const pick = options.find((o) => o.selector === selector) ?? defaultQualityOption(options);
+          selector = pick.selector;
+          setBatchSelector(selector);
+          const probedUrl = firstUrl;
+          setQueueItems((prev) =>
+            prev.map((item) =>
+              item.url === probedUrl ? { ...item, title: info.title || item.url } : item,
+            ),
+          );
+        }
+      }
+    } catch (error) {
+      // A failed probe must never block the queue: fall back to the chain the
+      // single-link path already uses, which has last-resort terms.
+      console.warn("[DownloaderCard] quality probe failed:", error);
+    } finally {
+      setBatchProbing(false);
+    }
+
+    if (!selector) selector = MP4_FORMAT_SELECTOR;
+
+    const result = await runDownloadQueue(
+      queueItems,
+      async (item) => {
+        // Only ticked links take part in this run; the rest stay pending.
+        if (!chosen.has(item.url)) return { ok: false, error: "Atlandı" };
+        const clean = normalizeVideoUrl(item.url);
+        if (!clean) return { ok: false, error: "Geçersiz link" };
+        return downloadOnce({
+          url: clean,
+          formatId: selector,
+          isPlaylist: false,
+        });
+      },
+      {
+        signal: queueAbortRef.current,
+        onChange: (items, summary) => {
+          setQueueItems(items);
+          setQueueSummary(summary);
+        },
+        onItemSettled: (item) => {
+          if (item.status === "completed") {
+            addDownloadRecord({
+              title: item.title || item.url,
+              url: item.url,
+              kind: "video",
+              time: Date.now(),
+            });
+          }
+        },
+      },
+    );
+
+    setQueueRunning(false);
+    // Leave untouched rows as "pending" instead of marking them failed.
+    setQueueItems((prev) =>
+      prev.map((item) => {
+        const settled = result.items.find((i) => i.id === item.id);
+        if (settled && chosen.has(item.url) && settled.status === "failed") return settled;
+        if (settled && chosen.has(item.url) && settled.status === "completed") return settled;
+        if (settled && chosen.has(item.url) && settled.status === "cancelled") return settled;
+        return item;
+      }),
+    );
+
+    const list = await getDownloads().catch(() => []);
+    if (list.length > 0) setSavedDownloads(list);
+    refreshHistory();
+  }, [batchSelector, queueItems, queueRunning, queueSelected, refreshHistory]);
+
+  const cancelBatchQueue = useCallback(() => {
+    queueAbortRef.current.aborted = true;
+    void cancelDownload();
+    // Show the stop immediately instead of waiting for the engine to notice.
+    setQueueItems((prev) =>
+      prev.map((item) =>
+        item.status === "pending" || item.status === "downloading"
+          ? { ...item, status: "cancelled" as const }
+          : item,
+      ),
+    );
+    setQueueRunning(false);
+  }, []);
+
   // Tracks the active native download so "Cancel" really stops it instead of
   // only resetting the UI.
   const workIdRef = useRef<string | null>(null);
@@ -1821,12 +2000,17 @@ export default function DownloaderCard({
     try {
       const text = await navigator.clipboard.readText();
       setUrl(text);
+      // A pasted block is usually a LIST — parse it right away.
+      syncLinksFromInput(text);
     } catch {
       inputRef.current?.focus();
     }
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    // With several links in the box, Enter must not analyze just the first
+    // one — the queue panel is the action for this input.
+    if (e.key === "Enter" && hasBatch) return;
     if (e.key === "Enter" && url.trim() && state !== "loading") {
       handleAnalyze();
     }
@@ -1839,6 +2023,7 @@ export default function DownloaderCard({
     setSelectedFormat("");
     setPlaylistSummary(null);
     setUrl("");
+    clearQueueList();
     inputRef.current?.focus();
   };
 
@@ -1971,7 +2156,10 @@ export default function DownloaderCard({
                 type="url"
                 placeholder="Paste video URL from YouTube, TikTok, Twitter..."
                 value={url}
-                onChange={(e) => setUrl(e.target.value)}
+                onChange={(e) => {
+                  setUrl(e.target.value);
+                  syncLinksFromInput(e.target.value);
+                }}
                 onKeyDown={handleKeyDown}
                 className="pl-10 pr-10 h-12 text-base border-border/60 bg-background/50 focus-visible:ring-primary/20"
               />
@@ -1979,6 +2167,7 @@ export default function DownloaderCard({
                 <button
                   onClick={() => {
                     setUrl("");
+                    clearQueueList();
                     updateState("idle");
                     setVideoInfo(null);
                     setErrorMsg("");
@@ -2005,8 +2194,29 @@ export default function DownloaderCard({
           </div>
 
           <AnimatePresence mode="wait">
+            {/* ── Multi-link queue (2+ links pasted, adjacent links included) ── */}
+            {hasBatch && (
+              <MultiLinkQueue
+                items={queueItems}
+                summary={queueSummary}
+                selected={queueSelected}
+                onToggle={toggleQueueItem}
+                onSelectAll={selectAllQueueItems}
+                onClearSelection={clearQueueSelection}
+                onRemoveAll={clearQueueList}
+                qualities={batchQualities.length ? batchQualities : [{ height: null, label: "Best", selector: MP4_FORMAT_SELECTOR, streamCount: 0 }]}
+                selectedQuality={batchSelector || MP4_FORMAT_SELECTOR}
+                onQualityChange={setBatchSelector}
+                running={queueRunning}
+                onStart={startBatchQueue}
+                onCancel={cancelBatchQueue}
+                probing={batchProbing}
+                lang={helpLang}
+              />
+            )}
+
             {/* ── Idle / URL entered ── */}
-            {state === "idle" && (
+            {!hasBatch && state === "idle" && (
               <motion.div
                 key="idle"
                 initial={{ opacity: 0, y: 8 }}
@@ -2261,7 +2471,7 @@ export default function DownloaderCard({
             )}
 
             {/* ── Loading ── */}
-            {state === "loading" && (
+            {!hasBatch && state === "loading" && (
               <motion.div
                 key="loading"
                 initial={{ opacity: 0, y: 10 }}
@@ -2297,7 +2507,7 @@ export default function DownloaderCard({
             )}
 
             {/* ── Error ── */}
-            {state === "error" && (
+            {!hasBatch && state === "error" && (
               <motion.div
                 key="error"
                 initial={{ opacity: 0, y: 10 }}
@@ -2326,7 +2536,7 @@ export default function DownloaderCard({
             )}
 
             {/* ── Loaded (video info shown) ── */}
-            {state === "loaded" && videoInfo && (
+            {!hasBatch && state === "loaded" && videoInfo && (
               <motion.div
                 key="loaded"
                 initial={{ opacity: 0, y: 10 }}
@@ -2514,7 +2724,7 @@ export default function DownloaderCard({
             )}
 
             {/* ── Downloading (with real-time progress) ── */}
-            {state === "downloading" && (
+            {!hasBatch && state === "downloading" && (
               <motion.div
                 key="downloading"
                 initial={{ opacity: 0, y: 10 }}
@@ -2629,7 +2839,7 @@ export default function DownloaderCard({
             )}
 
             {/* ── Download Complete ── */}
-            {state === "complete" && (
+            {!hasBatch && state === "complete" && (
               <motion.div
                 key="complete"
                 initial={{ opacity: 0, scale: 0.95 }}
