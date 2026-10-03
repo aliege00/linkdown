@@ -207,3 +207,34 @@ describe("approxMbPerMinuteForHeight", () => {
     expect(approxMbPerMinuteForHeight(240)).toBe(4);
   });
 });
+
+// ─── Parity: the chain the app actually passes to yt-dlp ──────────────
+// DownloaderCard sends mp4FormatWithHeight() (not selectorForMode) for the
+// default "data" mode and for pinned qualities. If those two drift, the UI
+// chip and the selector it sends disagree — and a missing last-resort term
+// makes DIRECT media links fail with "Requested format is not available".
+
+describe("mp4FormatWithHeight parity with selectorForMode", () => {
+  it("data mode's chain is exactly mp4FormatWithHeight(480)", () => {
+    expect(selectorForMode("data")).toBe(mp4FormatWithHeight(480));
+  });
+
+  it("every capped chain ends with codec-agnostic fallbacks", () => {
+    for (const height of [480, 720, 1080]) {
+      const terms = mp4FormatWithHeight(height).split("/");
+      // Height-capped + audio-guaranteed terms first…
+      expect(terms).toContain(`bestvideo[height<=${height}]+bestaudio`);
+      expect(terms).toContain(`best[ext=mp4][height<=${height}][acodec!=none]`);
+      // …then the last-resort tail that keeps direct media links working.
+      expect(terms[terms.length - 2]).toBe("best[ext=mp4]");
+      expect(terms[terms.length - 1]).toBe("best");
+    }
+  });
+
+  it("keeps every term height-capped until the final two fallbacks", () => {
+    const terms = mp4FormatWithHeight(720).split("/");
+    for (const term of terms.slice(0, -2)) {
+      expect(term).toContain("height<=720");
+    }
+  });
+});

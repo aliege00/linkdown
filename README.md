@@ -45,6 +45,17 @@ npm test             # vitest
 npm run build        # üretim build'i (dist/)
 ```
 
+Gerçek indirme testleri (ağ + gerçek `yt-dlp` motoru gerektirir; `yt-dlp` PATH'te olmalı):
+
+```bash
+npm run test:e2e     # WS kanalı + gerçek uzak dosya indirmesi + format zincirleri
+```
+
+Bu üç betik gerçekten indirme yapar:
+- `scripts/test-download-socket.cjs` — olay kanalı (yerel sunucu, ağ bağımlılığı yok)
+- `scripts/test-real-download.cjs` — `electron/main.cjs`'i gerçek kod olarak çalıştırıp uzak bir MP4'ü indirir; bayt sayısını sunucunun `Content-Length` değeriyle karşılaştırır
+- `scripts/test-real-selectors.cjs` — uygulamanın gönderdiği her format zincirini (480p/720p/1080p/best) gerçekten indirir
+
 Android build (yerel, debug imzalı — CI'daki release akışı aşağıda):
 
 ```bash

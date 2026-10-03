@@ -196,13 +196,23 @@ export const MP4_FORMAT_SELECTOR =
  * Strict MP4 format selector with height cap. Same audio-guarantee rule as
  * MP4_FORMAT_SELECTOR: no acodec filter on merge terms; single-file
  * fallbacks must contain an audio track.
+ *
+ * The last two terms (`best[ext=mp4]/best`) are last-resort ONLY: they run
+ * when no height-capped term matched, which is exactly the direct-media case
+ * (a plain https://…/clip.mp4 exposes a single format with NO height and NO
+ * codec info, so every `[height<=…]`/`[acodec!=none]` term rejects it and the
+ * download used to die with "Requested format is not available"). They mirror
+ * the tail of selectorForMode("data") in download-modes.ts — keep the two in
+ * sync, the parity is locked by a unit test.
  */
 export function mp4FormatWithHeight(maxHeight: number): string {
   return (
     `bestvideo[ext=mp4][vcodec^=avc1][height<=${maxHeight}]+bestaudio[ext=m4a]/` +
     `bestvideo[ext=mp4][height<=${maxHeight}]+bestaudio[ext=m4a]/` +
     `bestvideo[height<=${maxHeight}]+bestaudio/` +
-    `best[ext=mp4][height<=${maxHeight}][acodec!=none]/best[height<=${maxHeight}]`
+    `best[ext=mp4][height<=${maxHeight}][acodec!=none]/` +
+    `best[height<=${maxHeight}][acodec!=none]/` +
+    `best[ext=mp4]/best`
   );
 }
 
