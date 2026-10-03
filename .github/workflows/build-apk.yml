@@ -2,6 +2,7 @@
 # VidFetch — Android APK Build + Release
 #
 # Triggers:
+#   • Pull request to main    → typecheck + unit tests + DEBUG APK (pr-check job)
 #   • Push to main / develop  → build + upload artifact
 #   • Push a version tag      → build + upload artifact + create GitHub Release
 #
@@ -28,8 +29,70 @@ permissions:
   contents: write
 
 jobs:
+  # ── Pull-request gate ─────────────────────────────────────────────
+  # A PR must be verifiable by anyone, including contributors who do not
+  # have (and must never have) the release keystore. So PRs run the web
+  # checks + a DEBUG-signed APK build: it compiles the Kotlin engine and
+  # the Gradle/R8 config exactly like the release build, but it is never
+  # uploaded to a Release — only as a CI artifact. The release job below
+  # keeps its fail-fast secret check untouched.
+  pr-check:
+    name: PR checks (typecheck, tests, debug APK)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Accept Android SDK licenses
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      # Debug signing only — no release keystore, no release artifact.
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: vidfetch-pr-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          retention-days: 7
+          if-no-files-found: error
+
   build:
     name: Build Android APK
+    # Release/main builds only — see pr-check above for why PRs are excluded.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 30
 

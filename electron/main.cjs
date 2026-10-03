@@ -15,6 +15,7 @@ const fs = require("fs");
 const fsp = fs.promises;
 const { spawn } = require("child_process");
 const { startDownloadSocketServer } = require("./download-socket.cjs");
+const { isUsableFormat, mapFormat, pickBestFormatId } = require("./formats.cjs");
 
 // ── Low-RAM build flags ──────────────────────────────────────────────
 // Must run before app ready. Largest single win for a downloader whose UI
@@ -217,35 +218,7 @@ function collectJson(args) {
   });
 }
 
-function mapFormat(f) {
-  let resolution = "unknown";
-  if (f.resolution && f.resolution !== "audio only") resolution = f.resolution;
-  else if (f.height) resolution = `${f.width || "?"}x${f.height}`;
-  else if (f.format_note) resolution = String(f.format_note);
-
-  return {
-    format_id: f.format_id || "",
-    ext: f.ext || "",
-    resolution,
-    filesize: f.filesize || f.filesize_approx || null,
-    vcodec: f.vcodec && f.vcodec !== "none" ? f.vcodec : null,
-    acodec: f.acodec && f.acodec !== "none" ? f.acodec : null,
-    fps: f.fps || null,
-    tbr: f.tbr || null,
-  };
-}
-
-function pickBestFormatId(formats) {
-  const usable = formats.filter((f) => f.vcodec !== "none" || f.acodec !== "none");
-  const both = usable.filter((f) => f.vcodec !== "none" && f.acodec !== "none");
-  const pool = both.length ? both : usable;
-  if (!pool.length) return "best";
-  return pool.reduce((best, f) => {
-    const h = (f.height || 0);
-    const bh = best.height || 0;
-    return h > bh ? f : best;
-  }).format_id || "best";
-}
+// mapFormat / pickBestFormatId / isUsableFormat live in ./formats.cjs (unit-tested).
 
 async function getVideoInfo(url, isPlaylist) {
   if (!fs.existsSync(YTDLP_EXE)) {
@@ -323,9 +296,7 @@ async function getVideoInfo(url, isPlaylist) {
     };
   }
 
-  const formats = (info.formats || []).map(mapFormat).filter(
-    (f) => f.vcodec || f.acodec, // drop text-only formats
-  );
+  const formats = (info.formats || []).filter(isUsableFormat).map(mapFormat);
 
   return {
     success: true,
