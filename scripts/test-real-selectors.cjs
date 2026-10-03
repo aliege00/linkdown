@@ -33,14 +33,20 @@ function fail(msg) {
 function readChains() {
   const script =
     "import { mp4FormatWithHeight, MP4_FORMAT_SELECTOR, MP3_FORMAT_SELECTOR } from './src/lib/format-enforce.ts';" +
-    "import { selectorForMode } from './src/lib/download-modes.ts';" +
+    "import { selectorForMode, dataModeSelector } from './src/lib/download-modes.ts';" +
     "console.log(JSON.stringify({" +
-    "data: mp4FormatWithHeight(480)," +
+    // The Data Saver chain is what the app actually sends for the default
+    // "data" mode (bitrate-capped PREFERRED terms + the 480p chain tail).
+    "data: selectorForMode('data')," +
+    // Also exercise the exact same selector the UI builds explicitly, so a
+    // drift between selectorForMode() and dataModeSelector() fails here.
+    "dataExplicit: dataModeSelector(480)," +
     "pinned720: mp4FormatWithHeight(720)," +
     "pinned1080: mp4FormatWithHeight(1080)," +
     "best: MP4_FORMAT_SELECTOR," +
     "audio: MP3_FORMAT_SELECTOR," +
-    "dataParity: selectorForMode('data') === mp4FormatWithHeight(480)," +
+    "dataTailParity: selectorForMode('data').endsWith(mp4FormatWithHeight(480))," +
+    "dataMatchesExplicit: selectorForMode('data') === dataModeSelector(480)," +
     "}))";
   const out = execFileSync(
     process.execPath,
@@ -51,8 +57,17 @@ function readChains() {
 }
 
 const chains = readChains();
-if (!chains.dataParity) {
-  fail("selectorForMode('data') !== mp4FormatWithHeight(480) — the UI chip and the chain it sends disagree");
+if (!chains.dataTailParity) {
+  fail(
+    "selectorForMode('data') does not end with mp4FormatWithHeight(480) — " +
+      "the Data Saver chain lost its fallback tail and direct media links would break",
+  );
+}
+if (!chains.dataMatchesExplicit) {
+  fail(
+    "selectorForMode('data') !== dataModeSelector(480) — the mode chip and the " +
+      "selector DownloaderCard builds explicitly disagree",
+  );
 }
 console.log(`target: ${TARGET}\n`);
 
@@ -60,7 +75,10 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), "vidfetch-sel-"));
 const results = [];
 
 for (const [name, format] of Object.entries(chains)) {
-  if (name === "dataParity" || name === "audio") continue; // audio needs a real audio-only source
+  // Booleans are assertions, not chains; audio needs a real audio-only source.
+  if (name === "dataTailParity" || name === "dataMatchesExplicit" || name === "audio") {
+    continue;
+  }
   const dir = path.join(root, name);
   fs.mkdirSync(dir, { recursive: true });
   let code = 0;

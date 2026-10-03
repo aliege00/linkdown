@@ -1,15 +1,11 @@
 import { useState } from "react";
-import { useNavigate } from "react-router"; // kept: /chat navigation below
-import {
-  Sparkles,
-  HelpCircle,
-  ChevronRight,
-} from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FlatCard } from "@/components/FlatCard";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Cpu } from "lucide-react";
+import HelpCenter from "@/components/HelpCenter";
 import {
   loadEngineConfig,
   saveEngineConfig,
@@ -19,8 +15,16 @@ import {
   type EngineMode,
 } from "@/lib/engines";
 
+/**
+ * The "Yardım" tab: the help center FIRST, then app info and the engine
+ * settings.
+ *
+ * The help center used to live on its own /help page, reachable only through
+ * a card at the bottom of this tab — so the tab people open for help showed
+ * them engines and Cobalt instance fields instead. It is rendered inline
+ * here now, which is what the tab is named after.
+ */
 export default function SettingsTab() {
-  const navigate = useNavigate();
   // ── Download engines ──────────────────────────────────────────────
   // Default (auto) keeps everything on the on-device engine. Cobalt is only
   // used for the sites it handles better, and only when the user points the
@@ -42,6 +46,9 @@ export default function SettingsTab() {
   };
   return (
     <div className="mx-auto max-w-2xl space-y-4 p-4">
+      {/* ── Help center (was its own /help page) ── */}
+      <HelpCenter />
+
       {/* ── App Info ── */}
       <FlatCard interactive className="space-y-3 text-center">
         <div className="mx-auto flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-[#6cb4ee] to-[#4a90d9] shadow-lg shadow-[#6cb4ee]/25">
@@ -49,7 +56,7 @@ export default function SettingsTab() {
         </div>
         <h2 className="text-xl font-bold text-foreground">VidFetch</h2>
         <p className="text-xs text-muted-foreground">
-          v2.6.3 · On-device video downloader
+          v2.6.4 · On-device video downloader
         </p>
         <div className="grid grid-cols-3 gap-3 pt-2">
           {[
@@ -173,25 +180,6 @@ export default function SettingsTab() {
         </div>
       </FlatCard>
 
-      {/* ── Help center moved to its own page ── */}
-      <FlatCard
-        interactive
-        className="space-y-3"
-        onClick={() => navigate("/help")}
-      >
-        <div className="flex items-center gap-3">
-          <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10">
-            <HelpCircle className="h-4.5 w-4.5 text-primary" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold">Yardım Merkezi</p>
-            <p className="text-xs text-muted-foreground">
-              Bot kontrolü, sık hatalar, ipuçları ve AI asistan
-            </p>
-          </div>
-          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-        </div>
-      </FlatCard>
-    </div>
+      </div>
   );
 }

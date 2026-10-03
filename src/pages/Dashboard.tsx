@@ -6,6 +6,7 @@ import DownloaderCard from "@/components/DownloaderCard";
 import HistoryTab from "@/components/tabs/HistoryTab";
 import SettingsTab from "@/components/tabs/SettingsTab";
 import { useRef } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 
 export default function Dashboard() {
@@ -44,7 +45,7 @@ export default function Dashboard() {
               <h1 className="truncate text-sm font-bold tracking-tight">VidFetch</h1>
               {tab === "download" ? (
                 <span className="mt-0.5 inline-flex items-center rounded-full border border-primary/25 bg-primary/10 px-1.5 py-px text-[10px] font-semibold text-primary">
-                  v2.6.3
+                  v2.6.4
                 </span>
               ) : (
                 <p className="truncate text-[11px] text-muted-foreground">
@@ -79,21 +80,46 @@ export default function Dashboard() {
 
       {/* ── Active Tab (normal document flow — body scrolls, WebView-safe) ── */}
       {/* pb clears the floating island bar (56px + 14px + safe-area inset). */}
+      {/* ── Active Tab (normal document flow — body scrolls, WebView-safe) ── */}
+      {/* pb clears the floating island bar (56px + 14px + safe-area inset).
+
+          Page transition: the island's pill glides between tabs, but the
+          CONTENT used to swap instantly — the pill animated over a screen
+          that had already changed, which read as a glitch. AnimatePresence
+          with mode="wait" cross-fades the outgoing page out before the
+          incoming one comes in (a short lift + fade, no layout jump).
+
+          Deliberately transform/opacity only: both properties are
+          compositor-driven, so a tab switch costs no layout or paint. The
+          whole thing is also disabled by MotionConfig reducedMotion="user"
+          in main.tsx, so prefers-reduced-motion users see an instant swap
+          with no fade at all. */}
       <main className="pb-28">
-        {tab === "download" && (
-          <>
-            <DownloaderCard
-              inputRef={inputRef}
-              resultsRef={resultsRef}
-              className="mx-auto max-w-2xl px-4 pt-4"
-              showInlineHistory={false}
-            />
-            {/* History belongs to the download section: same place the files
-                were saved, same flow (analyze again with one tap). */}
-            <HistoryTab />
-          </>
-        )}
-        {tab === "support" && <SettingsTab />}
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={tab}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+          >
+            {tab === "download" ? (
+              <>
+                <DownloaderCard
+                  inputRef={inputRef}
+                  resultsRef={resultsRef}
+                  className="mx-auto max-w-2xl px-4 pt-4"
+                  showInlineHistory={false}
+                />
+                {/* History belongs to the download section: same place the
+                    files were saved, same flow (analyze again with one tap). */}
+                <HistoryTab />
+              </>
+            ) : (
+              <SettingsTab />
+            )}
+          </motion.div>
+        </AnimatePresence>
       </main>
 
       {/* ── Bottom Nav (floating island, never full width) ── */}

@@ -8,7 +8,6 @@ import {
   type DownloadModeId,
 } from "@/lib/download-modes";
 import {
-  MP4_FORMAT_SELECTOR,
   MP3_FORMAT_SELECTOR,
   mp4FormatWithHeight,
 } from "@/lib/format-enforce";
@@ -61,18 +60,20 @@ describe("selectorForMode", () => {
     );
   });
 
-  it("data mode uses the 480p-capped chain with guaranteed-audio fallbacks", () => {
-    // Same merge terms as mp4FormatWithHeight(480), but BOTH single-file
-    // terms require an audio codec and two extra last-ditch fallbacks are
-    // appended so the default mode NEVER fails where the preset would.
-    expect(selectorForMode("data")).toBe(
-      "bestvideo[ext=mp4][vcodec^=avc1][height<=480]+bestaudio[ext=m4a]/" +
-        "bestvideo[ext=mp4][height<=480]+bestaudio[ext=m4a]/" +
-        "bestvideo[height<=480]+bestaudio/" +
-        "best[ext=mp4][height<=480][acodec!=none]/" +
-        "best[height<=480][acodec!=none]/" +
-        "best[ext=mp4]/best",
-    );
+  it("data mode prefers the smallest stream, then falls back to the 480p chain", () => {
+    // The head of the chain is bitrate-capped (so yt-dlp can step DOWN to a
+    // genuinely smaller stream instead of always taking the tallest ≤480p
+    // one) and its tail is EXACTLY mp4FormatWithHeight(480), so nothing
+    // that used to download stops downloading.
+    const chain = selectorForMode("data").split("/");
+    expect(chain.slice(0, 5)).toEqual([
+      "bestvideo[ext=mp4][vcodec^=avc1][height<=480][tbr<=600][tbr<=900][tbr<=1400]+bestaudio[ext=m4a]",
+      "bestvideo[ext=mp4][height<=480][tbr<=600][tbr<=900][tbr<=1400]+bestaudio[ext=m4a]",
+      "bestvideo[height<=480][tbr<=600][tbr<=900][tbr<=1400]+bestaudio",
+      "best[ext=mp4][height<=480][tbr<=600][tbr<=900][tbr<=1400][acodec!=none]",
+      "bestvideo[ext=mp4][vcodec^=avc1][height<=480]+bestaudio[ext=m4a]",
+    ]);
+    expect(chain.slice(chain.length - 7).join("/")).toBe(mp4FormatWithHeight(480));
   });
 
   it("audio mode uses the strict audio selector", () => {
@@ -109,6 +110,25 @@ describe("selectorForMode", () => {
         expect(term).toContain("[height<=480]");
       }
     }
+  });
+
+  it("only the bitrate-capped terms may be stricter than the height cap", () => {
+    // A tbr filter must never be paired with a HIGHER height than the cap:
+    // that combination would download MORE than Data Saver promised.
+    for (const term of selectorForMode("data").split("/")) {
+      const capped = term.match(/\[height<=(\d+)\]/);
+      if (capped) expect(Number(capped[1])).toBeLessThanOrEqual(480);
+    }
+  });
+
+  it("keeps every data-mode term free of an audio-less guarantee hole", () => {
+    // The capped terms must not accidentally become the LAST term — a bare
+    // `bestvideo` tail would produce a silent file.
+    const chain = selectorForMode("data").split("/");
+    expect(chain[chain.length - 1]).toBe("best");
+    expect(chain.some((t) => t.startsWith("bestvideo") && !t.includes("bestaudio"))).toBe(
+      false,
+    );
   });
 
   it("leaves merge terms uncapped on the best mode", () => {
@@ -215,8 +235,17 @@ describe("approxMbPerMinuteForHeight", () => {
 // makes DIRECT media links fail with "Requested format is not available".
 
 describe("mp4FormatWithHeight parity with selectorForMode", () => {
-  it("data mode's chain is exactly mp4FormatWithHeight(480)", () => {
-    expect(selectorForMode("data")).toBe(mp4FormatWithHeight(480));
+  it("data mode ends with mp4FormatWithHeight(480) as its fallback tail", () => {
+    // The Data Saver chain gained bitrate-capped PREFERRED terms, so it is
+    // no longer byte-identical — but it must still END with the exact
+    // height-capped chain, so every site that resolved before still
+    // resolves (this is what keeps direct media links working).
+    const chain = selectorForMode("data").split("/");
+    const tail = mp4FormatWithHeight(480).split("/");
+    expect(chain.slice(chain.length - tail.length).join("/")).toBe(
+      mp4FormatWithHeight(480),
+    );
+    expect(selectorForMode("data").endsWith(mp4FormatWithHeight(480))).toBe(true);
   });
 
   it("every capped chain ends with codec-agnostic fallbacks", () => {
