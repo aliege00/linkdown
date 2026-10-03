@@ -49,7 +49,7 @@ export default function SettingsTab() {
         </div>
         <h2 className="text-xl font-bold text-foreground">VidFetch</h2>
         <p className="text-xs text-muted-foreground">
-          v2.6.2 · On-device video downloader
+          v2.6.3 · On-device video downloader
         </p>
         <div className="grid grid-cols-3 gap-3 pt-2">
           {[
