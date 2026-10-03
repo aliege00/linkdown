@@ -100,11 +100,22 @@ Release APK'lar GitHub Secrets'tan okunan bir keystore ile imzalanır. **Keystor
 ASLA repoya commit etmeyin** (`android/app/release.keystore` yalnızca CI runner'ında
 oluşturulur).
 
+### En hızlı yol (tek komut)
+
+```bash
+npm run setup:signing            # keytool ile keystore üretir + 4 secret'ı yükler + doğrular
+npm run setup:signing -- --dry-run   # önce kontrol et, hiçbir şeyi değiştirme
+```
+
+Gereksinimler: JDK 17+ (`keytool`) ve repo yöneticisi olarak giriş yapmış GitHub CLI
+(`gh auth login`). Secret'ları **repo yöneticisi** yükleyebilir — CI'ın açtığı PR
+kimliğinin Actions secret'larına erişimi yoktur (403).
+
 ### 1. Keystore oluşturun (tek seferlik, kendi makinenizde)
 
 ```bash
 keytool -genkeypair -v -keystore release.keystore -alias vidfetch \
-  -keyalg RSA -keysize 2048 -validity 10000
+  -keyalg RSA -keysize 2048 -validity 10000 -storetype PKCS12
 ```
 
 > ⚠️ Bu keystore'u güvenli bir yerde yedekleyin. Kaybederseniz kullanıcılar eski
@@ -125,11 +136,21 @@ Repo → Settings → Secrets and variables → Actions → New repository secre
 | `SIGNING_KEY` | Yukarıdaki base64 çıktının tamamı |
 | `SIGNING_STORE_PASSWORD` | keytool sırasında girdiğiniz store parolası |
 | `SIGNING_KEY_ALIAS` | `vidfetch` (veya seçtiğiniz alias) |
-| `SIGNING_KEY_PASSWORD` | key parolası (store ile aynıysa onu girin) |
+| `SIGNING_KEY_PASSWORD` | PKCS12 keystore'da key parolası store ile aynıdır |
+
+Veya CLI ile:
+
+```bash
+gh secret set SIGNING_KEY            -R aliege00/linkdown -b "$(base64 -w0 release.keystore)"
+gh secret set SIGNING_STORE_PASSWORD -R aliege00/linkdown
+gh secret set SIGNING_KEY_ALIAS      -R aliege00/linkdown -b vidfetch
+gh secret set SIGNING_KEY_PASSWORD   -R aliege00/linkdown
+```
 
 Secret'lar eksikse CI bilinçli olarak **fail** eder — debug imzalı APK sessizce
-yayınlamaz. Yerel build'lerde env değişkenleri yoksa imza, SDK debug key'ine düşer
-(yalnızca geliştirme için).
+yayınlamaz. (Pull request kontrolleri etkilenmez: `pr-check` işi debug-signed APK
+derler ve release imzası gerektirmez.) Yerel build'lerde env değişkenleri yoksa imza,
+SDK debug key'ine düşer (yalnızca geliştirme için).
 
 ## 🔒 Güvenlik notları
 
