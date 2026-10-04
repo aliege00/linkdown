@@ -51,6 +51,21 @@ describe("the JS boundary never lets an Error escape", () => {
     expect(bridge).not.toContain("catch (e: Exception)");
     expect(bridge).toContain("catch (e: Throwable)");
   });
+
+  it("keeps the worker's retry chain Throwable-safe too", () => {
+    // The worker runs in the app process: an Error escaping it kills the app
+    // mid-download. Its retry variables must be typed Throwable, or the
+    // compiler rejects the widened catch (this really happened).
+    const worker = read(
+      "android/app/src/main/java/com/vidfetch/downloader/DownloadWorker.kt",
+    );
+    expect(worker).toContain("var last: Throwable? = null");
+    expect(worker).not.toContain("var last: Exception? = null");
+  });
+
+  it("keeps isBotCheckError accepting any Throwable", () => {
+    expect(bridge).toContain("isBotCheckError(e: Throwable)");
+  });
 });
 
 describe("release build no longer shrinks", () => {

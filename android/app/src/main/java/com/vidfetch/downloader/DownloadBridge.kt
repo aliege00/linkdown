@@ -269,7 +269,7 @@ class DownloadBridge : Plugin() {
     }
 
     /** True when the error looks like YouTube's bot-check wall. */
-    private fun isBotCheckError(e: Exception): Boolean {
+    private fun isBotCheckError(e: Throwable): Boolean {
         val msg = (e.message ?: "").lowercase()
         return msg.contains("sign in to confirm") ||
             msg.contains("confirm you're not a bot") ||
@@ -293,7 +293,7 @@ class DownloadBridge : Plugin() {
             } catch (e: Throwable) {
                 if (!isBotCheckError(e)) throw e
                 Log.w(TAG, "bot check on analyze — trying fallback clients")
-                var last: Exception = e
+                var last: Throwable = e
                 var success = false
                 for (retry in botCheckRetryArgs()) {
                     try {
@@ -305,7 +305,7 @@ class DownloadBridge : Plugin() {
                         resolveSingleVideoInfo(url, YoutubeDL.getInfo(retryReq), call)
                         success = true
                         break
-                    } catch (e2: Exception) {
+                    } catch (e2: Throwable) {
                         last = e2
                     }
                 }
