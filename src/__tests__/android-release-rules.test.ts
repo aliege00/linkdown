@@ -17,8 +17,14 @@ describe("Android release build", () => {
   const gradle = readFileSync(repo("android/app/build.gradle"), "utf-8");
   const rules = readFileSync(repo("android/app/proguard-rules.pro"), "utf-8");
 
-  it("shrinks the release build (so the keep rules must actually cover it)", () => {
-    expect(gradle).toContain("minifyEnabled true");
+  it("does NOT shrink the release build any more", () => {
+    // R8 broke Chaquopy's static initialiser and every release APK died on
+    // launch. Minification is now off; proguard-rules.pro is kept for anyone
+    // who re-enables it. (Asserted on the assignment, not a substring, so the
+    // explanatory comment mentioning the old value cannot make this pass.)
+    expect(gradle).toMatch(/^\s*minifyEnabled false$/m);
+    expect(gradle).not.toMatch(/^\s*minifyEnabled true$/m);
+    expect(gradle).toMatch(/^\s*shrinkResources false$/m);
     expect(gradle).toContain("proguard-rules.pro");
   });
 
