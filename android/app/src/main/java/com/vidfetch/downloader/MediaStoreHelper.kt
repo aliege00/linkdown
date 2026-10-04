@@ -1,6 +1,8 @@
 package com.vidfetch.downloader
 
+import android.Manifest
 import android.content.ContentUris
+import android.content.pm.PackageManager
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -10,6 +12,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.documentfile.provider.DocumentFile
 import org.json.JSONArray
@@ -29,8 +32,21 @@ import java.io.FileOutputStream
 object MediaStoreHelper {
 
     private const val TAG = "MediaStoreHelper"
-    private const val VIDFETCH_DIR = "VidFetch"
     private const val MAX_LISTED = 50
+
+    /**
+     * The app's own folder inside the device's public downloads folder.
+     *
+     * `Environment.DIRECTORY_DOWNLOADS` is the literal string `"Download"` —
+     * singular. The UI used to label the destination "Downloads/VidFetch",
+     * which matched no folder on the device: the user opened `Download`,
+     * saw `VidFetch`, and concluded the app had saved somewhere else. Every
+     * user-visible string now uses this exact value.
+     */
+    const val VIDFETCH_DIR = "VidFetch"
+
+    /** `"Download/VidFetch"` — the label shown in the app and in notifications. */
+    val VIDFETCH_PATH = "${Environment.DIRECTORY_DOWNLOADS}/$VIDFETCH_DIR"
 
     /**
      * Save a file to the default public Downloads/VidFetch folder.
@@ -305,8 +321,7 @@ object MediaStoreHelper {
         val values = ContentValues().apply {
             put(MediaStore.Downloads.DISPLAY_NAME, fileName)
             put(MediaStore.Downloads.MIME_TYPE, mimeType)
-            put(MediaStore.Downloads.RELATIVE_PATH,
-                "${Environment.DIRECTORY_DOWNLOADS}/$VIDFETCH_DIR")
+            put(MediaStore.Downloads.RELATIVE_PATH, VIDFETCH_PATH)
             // Hidden until fully written
             put(MediaStore.Downloads.IS_PENDING, 1)
         }
@@ -383,7 +398,103 @@ object MediaStoreHelper {
             ).toString()
         } catch (e: Exception) {
             Log.e(TAG, "Legacy save failed", e)
+            // Do NOT swallow a missing storage grant here. This returned null
+            // before, and the worker read a null URI as success and reported
+            // "Download complete" for a file that was never written — on
+            // Android 9 and below, without the storage permission, every
+            // download silently vanished. Say what actually happened instead.
+            if (e is SecurityException) {
+                throw IllegalStateException(
+                    "Android did not grant permission to write to the Download folder. " +
+                        "Open the app's settings, allow storage access, and try again."
+                )
+            }
             null
+        }
+    }
+
+    // ── Download folder bootstrap ────────────────────────────────────
+
+    /**
+     * Whether the app still needs the runtime storage permission before it
+     * can create `Download/VidFetch` itself.
+     *
+     * Android 10 (API 29) and above grant apps scoped write access to their
+     * own MediaStore rows, so nothing is ever requested there — the folder is
+     * created by the insert at save time. Only Android 9 and below still gate
+     * the public directory behind `WRITE_EXTERNAL_STORAGE`.
+     */
+    fun needsStoragePermission(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+
+    /**
+     * Whether `Download/VidFetch` already exists.
+     *
+     * API 29+ has no cheap way to ask about an EMPTY folder — the MediaStore
+     * lists rows, and an empty folder has none. A row in that relative path is
+     * the honest answer: the user has downloaded something, so the folder is on
+     * disk and must not be created, or re-requested, again.
+     */
+    fun folderExists(context: Context): Boolean {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val projection = arrayOf(MediaStore.Downloads._ID)
+                val selection = "${MediaStore.Downloads.RELATIVE_PATH} = ?"
+                val args = arrayOf("$VIDFETCH_PATH/")
+                context.contentResolver.query(
+                    MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                    projection,
+                    selection,
+                    args,
+                    null
+                )?.use { it.moveToFirst() } ?: false
+            } else {
+                File(
+                    Environment.getExternalStoragePublicDirectory(
+                        Environment.DIRECTORY_DOWNLOADS
+                    ),
+                    VIDFETCH_DIR
+                ).exists()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "folderExists check failed", e)
+            false
+        }
+    }
+
+    /**
+     * Creates `Download/VidFetch` when it is missing.
+     *
+     * @return true when the folder is present (or will be, on the first save)
+     */
+    fun ensureVidFetchFolder(context: Context): Boolean {
+        return try {
+            // Already there — leave it alone. Recreating an existing folder, or
+            // prompting for a permission the user already granted, is what made
+            // the app ask on every single launch.
+            if (folderExists(context)) return true
+            if (needsStoragePermission() &&
+                ContextCompat.checkSelfPermission(
+                    context, Manifest.permission.WRITE_EXTERNAL_STORAGE
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                return false
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // No permission required: the folder is created by the first
+                // MediaStore insert, and it shows up in Files from then on.
+                true
+            } else {
+                File(
+                    Environment.getExternalStoragePublicDirectory(
+                        Environment.DIRECTORY_DOWNLOADS
+                    ),
+                    VIDFETCH_DIR
+                ).let { it.exists() || it.mkdirs() }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "ensureVidFetchFolder failed", e)
+            false
         }
     }
 }

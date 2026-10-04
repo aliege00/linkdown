@@ -20,6 +20,9 @@ import {
   clearCookieFile,
   setPoTokenProvider,
   cancelDownload,
+  getActiveDownload,
+  ensureDownloadFolder,
+  watchActiveDownload,
   isNativeAvailable,
   formatDuration,
   formatSize,
@@ -825,8 +828,8 @@ const PlaylistPanel = memo(function PlaylistPanel({
       </Button>
       <p className="text-xs text-center text-muted-foreground/70 -mt-2">
         {tr
-          ? "Her video tek bir liste klasörüne kaydedilir (Downloads/VidFetch)"
-          : "Saves every video into one playlist folder in Downloads/VidFetch"}
+          ? "Her video tek bir liste klasörüne kaydedilir (Download/VidFetch)"
+          : "Saves every video into one playlist folder in Download/VidFetch"}
       </p>
     </div>
   );
@@ -886,7 +889,7 @@ const NativeToolsPanel = memo(function NativeToolsPanel({
                 {tr ? "İndirme konumu" : "Download location"}
               </p>
               <p className="text-sm font-semibold truncate">
-                {downloadLocation?.uri ? downloadLocation.name : "Downloads/VidFetch"}
+                {downloadLocation?.uri ? downloadLocation.name : "Download/VidFetch"}
               </p>
             </div>
             <Button
@@ -1541,6 +1544,124 @@ export default function DownloaderCard({
     [onStateChange],
   );
 
+  /**
+   * Arms the stall watchdog: if the bar has been frozen for
+   * [STALLED_DOWNLOAD_MS] while the page still claims to be downloading, stop
+   * claiming to be downloading.
+   *
+   * This watches FROZEN PROGRESS, not elapsed time. A flat 120 s timer used to
+   * live here, which is well inside a normal download: a 200 MB video on a
+   * phone connection runs for many minutes, so the card flipped to "complete"
+   * and then back to "loaded" while the file was still arriving. Only step in
+   * when the bar has been silent AND no completion event arrived.
+   *
+   * Shared by the normal start path and by the re-attach path, so a download
+   * adopted on mount is guarded exactly like one this card started.
+   */
+  const stopStallWatchdog = useCallback(() => {
+    if (safetyTimerRef.current !== null) {
+      clearInterval(safetyTimerRef.current);
+      safetyTimerRef.current = null;
+    }
+  }, []);
+
+  const startStallWatchdog = useCallback(() => {
+    if (safetyTimerRef.current !== null) clearInterval(safetyTimerRef.current);
+    safetyTimerRef.current = setInterval(() => {
+      if (stateRef.current !== "downloading") {
+        stopStallWatchdog();
+        return;
+      }
+      if (Date.now() - lastProgressAtRef.current > STALLED_DOWNLOAD_MS) {
+        stopStallWatchdog();
+        updateState("complete");
+      }
+    }, 5000);
+  }, [updateState, stopStallWatchdog]);
+
+  // ── Re-attach to a download this component did not start ──────────
+  //
+  // The card's own state used to be the only place a download existed as far
+  // as the UI was concerned, so any remount — a tab switch, or Android
+  // recreating the Activity while the app sat in the background — lost the
+  // progress bar and left an empty form on screen while WorkManager carried
+  // on downloading. The job is the source of truth now, not the component:
+  // ask the device what is running and adopt it.
+  //
+  // The restored handlers deliberately do NOT read url/videoInfo. Those belong
+  // to this fresh mount (usually empty), and writing a history entry from them
+  // would record a blank title. The finished file is still picked up below
+  // through getDownloads(), which reads the device.
+  useEffect(() => {
+    if (!isNativeAvailable()) return;
+
+    // Ask for storage access now, once, so the very first download does not
+    // fail on a device that gates the public folder behind a grant. This is a
+    // no-op on Android 10+ and on any device where Download/VidFetch already
+    // exists — it never prompts twice.
+    void ensureDownloadFolder().catch(() => {});
+
+    let cancelled = false;
+    let detach: (() => void) | null = null;
+
+    void (async () => {
+      const snapshot = await getActiveDownload();
+      if (cancelled || !snapshot?.active) return;
+
+      // Adopt the running job: bar, page state and cancel handle.
+      workIdRef.current = snapshot.workId || null;
+      lastProgressAtRef.current = Date.now();
+      updateState("downloading");
+      setDownloadProgress({
+        percent: snapshot.percent,
+        speed: snapshot.speed,
+        eta: snapshot.eta,
+        item: snapshot.item || undefined,
+        itemCount: snapshot.itemCount || undefined,
+      });
+      startStallWatchdog();
+
+      const stop = await watchActiveDownload({
+        onProgress: (progress) => {
+          lastProgressAtRef.current = Date.now();
+          setDownloadProgress((prev) => ({
+            percent: progress.percent,
+            speed: progress.speed,
+            eta: progress.eta,
+            item: progress.item ?? prev.item,
+            itemCount: progress.itemCount ?? prev.itemCount,
+            fileName: progress.fileName ?? prev.fileName,
+          }));
+          if (progress.percent >= 100) updateState("complete");
+        },
+        onComplete: async (completed) => {
+          workIdRef.current = null;
+          stopStallWatchdog();
+          setLastCompleted(completed);
+          updateState("complete");
+          const list = await getDownloads();
+          if (list.length > 0) setSavedDownloads(list);
+        },
+        onError: (error) => {
+          workIdRef.current = null;
+          stopStallWatchdog();
+          setErrorMsg(error);
+          setErrorPhase("download");
+          updateState("error");
+        },
+      });
+      if (cancelled) stop();
+      else detach = stop;
+    })().catch(() => {});
+
+    return () => {
+      cancelled = true;
+      detach?.();
+    };
+    // Mount-only on purpose: this adopts whatever is running right now, once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Load the list of files already saved (APK only) + the chosen location
   useEffect(() => {
     if (!isNativeAvailable()) return;
@@ -1910,27 +2031,11 @@ export default function DownloaderCard({
     // downloadComplete/downloadError, and progress events keep the
     // progress screen alive until 100%. This fallback exists purely
     // so the UI can never get stuck on "downloading" if an event is lost
-    // (e.g. an old build without the complete event).
-    //
-    // It watches for STALLED progress, not elapsed time. The old version
-    // was a flat 120 s timer, which is well inside a normal download: a
-    // 200 MB video on a phone connection runs for many minutes, so the
-    // card flipped to "complete" and then back to "loaded" while the file
-    // was still arriving — exactly the "everything reset but it is still
-    // downloading" report. Only step in when the bar has been frozen for
-    // a long time AND no completion event arrived.
-    if (safetyTimerRef.current !== null) clearInterval(safetyTimerRef.current);
+    // (e.g. an old build without the complete event). See
+    // startStallWatchdog for why it watches FROZEN PROGRESS rather than
+    // elapsed time.
     if (completeResetTimerRef.current !== null) clearTimeout(completeResetTimerRef.current);
-    safetyTimerRef.current = setInterval(() => {
-      if (stateRef.current !== "downloading") {
-        if (safetyTimerRef.current !== null) clearInterval(safetyTimerRef.current);
-        return;
-      }
-      if (Date.now() - lastProgressAtRef.current > STALLED_DOWNLOAD_MS) {
-        if (safetyTimerRef.current !== null) clearInterval(safetyTimerRef.current);
-        updateState("complete");
-      }
-    }, 5000);
+    startStallWatchdog();
 
     // Reset "complete" state after a short delay so the success animation
     // is visible but the user can quickly start a new download.
@@ -1950,7 +2055,7 @@ export default function DownloaderCard({
       setErrorPhase("download");
       updateState("error");
     }
-  }, [url, selectedFormat, videoInfo, updateState, refreshHistory, helpLang]);
+  }, [url, selectedFormat, videoInfo, updateState, refreshHistory, helpLang, startStallWatchdog]);
 
   // ─── Playlist download (all videos at once) ───────────────────────
   const handleDownloadPlaylist = useCallback(async () => {
@@ -2063,18 +2168,8 @@ export default function DownloaderCard({
     // downloads. A flat 10-minute timer was wrong here too: a long playlist
     // is still progressing long after that, and announcing "complete"
     // mid-transfer is the bug this whole change is about.
-    if (safetyTimerRef.current !== null) clearInterval(safetyTimerRef.current);
     if (completeResetTimerRef.current !== null) clearTimeout(completeResetTimerRef.current);
-    safetyTimerRef.current = setInterval(() => {
-      if (stateRef.current !== "downloading") {
-        if (safetyTimerRef.current !== null) clearInterval(safetyTimerRef.current);
-        return;
-      }
-      if (Date.now() - lastProgressAtRef.current > STALLED_DOWNLOAD_MS) {
-        if (safetyTimerRef.current !== null) clearInterval(safetyTimerRef.current);
-        updateState("complete");
-      }
-    }, 5000);
+    startStallWatchdog();
     completeResetTimerRef.current = setTimeout(() => {
       if (stateRef.current === "complete") updateState("loaded");
     }, 10000);
@@ -2090,7 +2185,7 @@ export default function DownloaderCard({
       setErrorPhase("download");
       updateState("error");
     }
-  }, [url, videoInfo, playlistQuality, updateState, refreshHistory, helpLang]);
+  }, [url, videoInfo, playlistQuality, updateState, refreshHistory, helpLang, startStallWatchdog]);
 
   // Keep the auto-playlist ref pointing at the latest handler.
   // ─── Single video out of a playlist ───────────────────────────────────
@@ -3064,7 +3159,7 @@ export default function DownloaderCard({
                       <>
                         {playlistSummary.saved} videos saved to{" "}
                         <strong>
-                          Downloads/VidFetch
+                          Download/VidFetch
                           {playlistSummary.folder
                             ? `/${playlistSummary.folder}`
                             : ""}
@@ -3072,7 +3167,7 @@ export default function DownloaderCard({
                       </>
                     ) : (
                       <>
-                        Video saved to <strong>Downloads/VidFetch</strong>
+                        Video saved to <strong>Download/VidFetch</strong>
                       </>
                     )}
                   </p>

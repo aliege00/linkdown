@@ -11,6 +11,7 @@ import android.util.Log
 import androidx.activity.result.ActivityResult
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.work.BackoffPolicy
 import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequest
@@ -23,6 +24,8 @@ import com.getcapacitor.PluginMethod
 import androidx.documentfile.provider.DocumentFile
 import com.getcapacitor.annotation.ActivityCallback
 import com.getcapacitor.annotation.CapacitorPlugin
+import com.getcapacitor.annotation.Permission
+import com.getcapacitor.annotation.PermissionCallback
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import org.json.JSONArray
@@ -30,6 +33,7 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 /**
  * Capacitor plugin that bridges yt-dlp video download functionality
@@ -40,14 +44,24 @@ import java.util.UUID
  *   - startDownload({ url, formatId })→ Start foreground download
  *   - cancelDownload({ workId })      → Cancel a download
  *   - openFile({ uri })               → Open a saved file with the system viewer
- *   - getDownloads()                  → List saved files (Downloads/VidFetch)
+ *   - getDownloads()                  → List saved files (Download/VidFetch)
+ *   - getActiveDownload()             → State of the running download chain
+ *   - ensureDownloadFolder()          → Create Download/VidFetch if missing
  *
  * Events emitted to JS:
  *   - downloadProgress { percent, speed, eta }
  *   - downloadComplete { uri, fileName }
  *   - downloadError { error }
  */
-@CapacitorPlugin(name = "YtDlp")
+@CapacitorPlugin(
+    name = "YtDlp",
+    permissions = [
+        Permission(
+            alias = "storage",
+            strings = [Manifest.permission.WRITE_EXTERNAL_STORAGE]
+        )
+    ]
+)
 /*
  * Error handling note: every catch on the JS boundary is `Throwable`, not
  * `Exception`. The engine (Chaquopy/yt-dlp) raises `Error` subclasses —
@@ -90,6 +104,30 @@ class DownloadBridge : Plugin() {
         mutableListOf<Pair<androidx.lifecycle.LiveData<WorkInfo?>, androidx.lifecycle.Observer<WorkInfo?>>>()
 
     /**
+     * Work IDs already observed, so a re-attach never double-observes (which
+     * would deliver every progress event twice).
+     */
+    private val observedWorkIds = mutableSetOf<UUID>()
+
+    /**
+     * Attaches observers for downloads that are still running.
+     *
+     * This is the other half of the "switching tabs kills the download"
+     * report. The observer lived only on the `startDownload()` call, so any
+     * time the Activity was recreated — Android drops a backgrounded Activity
+     * to save memory, and the user returns by tapping the download
+     * notification — the whole plugin instance, and with it every observer,
+     * was gone. WorkManager happily kept downloading, but no progress and no
+     * completion event ever reached the web UI again: the bar froze where it
+     * was and the file finished unseen. Re-attaching on `load()` restores the
+     * event stream for whatever is still in flight.
+     */
+    override fun load() {
+        super.load()
+        reattachRunningWork()
+    }
+
+    /**
      * Runs [block] on the Android main (UI) thread, immediately when the
      * caller is already there.
      */
@@ -105,8 +143,153 @@ class DownloadBridge : Plugin() {
                 liveData.removeObserver(observer)
             }
             activeObservers.clear()
+            observedWorkIds.clear()
         }
         super.handleOnDestroy()
+    }
+
+    /**
+     * Finds any unfinished job in the download chain and re-observes it.
+     * Runs the WorkManager query off the plugin thread and only touches
+     * LiveData back on the main thread.
+     */
+    private fun reattachRunningWork() {
+        Thread {
+            runCatching {
+                WorkManager.getInstance(context)
+                    .getWorkInfosForUniqueWork(DownloadWorker.UNIQUE_WORK_NAME)
+                    .get()
+            }.getOrNull()
+                ?.filter { !it.state.isFinished }
+                ?.forEach { info ->
+                    runOnMain {
+                        if (observedWorkIds.add(info.id)) attachWorkObserver(info.id)
+                    }
+                }
+        }.start()
+    }
+
+    /**
+     * The current state of the download chain, so a freshly mounted UI can
+     * show a download it did not start itself.
+     *
+     * The web layer kept every piece of download state in React component
+     * state, so the progress bar belonged to whichever screen happened to be
+     * mounted. This endpoint makes the running job the single source of truth
+     * instead of the component.
+     */
+    @PluginMethod
+    fun getActiveDownload(call: PluginCall) {
+        Thread {
+            try {
+                val infos = runCatching {
+                    WorkManager.getInstance(context)
+                        .getWorkInfosForUniqueWork(DownloadWorker.UNIQUE_WORK_NAME)
+                        .get()
+                }.getOrNull().orEmpty()
+
+                val running = infos.firstOrNull { !it.state.isFinished }
+                val latest = running ?: infos.lastOrNull()
+
+                val progress = latest?.progress
+                val output = latest?.outputData
+                call.resolve(JSObject().apply {
+                    put("active", running != null)
+                    put("state", latest?.state?.name ?: "NONE")
+                    // Handed back so a remounted UI can still cancel the job.
+                    put("workId", latest?.id?.toString() ?: "")
+                    put("percent", progress?.getInt(DownloadWorker.KEY_PROGRESS, 0) ?: 0)
+                    put("speed", progress?.getString(DownloadWorker.KEY_SPEED) ?: "0")
+                    put("eta", progress?.getString(DownloadWorker.KEY_ETA) ?: "--:--")
+                    put("item", progress?.getInt(DownloadWorker.KEY_ITEM, 0) ?: 0)
+                    put("itemCount", progress?.getInt(DownloadWorker.KEY_ITEM_COUNT, 0) ?: 0)
+                    put("isPlaylist", output?.getBoolean(DownloadWorker.KEY_IS_PLAYLIST, false) ?: false)
+                    put("uri", output?.getString(DownloadWorker.KEY_OUTPUT_URI) ?: "")
+                    put("fileName", output?.getString(DownloadWorker.KEY_OUTPUT_NAME) ?: "")
+                    put("error", output?.getString(DownloadWorker.KEY_OUTPUT_ERROR) ?: "")
+                })
+            } catch (e: Throwable) {
+                Log.e(TAG, "getActiveDownload failed", e)
+                call.reject(e.message ?: "Failed to read download state")
+            }
+        }.start()
+    }
+
+    // ── Download folder bootstrap ────────────────────────────────────
+
+    /**
+     * Makes sure `Download/VidFetch` is ready before the first download, and
+     * asks for storage access only when the platform actually requires it.
+     *
+     * Never asks twice: the folder check runs first, and the permission
+     * request is only reached when the folder is missing AND the Android
+     * version gates the public directory behind a runtime grant (API < 29).
+     * Android 10+ needs no permission at all, so modern devices are never
+     * interrupted by a dialog.
+     */
+    @PluginMethod
+    fun ensureDownloadFolder(call: PluginCall) {
+        val needsGrant = MediaStoreHelper.needsStoragePermission() &&
+            ContextCompat.checkSelfPermission(
+                context, Manifest.permission.WRITE_EXTERNAL_STORAGE
+            ) != PackageManager.PERMISSION_GRANTED
+
+        if (!needsGrant) {
+            resolveFolderState(call, requested = false)
+            return
+        }
+
+        val act = activity
+        if (act == null) {
+            // No Activity to prompt from (headless start): report the need and
+            // let the UI offer the button instead of failing the whole call.
+            call.resolve(JSObject().apply {
+                put("ready", MediaStoreHelper.folderExists(context))
+                put("needsPermission", true)
+                put("path", MediaStoreHelper.VIDFETCH_PATH)
+            })
+            return
+        }
+
+        runOnMain {
+            // The alias is declared on @CapacitorPlugin above; Capacitor maps
+            // it to the permission string and remembers the call until the
+            // user answers the system dialog.
+            requestPermissionForAlias("storage", call, "storagePermissionCallback")
+        }
+    }
+
+    /**
+     * Runs after the system permission dialog, granted or denied.
+     *
+     * Capacitor invokes the callback with the saved [PluginCall] only, so the
+     * outcome is re-read from the platform rather than passed in. A denial is
+     * not an error: the download still works on any device where the folder
+     // is reachable, and the UI reports `ready: false` instead of throwing.
+     */
+    @PermissionCallback
+    private fun storagePermissionCallback(call: PluginCall) {
+        val granted = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.WRITE_EXTERNAL_STORAGE
+        ) == PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            MediaStoreHelper.ensureVidFetchFolder(context)
+        } else {
+            Log.i(TAG, "storage permission denied — Download/VidFetch will be created on the next grant")
+        }
+        resolveFolderState(call, requested = true)
+    }
+
+    /** Answers `ensureDownloadFolder` with the folder's final state. */
+    private fun resolveFolderState(call: PluginCall, requested: Boolean) {
+        val ready = runCatching { MediaStoreHelper.ensureVidFetchFolder(context) }
+            .getOrDefault(false)
+        call.resolve(JSObject().apply {
+            put("ready", ready)
+            put("permissionRequested", requested)
+            put("needsPermission", MediaStoreHelper.needsStoragePermission())
+            put("path", MediaStoreHelper.VIDFETCH_PATH)
+        })
     }
 
     // ── Extract Video Info ─────────────────────────────────────────
@@ -417,6 +600,11 @@ class DownloadBridge : Plugin() {
         val workRequest = OneTimeWorkRequest.Builder(DownloadWorker::class.java)
             .setInputData(inputData)
             .addTag(DownloadWorker.TAG)
+            // Linear, 10 s: the worker retries a stalled download immediately
+            // after it detects the stall. WorkManager's default is EXPONENTIAL
+            // from 30 s, so a dropped connection used to cost the user a
+            // half-minute of "nothing happening" before the retry even started.
+            .setBackoffCriteria(BackoffPolicy.LINEAR, 10, TimeUnit.SECONDS)
             .build()
 
         currentWorkId = workRequest.id
@@ -697,6 +885,7 @@ class DownloadBridge : Plugin() {
 
     /** Attaches the progress observer. MUST be called on the main thread. */
     private fun attachWorkObserver(workId: UUID) {
+        if (!observedWorkIds.add(workId)) return
         // Observe via a standalone LiveData + observer and REMOVE the observer
         // once the work reaches a terminal state. Without this, every download
         // registers a new observerForever that is never cleaned up — observers
@@ -710,7 +899,13 @@ class DownloadBridge : Plugin() {
             if (workInfo == null) return@Observer
 
             when (workInfo.state) {
-                WorkInfo.State.RUNNING -> {
+                WorkInfo.State.RUNNING, WorkInfo.State.ENQUEUED -> {
+                    // ENQUEUED is included on purpose: it is the state the job
+                    // sits in while WorkManager waits out the backoff before
+                    // restarting a download the watchdog killed. Forwarding the
+                    // last known progress keeps the UI (and its own stall
+                    // watchdog) alive instead of letting the screen look frozen
+                    // during a retry that is already under way.
                     val progress = workInfo.progress
                     val percent = progress.getInt(DownloadWorker.KEY_PROGRESS, 0)
                     val speed = progress.getString(DownloadWorker.KEY_SPEED) ?: "0"
@@ -734,6 +929,7 @@ class DownloadBridge : Plugin() {
                     })
                     liveData.removeObserver(observer)
                     activeObservers.remove(liveData to observer)
+                    observedWorkIds.remove(workId)
                 }
                 WorkInfo.State.FAILED, WorkInfo.State.CANCELLED -> {
                     // Surface the actual error message from the worker
@@ -753,6 +949,7 @@ class DownloadBridge : Plugin() {
                     })
                     liveData.removeObserver(observer)
                     activeObservers.remove(liveData to observer)
+                    observedWorkIds.remove(workId)
                 }
                 else -> { /* ignore */ }
             }

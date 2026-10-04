@@ -22,6 +22,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -130,6 +131,79 @@ internal class ProgressAggregator(private val planned: Int) {
 }
 
 /**
+ * Decides when yt-dlp has gone quiet for so long that the download is dead
+ * rather than merely slow, so the worker can restart it instead of leaving the
+ * bar frozen forever.
+ *
+ * The shipped bug was "some videos stay at 0% and never continue". yt-dlp is a
+ * separate process driven over pipes: when that process wedges — a socket that
+ * opens but never delivers, a fragment range the CDN never answers, a DNS or
+ * TLS black hole on a phone that just lost signal — it simply stops printing
+ * progress lines. Nothing in the worker noticed, `YoutubeDL.execute` never
+ * returned and never threw, so the job sat at whatever percentage it last
+ * reached (usually 0 %, because the wedge almost always happens during format
+ * resolution or on the first fragment) until the user gave up.
+ *
+ * Two rules keep this from firing on healthy downloads:
+ *
+ *  1. **Any output counts as life.** yt-dlp prints plenty of non-progress
+ *     lines; every one of them proves the process is awake, so each callback
+ *     re-arms the timer. Only total silence trips the watchdog.
+ *  2. **Post-processing gets a longer leash.** After the last fragment yt-dlp
+ *     merges the streams with ffmpeg, which prints nothing while it works and
+ *     can take minutes on a large file. A download that is 100% of the way
+ *     through must never be killed for being quiet, so the mute window widens
+ *     once a post-processor marker appears.
+ */
+internal class StallWatchdog(
+    private val timeoutMs: Long,
+    private val postProcessTimeoutMs: Long
+) {
+
+    private var lastActivityAt = 0L
+    private var postProcessing = false
+
+    /** Starts (or restarts) the window from [nowMs]. */
+    fun arm(nowMs: Long) {
+        lastActivityAt = nowMs
+        postProcessing = false
+    }
+
+    /**
+     * Records one yt-dlp output line.
+     *
+     * @param line the raw line from the process, or null when none is available
+     * @param nowMs a monotonic clock reading, in milliseconds
+     */
+    fun onLine(line: String?, nowMs: Long) {
+        lastActivityAt = nowMs
+        if (line != null && POST_PROCESS_MARKERS.any { line.contains(it) }) {
+            postProcessing = true
+        }
+    }
+
+    /** Milliseconds since yt-dlp last said anything. */
+    fun idleMs(nowMs: Long): Long = nowMs - lastActivityAt
+
+    /** The mute window currently in force. */
+    fun limitMs(): Long = if (postProcessing) postProcessTimeoutMs else timeoutMs
+
+    /** True when yt-dlp has been silent for longer than the window allows. */
+    fun isStalled(nowMs: Long): Boolean = idleMs(nowMs) > limitMs()
+
+    companion object {
+        /** Lines that prove yt-dlp reached the ffmpeg merge / fixup stage. */
+        val POST_PROCESS_MARKERS = listOf(
+            "[Merger]",
+            "[ExtractAudio]",
+            "[VideoConvertor]",
+            "[Fixup",
+            "Merging formats",
+        )
+    }
+}
+
+/**
  * WorkManager CoroutineWorker that downloads videos using yt-dlp
  * in a persistent foreground service.
  *
@@ -161,6 +235,54 @@ class DownloadWorker(
         private const val NOTIFICATION_ID = 1001
         private const val COMPLETE_NOTIFICATION_ID = 1002
 
+        /**
+         * How long yt-dlp may print nothing before the worker assumes the
+         * process is wedged and restarts it. Comfortably longer than a normal
+         * pause between fragments, short enough that a real hang is not a
+         * multi-minute wait for the user.
+         */
+        const val STALL_TIMEOUT_MS = 45_000L
+
+        /**
+         * The same window while ffmpeg merges the streams. Merging a large
+         * 1080p file is silent and slow, so killing it would destroy a
+         * download that is already finished transferring.
+         */
+        const val POST_PROCESS_STALL_TIMEOUT_MS = 180_000L
+
+        /**
+         * Network + parallelism flags shared by the first attempt AND every
+         * player-client retry, so a retry can never be slower than the original.
+         *
+         * Why exactly these, per yt-dlp's own documentation:
+         *
+         *  - `--concurrent-fragments 8` is the only real throughput lever.
+         *    YouTube serves DASH/HLS, which are lists of fragments that yt-dlp
+         *    otherwise fetches strictly one at a time; raising the count lets
+         *    it keep several in flight at once.
+         *  - `--http-chunk-size` is deliberately NOT here. yt-dlp documents it
+         *    as an *experimental* throttle bypass for chunk-based HTTP
+         *    downloads, and yt-dlp's FAQ notes YouTube throttles chunked
+         *    requests. It raises no ceiling (the per-request rate limit is the
+         *    real limit) and when a CDN answers the chunk request slowly or
+         *    mishandles the Range header, the downloader waits on data that
+         *    never arrives — precisely the "stuck at 0%" report. Dropping it is
+         *    the stall fix; the fragments flag is what speeds us up.
+         *  - The timeout and retry flags turn a dead connection into a resume
+         *    instead of an indefinite wait: the socket read timeout aborts the
+         *    hung request, `--retry-sleep linear=1::2` restarts it after a short
+         *    and growing pause, and the retry counts give a phone that briefly
+         *    loses signal enough chances to finish.
+         */
+        val NETWORK_OPTIONS: List<Pair<String, String?>> = listOf(
+            "--concurrent-fragments" to "8",
+            "--socket-timeout" to "30",
+            "--retries" to "10",
+            "--fragment-retries" to "10",
+            "--file-access-retries" to "3",
+            "--retry-sleep" to "linear=1::2",
+        )
+
         // Matches a speed token from the yt-dlp progress line, e.g. "12.5MiB/s"
         private val SPEED_PATTERN =
             Regex("([0-9]+(?:\\.[0-9]+)?\\s?[KMGTP]?i?B/s)")
@@ -176,6 +298,17 @@ class DownloadWorker(
             Regex("\\[download\\]\\s+Destination:\\s+(.+?)\\s*$")
         private val ALREADY_DOWNLOADED_PATTERN =
             Regex("\\[download\\]\\s+(.+?)\\s+has already been downloaded")
+
+        /**
+         * Thrown when yt-dlp stops talking for longer than
+         * [STALL_TIMEOUT_MS]. It is not a failure the user caused, so the
+         * catch block turns it into a `Result.retry()` — WorkManager restarts
+         * the worker, yt-dlp resumes the `.part` file it already has, and the
+         * download continues from where it froze instead of dying.
+         */
+        class DownloadStalledException : Exception(
+            "The download stopped making progress and was restarted automatically."
+        )
 
         /**
          * Player-client rotation for YouTube's "Sign in to confirm you're
@@ -236,37 +369,10 @@ class DownloadWorker(
             }
 
             // ── Step 3: Build yt-dlp request ───────────────────────
-            val request = YoutubeDLRequest(url).apply {
-                addOption("-f", formatId)
-                if (!isPlaylist) addOption("--no-playlist")
-                addOption("--no-warnings")
-                addOption("--no-cache-dir")
-                // ── Download speed ─────────────────────────────
-                // Merged (bestvideo+bestaudio) downloads and YouTube's
-                // DASH sources are split into fragments; fetching several
-                // in parallel plus large HTTP ranges substantially raises
-                // throughput on fast connections. yt-dlp caps these
-                // internally for servers that reject ranges, so they are
-                // safe defaults for every site.
-                addOption("--concurrent-fragments", "4")
-                addOption("--http-chunk-size", "10M")
-                // NOTE: --merge-output-format intentionally omitted.
-                // Forcing MP4 when the source uses VP9/AV1 codecs produces
-                // a container Android's MediaCodec cannot decode.  yt-dlp
-                // picks the best native container automatically (mp4 for
-                // H.264, webm for VP9/AV1).  The MIME type is resolved
-                // from the real extension in MediaStoreHelper.mimeTypeFor().
-                addOption("-o", outputTemplate)
-
-                // Authenticated YouTube requests (cookies.txt imported by the
-                // user in the advanced settings) bypass the bot check.
-                if (DownloadPrefs.getCookiesFileName(applicationContext) != null) {
-                    val cookieFile = File(applicationContext.filesDir, "cookies.txt")
-                    if (cookieFile.exists()) {
-                        addOption("--cookies", cookieFile.absolutePath)
-                    }
-                }
-            }
+            // Every request in this worker (the first attempt and each
+            // player-client retry) is built by newRequest(), so a retry can
+            // never be missing a flag the original had.
+            val request = newRequest(url, formatId, isPlaylist, outputTemplate)
 
             // ── Step 4: Execute download with real-time progress ──
             // On a bot-check failure, automatically retry with alternate
@@ -280,8 +386,16 @@ class DownloadWorker(
             // job writes more than one file (video, then audio) and merges
             // them afterwards. See ProgressAggregator for the full rationale.
             val progress = ProgressAggregator(ProgressAggregator.streamCountFor(formatId))
+            // Turns "yt-dlp went silent forever" into "restart and resume".
+            val stallWatchdog = StallWatchdog(
+                STALL_TIMEOUT_MS, POST_PROCESS_STALL_TIMEOUT_MS
+            )
+            stallWatchdog.arm(SystemClock.elapsedRealtime())
 
             val progressCb: (Float, Long, String?) -> Unit = { percent, etaSeconds, line ->
+                // Any output at all proves the process is alive — re-arm
+                // before doing anything else with the line.
+                stallWatchdog.onLine(line, SystemClock.elapsedRealtime())
                 val speed = SPEED_PATTERN.find(line ?: "")?.groupValues?.getOrNull(1) ?: "0 B/s"
                 val eta = formatEta(etaSeconds)
 
@@ -351,9 +465,49 @@ class DownloadWorker(
             // when configured). If YouTube's bot-check wall trips, rotate the
             // player client — different clients almost always get through
             // WITHOUT any cookies.
-            runDownloadWithClients(
-                request, url, formatId, isPlaylist, outputTemplate, processId, progressCb,
-            )
+            //
+            // The watchdog runs for exactly as long as execute() is inside the
+            // call: it is cancelled the moment yt-dlp returns, so the silent
+            // ffmpeg merge that happens INSIDE execute() is covered (its lines
+            // widen the window) but the post-download save/merge bookkeeping
+            // outside it is never watched.
+            //
+            // It only RECORDS the stall and kills the wedged process — it does
+            // not throw. progressScope is a SupervisorJob with no
+            // CoroutineExceptionHandler, so an exception escaping this launch
+            // would reach the global handler and take the app down; that is
+            // exactly the class of bug this worker was hardened against. The
+            // throw happens below, on doWork's own coroutine, where the catch
+            // block turns it into a clean retry.
+            var stalledByWatchdog = false
+            val stallJob = progressScope.launch {
+                while (true) {
+                    delay(5_000)
+                    val idle = stallWatchdog.idleMs(SystemClock.elapsedRealtime())
+                    if (stallWatchdog.isStalled(SystemClock.elapsedRealtime())) {
+                        Log.w(TAG, "yt-dlp silent for ${idle}ms — killing and restarting")
+                        stalledByWatchdog = true
+                        setForegroundSafely(
+                            "Bağlantı takıldı, yeniden deneniyor…", progress.percent
+                        )
+                        // Kill the wedged process so execute() unblocks instead
+                        // of waiting on a pipe that will never produce another
+                        // line. The `.part` file survives, so the retry resumes
+                        // rather than starting the file over.
+                        runCatching { YoutubeDL.destroyProcessById(processId) }
+                        break
+                    }
+                }
+            }
+
+            try {
+                runDownloadWithClients(
+                    request, url, formatId, isPlaylist, outputTemplate, processId, progressCb,
+                )
+            } finally {
+                stallJob.cancel()
+            }
+            if (stalledByWatchdog) throw DownloadStalledException()
 
             // yt-dlp returned: the ffmpeg merge is done too, so the job is
             // genuinely complete and the bar can finally read 100 %.
@@ -445,7 +599,7 @@ class DownloadWorker(
                 downloaded.delete()
                 savedName = downloaded.name
             } else if (downloaded != null && downloaded.exists() && downloaded.isFile) {
-                setForegroundSafely("Saving to Downloads…", 100)
+                setForegroundSafely("Saving to ${MediaStoreHelper.VIDFETCH_PATH}…", 100)
                 val mime = MediaStoreHelper.mimeTypeFor(downloaded.name)
                 // Save into the user's chosen folder when set, otherwise the
                 // default Downloads/VidFetch folder.
@@ -493,7 +647,15 @@ class DownloadWorker(
             e.printStackTrace()
             // Build an actionable error message that survives the
             // WorkManager → observer → frontend pipeline.
-            val errorMsg = e.message ?: "Download failed"
+            val errorMsg = if (e is DownloadStalledException) {
+                // The engine kept going silent on this network. Say so plainly
+                // instead of the generic failure string — the user needs to
+                // know it is their connection, not a broken video.
+                "The connection kept dropping and the download could not continue. " +
+                    "It was restarted automatically several times — try again on a steadier network."
+            } else {
+                e.message ?: "Download failed"
+            }
 
             // NOTE: no manual notification here — posting on the FGS id races
             // WorkManager's cancellation when the service stops (flicker),
@@ -516,6 +678,47 @@ class DownloadWorker(
     }
 
     // ── Download with automatic bot-check fallback ─────────────────
+
+    /**
+     * Builds one yt-dlp request with the full shared option set.
+     *
+     * Every request in this worker goes through here. The previous code wrote
+     * the options out twice and the two copies had already drifted: the retry
+     * request silently dropped the user's imported cookies.txt and the network
+     * flags. A retry built from the same builder can not drift again.
+     *
+     * NOTE: `--merge-output-format` is intentionally omitted. Forcing MP4 when
+     * the source uses VP9/AV1 produces a container Android's MediaCodec cannot
+     * decode. yt-dlp picks the best native container automatically (mp4 for
+     * H.264, webm for VP9/AV1) and the MIME type is resolved from the real
+     * extension in MediaStoreHelper.mimeTypeFor().
+     *
+     * @param extraArgs additional single-value flags, e.g. a player-client override
+     */
+    private fun newRequest(
+        url: String,
+        formatId: String,
+        isPlaylist: Boolean,
+        outputTemplate: String,
+        extraArgs: List<String> = emptyList(),
+    ): YoutubeDLRequest = YoutubeDLRequest(url).apply {
+        addOption("-f", formatId)
+        if (!isPlaylist) addOption("--no-playlist")
+        addOption("--no-warnings")
+        addOption("--no-cache-dir")
+        for ((flag, value) in NETWORK_OPTIONS) {
+            if (value == null) addOption(flag) else addOption(flag, value)
+        }
+        addOption("-o", outputTemplate)
+        // Authenticated YouTube requests (cookies.txt imported by the user in
+        // the advanced settings) bypass the bot check.
+        val cookieFile = File(applicationContext.filesDir, "cookies.txt")
+        if (DownloadPrefs.getCookiesFileName(applicationContext) != null && cookieFile.exists()) {
+            addOption("--cookies", cookieFile.absolutePath)
+        }
+        // --extractor-args arrives as flag/value pairs, flattened.
+        extraArgs.forEach { addOption(it) }
+    }
 
     /**
      * Runs the download; if yt-dlp throws a bot-check error, transparently
@@ -545,18 +748,9 @@ class DownloadWorker(
         var last: Throwable? = null
         for (retry in BOT_CHECK_ARGS) {
             try {
-                val retryReq = YoutubeDLRequest(url).apply {
-                    addOption("-f", formatId)
-                    if (!isPlaylist) addOption("--no-playlist")
-                    addOption("--no-warnings")
-                    addOption("--no-cache-dir")
-                    // Same speed flags as the primary request — retries
-                    // should be just as fast.
-                    addOption("--concurrent-fragments", "4")
-                    addOption("--http-chunk-size", "10M")
-                    addOption("-o", outputTemplate)
-                    retry.forEach { addOption(it) }
-                }
+                // Same builder as the first attempt, so a retry keeps the speed
+                // flags AND the user's cookies.
+                val retryReq = newRequest(url, formatId, isPlaylist, outputTemplate, retry)
                 YoutubeDL.execute(retryReq, processId, true, progressCb)
                 return
             } catch (e: Throwable) {
@@ -654,7 +848,7 @@ class DownloadWorker(
         manager?.notify(
             COMPLETE_NOTIFICATION_ID,
             createNotification(
-                fileName ?: "Saved to Downloads/VidFetch",
+                fileName ?: "Saved to ${MediaStoreHelper.VIDFETCH_PATH}",
                 100,
                 true,
                 openUri,

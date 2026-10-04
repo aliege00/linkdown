@@ -101,34 +101,43 @@ export default function Dashboard() {
           compositor-driven, so a tab switch costs no layout or paint. The
           whole thing is also disabled by MotionConfig reducedMotion="user"
           in main.tsx, so prefers-reduced-motion users see an instant swap
-          with no fade at all. */}
+          with no fade at all.
+
+          ⚠️ The DOWNLOAD tab is deliberately NOT inside AnimatePresence.
+          It used to be, and every tab switch tore the card down and built a
+          brand new one. The download itself kept running (it is a WorkManager
+          job, not a component), but ALL of its UI state — the progress bar,
+          the page state machine, the stall watchdog, the cancel handle —
+          lived in that component's React state and was destroyed with it.
+          Coming back showed an empty form while the file quietly finished in
+          the notification shade: "I switch tabs and the download stops".
+          It now stays mounted and is hidden with `hidden` (display:none, so
+          it costs no layout and no paint) while another tab is in front. */}
       <main className="pb-28">
+        <div hidden={tab !== "download"}>
+          <DownloaderCard
+            inputRef={inputRef}
+            resultsRef={resultsRef}
+            className="mx-auto max-w-2xl px-4 pt-4"
+            showInlineHistory={false}
+          />
+          {/* History belongs to the download section: same place the
+              files were saved, same flow (analyze again with one tap). */}
+          <HistoryTab />
+        </div>
+
         <AnimatePresence mode="wait" initial={false}>
-          <motion.div
-            key={tab}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-          >
-            {tab === "download" ? (
-              <>
-                <DownloaderCard
-                  inputRef={inputRef}
-                  resultsRef={resultsRef}
-                  className="mx-auto max-w-2xl px-4 pt-4"
-                  showInlineHistory={false}
-                />
-                {/* History belongs to the download section: same place the
-                    files were saved, same flow (analyze again with one tap). */}
-                <HistoryTab />
-              </>
-            ) : tab === "settings" ? (
-              <SettingsTab />
-            ) : (
-              <HelpTab />
-            )}
-          </motion.div>
+          {tab !== "download" && (
+            <motion.div
+              key={tab}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            >
+              {tab === "settings" ? <SettingsTab /> : <HelpTab />}
+            </motion.div>
+          )}
         </AnimatePresence>
       </main>
 

@@ -36,6 +36,8 @@ interface YtDlpPluginInterface {
   pickFolder(): Promise<DownloadLocation>;
   getDownloadLocation(): Promise<DownloadLocation>;
   resetDownloadLocation(): Promise<void>;
+  getActiveDownload(): Promise<ActiveDownload>;
+  ensureDownloadFolder(): Promise<FolderState>;
   getYouTubeSettings(): Promise<YouTubeSettings>;
   setCookiesBrowser(browser: string): Promise<void>;
   pickCookieFile(): Promise<{ cookiesFileName: string }>;
@@ -56,6 +58,46 @@ export interface YouTubeSettings {
   cookiesFileName: string;
   /** PO token provider server URL — desktop only */
   poTokenProvider: string;
+}
+
+/**
+ * A snapshot of the download chain, taken from the device rather than from
+ * React state.
+ *
+ * The running job lives in WorkManager, not in a component. Reading it back
+ * is what lets a screen that did not start the download — one remounted after
+ * a tab switch, or after Android recreated the Activity — show the download
+ * that is actually in flight instead of an empty form.
+ */
+export interface ActiveDownload {
+  /** True while a job in the chain has not reached a terminal state. */
+  active: boolean;
+  /** WorkManager state name: RUNNING, ENQUEUED, SUCCEEDED, FAILED, … */
+  state: string;
+  /** WorkManager job id, needed to cancel the job after a remount. */
+  workId: string;
+  percent: number;
+  speed: string;
+  eta: string;
+  /** Playlist entry number, 0 for a single video. */
+  item: number;
+  /** Playlist length, 0 for a single video. */
+  itemCount: number;
+  isPlaylist: boolean;
+  uri: string;
+  fileName: string;
+  error: string;
+}
+
+/** Where downloads land, and whether the folder is ready to use. */
+export interface FolderState {
+  ready: boolean;
+  /** True when this call actually showed the system permission dialog. */
+  permissionRequested: boolean;
+  /** True on platforms that gate the public folder behind a runtime grant. */
+  needsPermission: boolean;
+  /** Human-readable destination, e.g. "Download/VidFetch". */
+  path: string;
 }
 
 export interface YtDlpFormat {
@@ -143,7 +185,8 @@ export interface DownloadLocation {
   isDefault?: boolean;
 }
 
-type ProgressCallback = (data: {
+/** One progress tick from the native foreground service. */
+export interface ProgressUpdate {
   percent: number;
   speed: string;
   eta: string;
@@ -155,7 +198,9 @@ type ProgressCallback = (data: {
   itemCount?: number;
   /** current destination file/folder name */
   fileName?: string;
-}) => void;
+}
+
+type ProgressCallback = (data: ProgressUpdate) => void;
 
 // Safe plugin registration — throws in non-Capacitor environments or when
 // the native plugin is not installed (e.g. plain web build).
@@ -284,6 +329,118 @@ export async function getVideoInfo(
           : "Failed to extract video info",
     };
   }
+}
+
+/**
+ * Reads the current state of the download chain from the device.
+ *
+ * Returns null in builds without an on-device engine (browser preview, and
+ * the Windows EXE, whose jobs live in the Electron main process rather than in
+ * the Android plugin).
+ */
+export async function getActiveDownload(): Promise<ActiveDownload | null> {
+  if (!isNativeAvailable() || Desktop?.isDesktop) return null;
+  try {
+    const data = await getYtDlp().getActiveDownload();
+    return {
+      active: !!data.active,
+      state: (data.state as string) ?? "NONE",
+      workId: (data.workId as string) ?? "",
+      percent: (data.percent as number) ?? 0,
+      speed: (data.speed as string) ?? "0",
+      eta: (data.eta as string) ?? "--:--",
+      item: (data.item as number) ?? 0,
+      itemCount: (data.itemCount as number) ?? 0,
+      isPlaylist: !!data.isPlaylist,
+      uri: (data.uri as string) ?? "",
+      fileName: (data.fileName as string) ?? "",
+      error: (data.error as string) ?? "",
+    };
+  } catch (error) {
+    console.warn("[ytdlp-native] getActiveDownload failed:", error);
+    return null;
+  }
+}
+
+/**
+ * Makes sure `Download/VidFetch` exists before the first download.
+ *
+ * On Android 10+ this is a no-op check — scoped storage needs no permission.
+ * On Android 9 and below it requests the storage grant exactly once: the
+ * folder check runs first, so an existing folder is never re-created and a
+ * granted permission is never re-requested.
+ */
+export async function ensureDownloadFolder(): Promise<FolderState | null> {
+  if (!isNativeAvailable() || Desktop?.isDesktop) return null;
+  try {
+    const data = await getYtDlp().ensureDownloadFolder();
+    return {
+      ready: !!data.ready,
+      permissionRequested: !!data.permissionRequested,
+      needsPermission: !!data.needsPermission,
+      path: (data.path as string) ?? "",
+    };
+  } catch (error) {
+    console.warn("[ytdlp-native] ensureDownloadFolder failed:", error);
+    return null;
+  }
+}
+
+/**
+ * Subscribes to the download event stream WITHOUT starting a download.
+ *
+ * {@link startDownload} attaches its listeners around one call and removes
+ * them when that job finishes, so a UI that did not start the job never heard
+ * about it. This is the listener set a remounted screen uses to pick up a
+ * download that is already running.
+ *
+ * @returns a function that detaches every listener it attached
+ */
+export async function watchActiveDownload(handlers: {
+  onProgress?: (progress: ProgressUpdate) => void;
+  onComplete?: (info: CompletedDownload) => void;
+  onError?: (error: string) => void;
+}): Promise<() => void> {
+  if (!isNativeAvailable() || Desktop?.isDesktop) return () => {};
+  const handles: PluginListenerHandle[] = [];
+  try {
+    if (handlers.onProgress) {
+      handles.push(
+        await getYtDlp().addListener("downloadProgress", (data) => {
+          handlers.onProgress?.({
+            percent: (data.percent as number) ?? 0,
+            speed: (data.speed as string) ?? "0",
+            eta: (data.eta as string) ?? "--:--",
+            item: data.item as number | undefined,
+            itemCount: data.itemCount as number | undefined,
+            fileName: data.fileName as string | undefined,
+          });
+        }),
+      );
+    }
+    if (handlers.onComplete) {
+      const onComplete = handlers.onComplete;
+      handles.push(
+        await getYtDlp().addListener("downloadComplete", (data) => {
+          onComplete({
+            uri: (data.uri as string) ?? "",
+            fileName: (data.fileName as string) ?? "",
+          });
+        }),
+      );
+    }
+    if (handlers.onError) {
+      const onError = handlers.onError;
+      handles.push(
+        await getYtDlp().addListener("downloadError", (data) => {
+          onError((data.error as string) ?? "Download failed");
+        }),
+      );
+    }
+  } catch (error) {
+    console.warn("[ytdlp-native] watchActiveDownload failed:", error);
+  }
+  return () => handles.forEach((h) => h.remove());
 }
 
 /** Options for {@link startDownload}. */
