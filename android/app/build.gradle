@@ -59,8 +59,24 @@ android {
             // the env vars fall back to the debug key so development stays
             // friction-free.
             signingConfig signingConfigs.release
-            minifyEnabled true
-            shrinkResources true
+
+            // ⚠️ minification is OFF on purpose.
+            //
+            // Every release so far shipped with minifyEnabled true, and every
+            // one of them crashed on launch: R8 renamed/merged classes inside
+            // Chaquopy — the Python runtime behind youtubedl-android, which
+            // ships no consumer R8 rules — and its static initialiser threw
+            //     ExceptionInInitializerError … class p3.a is not a concrete class
+            // The keep rules in proguard-rules.pro fix the common case, but the
+            // failure could not be reproduced and verified anywhere outside a
+            // physical device, and a fatal error there closes the app on every
+            // launch. An APK that ships broken is worth far more than the ~4 MB
+            // R8 saves.
+            //
+            // Re-enabling it means: keep the proguard-rules.pro rules, AND
+            // smoke-test a RELEASE build on a real device before tagging.
+            minifyEnabled false
+            shrinkResources false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }

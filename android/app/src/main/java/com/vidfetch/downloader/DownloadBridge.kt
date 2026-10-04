@@ -48,6 +48,13 @@ import java.util.UUID
  *   - downloadError { error }
  */
 @CapacitorPlugin(name = "YtDlp")
+/*
+ * Error handling note: every catch on the JS boundary is `Throwable`, not
+ * `Exception`. The engine (Chaquopy/yt-dlp) raises `Error` subclasses —
+ * ExceptionInInitializerError among them — and a single uncaught one kills the
+ * process while the user is tapping, which reads to them as "the app just
+ * closed". Turning those into a rejected promise keeps the UI alive.
+ */
 class DownloadBridge : Plugin() {
 
     companion object {
@@ -125,7 +132,7 @@ class DownloadBridge : Plugin() {
             try {
                 if (isPlaylist && extractPlaylistInfo(url, call)) return@Thread
                 extractSingleVideoInfo(url, call)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.e(TAG, "extractInfo failed", e)
                 call.reject(e.message ?: "Extraction failed")
             }
@@ -179,7 +186,7 @@ class DownloadBridge : Plugin() {
                 return true
             }
             return handlePlaylistJson(response.out, url, call)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.e(TAG, "extractPlaylistInfo failed", e)
             call.reject(e.message ?: "Playlist extraction failed")
             return true
@@ -262,7 +269,7 @@ class DownloadBridge : Plugin() {
     }
 
     /** True when the error looks like YouTube's bot-check wall. */
-    private fun isBotCheckError(e: Exception): Boolean {
+    private fun isBotCheckError(e: Throwable): Boolean {
         val msg = (e.message ?: "").lowercase()
         return msg.contains("sign in to confirm") ||
             msg.contains("confirm you're not a bot") ||
@@ -283,10 +290,10 @@ class DownloadBridge : Plugin() {
             // the user never sees the error unless EVERY fallback fails.
             val info = try {
                 YoutubeDL.getInfo(base)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 if (!isBotCheckError(e)) throw e
                 Log.w(TAG, "bot check on analyze — trying fallback clients")
-                var last: Exception = e
+                var last: Throwable = e
                 var success = false
                 for (retry in botCheckRetryArgs()) {
                     try {
@@ -298,7 +305,7 @@ class DownloadBridge : Plugin() {
                         resolveSingleVideoInfo(url, YoutubeDL.getInfo(retryReq), call)
                         success = true
                         break
-                    } catch (e2: Exception) {
+                    } catch (e2: Throwable) {
                         last = e2
                     }
                 }
@@ -307,7 +314,7 @@ class DownloadBridge : Plugin() {
             }
 
             resolveSingleVideoInfo(url, info, call)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.e(TAG, "extractSingleVideoInfo failed", e)
             call.reject(e.message ?: "Extraction failed")
         }
@@ -465,7 +472,7 @@ class DownloadBridge : Plugin() {
             DownloadWorker.activeProcessId?.let { YoutubeDL.destroyProcessById(it) }
 
             call.resolve()
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             call.reject("Cancel failed: ${e.message}")
         }
     }
@@ -501,7 +508,7 @@ class DownloadBridge : Plugin() {
                     DownloadPrefs.getSaveToUri(context)
                 )
                 call.resolve(JSObject().put("downloads", downloads))
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.e(TAG, "getDownloads failed", e)
                 call.reject(e.message ?: "Failed to list downloads")
             }
@@ -542,7 +549,7 @@ class DownloadBridge : Plugin() {
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or
                     Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             )
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.w(TAG, "takePersistableUriPermission failed", e)
         }
 
@@ -646,7 +653,7 @@ class DownloadBridge : Plugin() {
 
             DownloadPrefs.saveCookiesFileName(context, name)
             call.resolve(JSObject().put("cookiesFileName", name))
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.e(TAG, "pickCookieFile failed", e)
             call.reject(e.message ?: "Could not import cookies")
         }
@@ -659,7 +666,7 @@ class DownloadBridge : Plugin() {
             File(context.filesDir, COOKIES_FILE).delete()
             DownloadPrefs.clearCookies(context)
             call.resolve()
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             call.reject("Clear failed: ${e.message}")
         }
     }

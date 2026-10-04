@@ -405,14 +405,14 @@ class DownloadWorker(
         try {
             YoutubeDL.execute(request, processId, true, progressCb)
             return
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             val msg = (e.message ?: "").lowercase()
             if (!(msg.contains("not a bot") || msg.contains("sign in to confirm"))) throw e
             Log.w("DownloadWorker", "bot check on download — rotating player clients")
             setForegroundSafely("YouTube bot check — alternate client deneniyor…", 0)
         }
 
-        var last: Exception? = null
+        var last: Throwable? = null
         for (retry in BOT_CHECK_ARGS) {
             try {
                 val retryReq = YoutubeDLRequest(url).apply {
@@ -429,7 +429,10 @@ class DownloadWorker(
                 }
                 YoutubeDL.execute(retryReq, processId, true, progressCb)
                 return
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
+                // Throwable, not Exception: the engine raises Error subclasses
+                // (ExceptionInInitializerError) and a worker in the app
+                // process that lets one escape takes the whole app down.
                 last = e
             }
         }

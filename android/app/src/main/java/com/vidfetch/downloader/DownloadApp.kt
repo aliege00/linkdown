@@ -9,20 +9,30 @@ import android.os.StatFs
 import android.util.Log
 import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Custom Application class that initializes the yt-dlp engine
- * and notification channels on app startup.
+ * Custom Application class that prepares the yt-dlp engine and the
+ * notification channel on app startup.
  *
- * youtubedl-android bundles a Python runtime + yt-dlp for Android ARM64.
- * init() unpacks these assets into the app's internal storage (idempotent).
+ * youtubedl-android bundles a Python runtime + yt-dlp for Android. init()
+ * unpacks these assets into the app's internal storage (idempotent).
  *
- * NOTE: init() can fail on first run (low storage during the ~60 MB
- * extraction, slow flash, etc.). If it does, we record WHY instead of
- * swallowing it — otherwise the user only ever sees the library's cryptic
- * "instance not initialized" later. The plugin retries init lazily before
- * every analyze/download, which usually recovers from a transient startup
- * failure by the time the user actually pastes a URL.
+ * ⚠️ TWO HARDENING RULES LEARNED THE HARD WAY (both from a shipped crash):
+ *
+ *  1. **Catch Throwable, never Exception.** The failure users reported was
+ *     `java.lang.ExceptionInInitializerError` raised inside Chaquopy's static
+ *     initialiser. That is an `Error`, so the old `catch (e: Exception)`
+ *     did not catch it: it escaped `initEngine`, propagated out of
+ *     `Application.onCreate`, and the process died — the app appeared for an
+ *     instant and closed. Catching `Throwable` is what makes a broken engine
+ *     a readable error instead of a dead app.
+ *
+ *  2. **Never let the engine block startup.** Unpacking ~60 MB of Python +
+ *     yt-dlp + ffmpeg assets on the main thread is slow enough to trip the
+ *     ANR watchdog on cold storage. Startup kicks it off in the background;
+ *     `DownloadBridge` retries lazily before every analyze/download anyway
+ *     (see `retryEngineInit`), so nothing is lost by not waiting.
  */
 class DownloadApp : Application() {
 
@@ -30,25 +40,30 @@ class DownloadApp : Application() {
         const val DOWNLOAD_CHANNEL_ID = "vidfetch_downloads"
         const val DOWNLOAD_CHANNEL_NAME = "Video Downloads"
 
+        private const val TAG = "DownloadApp"
+
         /**
-         * Why the embedded yt-dlp engine failed to initialize, or null when
-         * it is ready. Written at app startup, cleared once a lazy retry in
-         * the plugin succeeds.
+         * Why the embedded yt-dlp engine failed to initialize, or null when it
+         * is ready. Written whenever init is attempted, cleared once a lazy
+         * retry succeeds.
          */
         @Volatile
         var engineError: String? = null
 
+        /** Guards against starting the background init twice. */
+        private val startupInitStarted = AtomicBoolean(false)
+
         /**
          * Builds an actionable, human-readable reason for an engine init
-         * failure — includes the device ABI and free space so the user (or
-         * the developer looking at a screenshot) knows what to do.
+         * failure — includes the device ABI and free space so the user (or the
+         * developer looking at a screenshot) knows what to do.
          */
-        fun describeEngineError(filesDirPath: String, e: Exception): String {
-            val cause = e.cause?.message ?: e.message ?: e.javaClass.simpleName
+        fun describeEngineError(filesDirPath: String, t: Throwable): String {
+            val cause = t.cause?.message ?: t.message ?: t.javaClass.simpleName
             val abi = Build.SUPPORTED_ABIS.joinToString(", ")
             val freeMb = try {
                 StatFs(filesDirPath).availableBytes / 1024 / 1024
-            } catch (_: Exception) {
+            } catch (_: Throwable) {
                 -1L
             }
             return "The download engine could not start on this device " +
@@ -66,6 +81,10 @@ class DownloadApp : Application() {
          * Idempotent and synchronized inside the library, so calling this
          * repeatedly (startup, lazy retry in the plugin, worker) is safe.
          *
+         * Catches `Throwable` on purpose: Chaquopy raises
+         * `ExceptionInInitializerError` (an `Error`) when its runtime cannot
+         * start, and letting that escape kills the whole app at launch.
+         *
          * @return null when the engine is ready, or an actionable error
          */
         fun initEngine(context: Context): String? {
@@ -73,14 +92,36 @@ class DownloadApp : Application() {
                 YoutubeDL.init(context)
                 try {
                     FFmpeg.getInstance().init(context)
-                } catch (e: Exception) {
+                } catch (t: Throwable) {
                     // ffmpeg failure should not brick the whole engine — the
                     // error surfaces later if a download actually needs to merge.
-                    Log.w("DownloadApp", "FFmpeg init failed (non-fatal)", e)
+                    Log.w(TAG, "FFmpeg init failed (non-fatal)", t)
                 }
                 null
-            } catch (e: Exception) {
-                describeEngineError(context.filesDir.absolutePath, e)
+            } catch (t: Throwable) {
+                // Includes OutOfMemoryError and, crucially, the
+                // ExceptionInInitializerError Chaquopy throws when its static
+                // initialiser fails (e.g. under R8 without the right rules).
+                val described = describeEngineError(context.filesDir.absolutePath, t)
+                Log.e(TAG, "yt-dlp engine init failed", t)
+                described
+            }
+        }
+
+        /**
+         * Kick off engine initialization off the main thread. Never throws:
+         * a broken engine must not stop the app from starting.
+         */
+        private fun initEngineAsync(context: Context) {
+            Thread({
+                engineError = initEngine(context)
+                if (engineError == null) {
+                    Log.i(TAG, "yt-dlp engine + ffmpeg initialized")
+                }
+            }, "vidfetch-engine-init").apply {
+                priority = Thread.NORM_PRIORITY - 1
+                isDaemon = true
+                start()
             }
         }
     }
@@ -88,14 +129,13 @@ class DownloadApp : Application() {
     override fun onCreate() {
         super.onCreate()
 
-        // ── Initialize yt-dlp engine (+ ffmpeg) ────────────────────
-        // Unpacks the embedded Python runtime + yt-dlp + ffmpeg to internal
-        // storage. Safe to call repeatedly — it no-ops once initialized.
-        engineError = initEngine(this)
-        if (engineError == null) {
-            Log.i("DownloadApp", "yt-dlp engine + ffmpeg initialized")
-        } else {
-            Log.e("DownloadApp", "Failed to initialize yt-dlp engine: $engineError")
+        // ── Initialize yt-dlp engine (+ ffmpeg) in the BACKGROUND ────
+        // ~60 MB of assets are unpacked here; doing that on the main thread
+        // risks an ANR, and doing it *fatally* would close the app on launch.
+        // The bridge retries lazily before every analyze/download, so the UI
+        // never depends on this finishing first.
+        if (startupInitStarted.compareAndSet(false, true)) {
+            initEngineAsync(this)
         }
 
         // ── Create notification channel (Android 8.0+) ──────────────
