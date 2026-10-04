@@ -346,8 +346,12 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: "VidFetch ${{ steps.version.outputs.tag }}"
-          draft: ${{ inputs.draft || false }}
-          prerelease: ${{ inputs.prerelease || needs.build-apk.outputs.unsigned == 'true' }}
+          # Compare against the boolean, never with `||` on the raw input:
+          # on a tag push the declared inputs resolve to the STRING "false",
+          # which is truthy in GitHub expressions and would silently override
+          # the unsigned-build rule below.
+          draft: ${{ inputs.draft == true }}
+          prerelease: ${{ needs.build-apk.outputs.unsigned == 'true' || inputs.prerelease == true }}
           generate_release_notes: true
           files: |
             ./artifacts/VidFetch-*.apk

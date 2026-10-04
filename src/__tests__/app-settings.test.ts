@@ -310,8 +310,13 @@ describe("release without a keystore", () => {
   });
 
   it("labels an unsigned release as a pre-release", () => {
-    expect(release).toContain("needs.build-apk.outputs.unsigned == 'true'");
-    expect(release).toContain("prerelease: ${{ inputs.prerelease || needs.build-apk.outputs.unsigned == 'true' }}");
+    expect(release).toContain("prerelease: ${{ needs.build-apk.outputs.unsigned == 'true' || inputs.prerelease == true }}");
+    // The boolean comparison is load-bearing: on a tag push the declared
+    // inputs resolve to the STRING "false", and `inputs.prerelease || …`
+    // would take that truthy string and publish a full release instead.
+    expect(release).not.toContain("inputs.prerelease ||");
+    expect(release).not.toContain("inputs.draft ||");
+    expect(release).toContain("draft: ${{ inputs.draft == true }}");
   });
 
   it("still uses the keystore whenever the secrets exist", () => {
