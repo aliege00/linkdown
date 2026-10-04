@@ -24,6 +24,7 @@ import com.getcapacitor.PluginMethod
 import androidx.documentfile.provider.DocumentFile
 import com.getcapacitor.annotation.ActivityCallback
 import com.getcapacitor.annotation.CapacitorPlugin
+import com.getcapacitor.annotation.Permission
 import com.getcapacitor.annotation.PermissionCallback
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
@@ -52,7 +53,15 @@ import java.util.concurrent.TimeUnit
  *   - downloadComplete { uri, fileName }
  *   - downloadError { error }
  */
-@CapacitorPlugin(name = "YtDlp")
+@CapacitorPlugin(
+    name = "YtDlp",
+    permissions = [
+        Permission(
+            alias = "storage",
+            strings = [Manifest.permission.WRITE_EXTERNAL_STORAGE]
+        )
+    ]
+)
 /*
  * Error handling note: every catch on the JS boundary is `Throwable`, not
  * `Exception`. The engine (Chaquopy/yt-dlp) raises `Error` subclasses —
@@ -243,20 +252,31 @@ class DownloadBridge : Plugin() {
         }
 
         runOnMain {
-            requestPermissionForAlias(
-                "storage",
-                call,
-                Manifest.permission.WRITE_EXTERNAL_STORAGE,
-                "storagePermissionCallback",
-            )
+            // The alias is declared on @CapacitorPlugin above; Capacitor maps
+            // it to the permission string and remembers the call until the
+            // user answers the system dialog.
+            requestPermissionForAlias("storage", call, "storagePermissionCallback")
         }
     }
 
+    /**
+     * Runs after the system permission dialog, granted or denied.
+     *
+     * Capacitor invokes the callback with the saved [PluginCall] only, so the
+     * outcome is re-read from the platform rather than passed in. A denial is
+     * not an error: the download still works on any device where the folder
+     // is reachable, and the UI reports `ready: false` instead of throwing.
+     */
     @PermissionCallback
-    private fun storagePermissionCallback(call: PluginCall, permissions: Array<String>, grantResults: IntArray) {
-        val granted = grantResults.isNotEmpty() &&
-            grantResults[0] == PackageManager.PERMISSION_GRANTED
-        if (granted) MediaStoreHelper.ensureVidFetchFolder(context)
+    private fun storagePermissionCallback(call: PluginCall) {
+        val granted = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.WRITE_EXTERNAL_STORAGE
+        ) == PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            MediaStoreHelper.ensureVidFetchFolder(context)
+        } else {
+            Log.i(TAG, "storage permission denied — Download/VidFetch will be created on the next grant")
+        }
         resolveFolderState(call, requested = true)
     }
 

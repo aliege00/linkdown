@@ -205,6 +205,58 @@ describe("the folder is prepared once, on app entry", () => {
   });
 });
 
+describe("the Capacitor permission API is used with the right shape", () => {
+  // This failed the PR's `assembleDebug` job once: Capacitor's
+  // requestPermissionForAlias(alias, call, callbackName) takes THREE
+  // arguments — the permission string is not passed, it is declared on
+  // @CapacitorPlugin and resolved from the alias. A four-argument call is a
+  // compile error, and nothing in the JS test suite would have caught it.
+  it("declares the permission alias on the plugin", () => {
+    expect(bridge).toMatch(
+      /@CapacitorPlugin\([\s\S]{0,400}?permissions\s*=\s*\[[\s\S]{0,300}?Permission\(\s*alias\s*=\s*"storage"/,
+    );
+    expect(bridge).toMatch(
+      /Permission\(\s*alias\s*=\s*"storage",\s*strings\s*=\s*\[Manifest\.permission\.WRITE_EXTERNAL_STORAGE\]/,
+    );
+    expect(bridge).toContain("import com.getcapacitor.annotation.Permission");
+  });
+
+  it("requests the alias with exactly three arguments", () => {
+    const call = /requestPermissionForAlias\(([^)]*)\)/.exec(bridge);
+    expect(call, "requestPermissionForAlias not found in DownloadBridge.kt").not.toBeNull();
+    const args = call![1]
+      .split(",")
+      .map((a) => a.trim())
+      .filter(Boolean);
+    expect(args).toEqual(['"storage"', "call", '"storagePermissionCallback"']);
+  });
+
+  it("gives the callback the signature Capacitor actually invokes", () => {
+    // Capacitor calls `method.invoke(this, savedCall)` — one argument. A
+    // (call, permissions, grantResults) signature does not compile against
+    // this version and the callback silently never fires.
+    expect(bridge).toMatch(
+      /@PermissionCallback\s*\n\s*private fun storagePermissionCallback\(call: PluginCall\)/,
+    );
+  });
+
+  it("re-reads the grant instead of trusting a passed-in result", () => {
+    const cb = bridge.slice(bridge.indexOf("@PermissionCallback"));
+    expect(cb).toContain("ContextCompat.checkSelfPermission(");
+    expect(cb).toContain("Manifest.permission.WRITE_EXTERNAL_STORAGE");
+  });
+
+  it("treats a denial as a report, never as an exception", () => {
+    // Bounded to the callback itself: later plugin methods reject legitimately.
+    const cb = bridge.slice(
+      bridge.indexOf("@PermissionCallback"),
+      bridge.indexOf("/** Answers `ensureDownloadFolder` with the folder's final state. */"),
+    );
+    expect(cb).not.toContain("call.reject(");
+    expect(cb).toContain("resolveFolderState(call, requested = true)");
+  });
+});
+
 describe("a missing storage grant can no longer look like success", () => {
   it("throws an actionable error instead of returning null", () => {
     // legacySave returned null on SecurityException; the worker read a null
