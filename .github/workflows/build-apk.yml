@@ -147,6 +147,28 @@ jobs:
           `npm run setup:signing` (generates the keystore with keytool and
           uploads the four secrets) or add them with `gh secret set`.
           MSG
+          # Gradle only auto-creates ~/.android/debug.keystore for a DEBUG
+          # build. The release build falls back to the debug signing config
+          # (android/app/build.gradle), so on a fresh runner that file does
+          # not exist yet and :app:validateSigningRelease fails. Create it
+          # here — the standard Android debug key, generated fresh on every
+          # runner, never a real release key.
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair -v \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android -keypass android \
+              -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US" >/dev/null
+            echo "ℹ️  Generated a throwaway debug keystore for this run."
+          fi
+          # Never let a silent keytool failure reach Gradle: it would fail
+          # later with "Keystore file ... not found", far from the cause.
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            echo "::error::Could not create the debug keystore — keytool is missing or failed."
+            exit 1
+          fi
             exit 0
           fi
           echo "$SIGNING_KEY" | base64 --decode > android/app/release.keystore
