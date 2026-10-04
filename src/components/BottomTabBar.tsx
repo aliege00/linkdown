@@ -1,11 +1,12 @@
-import { Download, LifeBuoy, type LucideIcon } from "lucide-react";
+import { Download, LifeBuoy, Settings2, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type TabId = "download" | "support";
+export type TabId = "download" | "support" | "settings";
 
 const TABS: { id: TabId; label: string; icon: LucideIcon }[] = [
   { id: "download", label: "İndirme", icon: Download },
   { id: "support", label: "Yardım", icon: LifeBuoy },
+  { id: "settings", label: "Ayarlar", icon: Settings2 },
 ];
 
 /**
@@ -72,16 +73,21 @@ export default function BottomTabBar({
       <div className="relative flex items-stretch gap-1">
         {/* Sliding active pill — one element that travels between tabs.
             Positioned with a percentage translate, so it costs one transform
-            on one layer instead of animating width/box-shadow on every tab. */}
+            on one layer instead of animating width/box-shadow on every tab.
+            The width is 1/3 of the track (three tabs), computed inline so
+            adding a tab can never leave the pill mis-sized. */}
         <span
           aria-hidden="true"
           className={cn(
-            "pointer-events-none absolute inset-y-0 left-0 w-[calc(50%-0.25rem)] rounded-[1.25rem]",
+            "pointer-events-none absolute inset-y-0 left-0 rounded-[1.25rem]",
             "bg-primary/14 shadow-[0_0_18px_var(--island-glow)]",
             "transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
             "motion-reduce:transition-none",
           )}
-          style={{ transform: `translate3d(${activeIndex * 100}%, 0, 0)` }}
+          style={{
+            width: `calc(${100 / TABS.length}% - 0.125rem)`,
+            transform: `translate3d(${activeIndex * 100}%, 0, 0)`,
+          }}
         />
 
         {TABS.map((tab) => {

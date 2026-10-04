@@ -1,26 +1,45 @@
 /**
  * Google Gemini AI utility for VidFetch.
  *
- * Uses the @google/generative-ai SDK with a VITE_GOOGLE_API_KEY env var.
- * All calls are client-side — the key is only exposed in the built bundle
- * (acceptable for a personal-use Capacitor app).
+ * Key resolution order:
+ *   1. the key saved in the Ayarlar tab (Ayarlar → Yapay zeka), stored on the
+ *      device — this is what almost every user has, because it means NO build
+ *      step and no .env edit;
+ *   2. the VITE_GOOGLE_API_KEY env var, kept as a fallback for anyone who
+ *      prefers baking the key into the bundle.
+ *
+ * All calls are client-side — the key only ever goes to Google, from the
+ * device. Acceptable for a personal-use Capacitor app with no accounts.
  */
 
 import { GoogleGenerativeAI, type GenerativeModel } from "@google/generative-ai";
+import { loadSettings } from "@/lib/app-settings";
 
-const API_KEY = import.meta.env.VITE_GOOGLE_API_KEY as string | undefined;
+const ENV_KEY = import.meta.env.VITE_GOOGLE_API_KEY as string | undefined;
+
+/** The effective Gemini key: saved setting first, env var second. */
+export function getGeminiKey(): string {
+  const saved = loadSettings().geminiKey;
+  if (saved) return saved;
+  return typeof ENV_KEY === "string" ? ENV_KEY.trim() : "";
+}
 
 let cachedModel: GenerativeModel | null = null;
+let cachedKey = "";
 
 /**
  * Lazily initialise the Gemini model.
  * Returns null when the API key is missing so callers can degrade gracefully.
+ * The model is cached per key, so pasting a new key in Ayarlar takes effect
+ * immediately instead of keeping the old client.
  */
 export function getModel(): GenerativeModel | null {
-  if (!API_KEY) return null;
-  if (cachedModel) return cachedModel;
+  const key = getGeminiKey();
+  if (!key) return null;
+  if (cachedModel && cachedKey === key) return cachedModel;
 
-  const genAI = new GoogleGenerativeAI(API_KEY);
+  const genAI = new GoogleGenerativeAI(key);
+  cachedKey = key;
   cachedModel = genAI.getGenerativeModel({
     model: "gemini-2.0-flash",
     systemInstruction: `You are VidFetch AI, a helpful assistant inside the VidFetch video downloader app.
@@ -35,7 +54,7 @@ Do not fabricate URLs or file paths.`,
 
 /** Is the Gemini API key configured? */
 export function isGeminiAvailable(): boolean {
-  return typeof API_KEY === "string" && API_KEY.length > 0;
+  return getGeminiKey().length > 0;
 }
 
 export interface ChatMessage {

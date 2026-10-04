@@ -6,6 +6,9 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router";
 import { startupCleanup } from "@/lib/auto-cleanup";
 import { requestNotificationPermission } from "@/lib/notification-permission";
+import { SettingsProvider, useAppSettings } from "@/hooks/use-app-settings";
+import { applySettings, loadSettings } from "@/lib/app-settings";
+import PageTransition from "@/components/PageTransition";
 import "./index.css";
 
 // NOTE: The app-account login/signup system (Convex auth) was removed on
@@ -112,21 +115,44 @@ function AppRoutes() {
   return (
     <BrowserRouter>
       <RouteSyncer />
+      {/* Page transitions between routes. Inside Dashboard the tab switch
+          has its own (shorter) animation, so this one stays quiet enough
+          not to double up when the island changes tabs — it only fires on a
+          real URL change. */}
       <Suspense fallback={<RouteLoading />}>
-        <Routes>
-          <Route path="/" element={<Landing />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/chat" element={<ChatPage />} />
-          {/* The help center is rendered inline in the "Yardım" tab of the
-              dashboard, so /help is no longer a route of its own. */}
-          {/* Legal pages: /legal/privacy, /legal/terms, /legal/copyright */}
-          <Route path="/legal/:doc" element={<LegalPage />} />
-          {/* /auth was removed together with the account system — old links land on 404 */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
+        <PageTransition>
+          <Routes>
+            <Route path="/" element={<Landing />} />
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/chat" element={<ChatPage />} />
+            {/* The help center is rendered inline in the "Yardım" tab of the
+                dashboard, so /help is no longer a route of its own. */}
+            {/* Legal pages: /legal/privacy, /legal/terms, /legal/copyright */}
+            <Route path="/legal/:doc" element={<LegalPage />} />
+            {/* /auth was removed together with the account system — old links land on 404 */}
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </PageTransition>
       </Suspense>
       <Toaster />
     </BrowserRouter>
+  );
+}
+
+/**
+ * Bridges the "Animasyonları kapat" switch into framer-motion.
+ *
+ * reducedMotion="always" makes every motion component jump straight to its
+ * final state — no fades, no transforms — which is what a user who turned
+ * animations off expects, and it also covers framer-motion's own exit
+ * animations (the CSS layer in index.css cannot reach those).
+ */
+function MotionGate({ children }: { children: React.ReactNode }) {
+  const { settings } = useAppSettings();
+  return (
+    <MotionConfig reducedMotion={settings.animations ? "user" : "always"}>
+      {children}
+    </MotionConfig>
   );
 }
 
@@ -150,22 +176,24 @@ if (typeof window !== "undefined") {
   });
 }
 
+// Paint the saved look before React mounts, so an already-saved
+// "düşük donanım modu" / "animasyonları kapat" never flashes the animated,
+// blurred UI for a frame.
+applySettings(loadSettings());
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <RootErrorBoundary>
       <ToolbarErrorBoundary>{null}</ToolbarErrorBoundary>
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-        {/* Animation policy: respect the OS "reduce motion" setting.
-
-            This used to be hard-disabled ("always") whenever VITE_CONVEX_URL
-            was empty — which, after the account system was removed, is ALWAYS
-            the case. Every framer-motion animation in the app (the tab island
-            indicator, tab cross-fades, list transitions) was therefore
-            silently dead. "user" restores them while still honoring
-            prefers-reduced-motion, which the CSS layer also enforces. */}
-        <MotionConfig reducedMotion="user">
-          <AppRoutes />
-        </MotionConfig>
+        {/* Animation policy: default to the OS "reduce motion" setting
+            ("user"), and force "always" when the user turns animations off
+            in the Ayarlar tab — see MotionGate. */}
+        <SettingsProvider>
+          <MotionGate>
+            <AppRoutes />
+          </MotionGate>
+        </SettingsProvider>
       </ThemeProvider>
     </RootErrorBoundary>
   </StrictMode>,

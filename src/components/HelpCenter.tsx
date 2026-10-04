@@ -77,8 +77,12 @@ export default function HelpCenter() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-4">
-  {/* ── Help Tabs ── */}
-  <FlatCard interactive>
+  {/* ── Help Tabs ──
+        NOT `interactive`: this card is a container, not a target. With
+        `interactive` the whole card carried cursor-pointer + hover-border +
+        active:scale, so tapping any empty space inside it lit up the entire
+        card — which read as "every item got pressed at once". */}
+  <FlatCard>
     {/* Language */}
     <div className="mb-4 flex justify-center">
       <div className="flex rounded-lg border border-border bg-background p-0.5">

@@ -78,6 +78,13 @@ import {
   cobaltVideoQuality,
   COBALT_FORMAT_ID,
 } from "@/lib/cobalt";
+import {
+  resolveWithYtdlpServer,
+  resolveWithSeal,
+  infoFromServer,
+  SERVER_FORMAT_ID,
+  SEAL_FORMAT_ID,
+} from "@/lib/server-engines";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowDownToLine,
@@ -641,6 +648,53 @@ const FormatCard = memo(function FormatCard({
   );
 });
 
+/**
+ * Resolve a URL through one of the HTTP engines (Cobalt, a self-hosted
+ * yt-dlp API, or a Seal server).
+ *
+ * All three answer the same question — "what is the direct media file?" — so
+ * they share one code path and produce the same YtDlpInfo shape with a
+ * `direct_url` the on-device engine can download. A failure is returned as a
+ * message instead of thrown so the caller can fall through to the next engine.
+ */
+async function resolveWithHttpEngine(
+  engine: Exclude<EngineAttempt, "ondevice">,
+  pageUrl: string,
+  cfg: ReturnType<typeof loadEngineConfig>,
+  opts: { audioOnly: boolean; mode: string; precise: number | "auto" },
+): Promise<{ ok: true; info: YtDlpInfo } | { ok: false; message: string }> {
+  const quality = cobaltVideoQuality(opts.mode, opts.precise);
+  // "max" has no height of its own; every engine here tops out at 1080p.
+  const requestedQuality = quality === "max" ? "1080" : quality;
+
+  if (engine === "cobalt") {
+    const res = await resolveWithCobalt({
+      instance: cfg.instance,
+      token: cfg.token || undefined,
+      url: pageUrl,
+      audioOnly: opts.audioOnly,
+      mode: opts.mode,
+      precise: opts.precise,
+    });
+    return res.ok
+      ? { ok: true, info: infoFromCobalt(pageUrl, res, { audioOnly: opts.audioOnly, requestedQuality }) }
+      : { ok: false, message: res.message };
+  }
+
+  const serverOpts = { audioOnly: opts.audioOnly, requestedQuality };
+  const res =
+    engine === "server"
+      ? await resolveWithYtdlpServer(pageUrl, cfg.serverUrl, {
+          ...serverOpts,
+          token: cfg.serverToken || undefined,
+        })
+      : await resolveWithSeal(pageUrl, cfg.sealUrl, serverOpts);
+
+  return res.ok
+    ? { ok: true, info: infoFromServer(pageUrl, res.resolution, serverOpts) }
+    : { ok: false, message: res.message };
+}
+
 // ─── Playlist Panel ──────────────────────────────────────────────────
 
 const PlaylistPanel = memo(function PlaylistPanel({
@@ -649,6 +703,7 @@ const PlaylistPanel = memo(function PlaylistPanel({
   quality,
   onQuality,
   onDownloadAll,
+  onDownloadOne,
   lang,
 }: {
   count: number;
@@ -656,6 +711,8 @@ const PlaylistPanel = memo(function PlaylistPanel({
   quality: string;
   onQuality: (id: string) => void;
   onDownloadAll: () => void;
+  /** Download ONE entry — the per-video button in the list. */
+  onDownloadOne: (entry: PlaylistEntry) => void;
   lang: HelpLang;
 }) {
   const tr = lang === "tr";
@@ -695,8 +752,8 @@ const PlaylistPanel = memo(function PlaylistPanel({
         {entries.length === 0 ? (
           <p className="text-sm text-muted-foreground py-4 text-center border border-border/30 rounded-lg bg-background/50">
             {tr
-              ? "Liste okunuyor… Tüm videoları indirmek için Tümünü indir'e bas."
-              : "Reading playlist… press Download all to grab every video."}
+              ? "Liste okunuyor… Videolar burada listelenir; istediğini tek tek ya da 'Tümünü indir' ile indirebilirsin."
+              : "Reading playlist… videos are listed here — grab one by one or press Download all."}
           </p>
         ) : (
           <>
@@ -725,14 +782,25 @@ const PlaylistPanel = memo(function PlaylistPanel({
                       {entry.duration ? formatDuration(entry.duration) : ""}
                     </p>
                   </div>
-                  <Play className="h-3 w-3 shrink-0 text-muted-foreground/40" />
+                  <button
+                    type="button"
+                    onClick={() => onDownloadOne(entry)}
+                    className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-border bg-background text-[#6cb4ee] transition-colors hover:border-[#6cb4ee]/50 hover:bg-[#6cb4ee]/10 active:scale-95"
+                    aria-label={
+                      tr ? `Videoyu indir: ${entry.title}` : `Download video: ${entry.title}`
+                    }
+                    title={tr ? "Bu videoyu indir" : "Download this video"}
+                  >
+                    <Play className="size-3.5 fill-current" />
+                  </button>
                 </li>
               ))}
             </ul>
             {count > 100 && (
               <p className="text-xs text-muted-foreground mt-1.5">
-                Showing the first 100 of {count} videos — the whole playlist
-                downloads.
+                {tr
+                  ? `İlk 100 video gösteriliyor (${count} video). "Tümünü indir" listenin tamamını indirir.`
+                  : `Showing the first 100 of ${count} videos — Download all still grabs the whole playlist.`}
               </p>
             )}
           </>
@@ -1597,54 +1665,45 @@ export default function DownloaderCard({
 
         for (const engine of plan) {
           tried.push(engine);
-          if (engine === "cobalt") {
-            const res = await resolveWithCobalt({
-              instance: engineCfg.instance,
-              token: engineCfg.token || undefined,
-              url: cleanUrl,
-              audioOnly: videoQuality === "audio",
-              mode: videoQuality,
-              precise: preciseQuality,
-            });
-            if (res.ok) {
-              const q = cobaltVideoQuality(videoQuality, preciseQuality);
-              result = infoFromCobalt(cleanUrl, res, {
-                audioOnly: videoQuality === "audio",
-                requestedQuality: q === "max" ? "1080" : q,
-              });
+          if (engine === "ondevice") {
+            const nativeResult = await getVideoInfo(cleanUrl, isPlaylist);
+            if (nativeResult.success) {
+              result = nativeResult;
               break;
             }
-            lastError = res.message;
+            lastError = nativeResult.error;
             continue;
           }
-          const nativeResult = await getVideoInfo(cleanUrl, isPlaylist);
-          if (nativeResult.success) {
-            result = nativeResult;
+          const res = await resolveWithHttpEngine(engine, cleanUrl, engineCfg, {
+            audioOnly: videoQuality === "audio",
+            mode: videoQuality,
+            precise: preciseQuality,
+          });
+          if (res.ok) {
+            result = res.info;
             break;
           }
-          lastError = nativeResult.error;
+          lastError = res.message;
         }
 
         // Last resort: the on-device engine was blocked (e.g. a bot check)
         // and Cobalt is configured but was not tried for this site yet.
         if (!result) {
           const rescue = lastResortEngine(cleanUrl, tried, engineCfg.mode);
-          if (rescue === "cobalt") {
-            tried.push("cobalt");
-            const res = await resolveWithCobalt({
-              instance: engineCfg.instance,
-              token: engineCfg.token || undefined,
-              url: cleanUrl,
-              audioOnly: videoQuality === "audio",
-              mode: videoQuality,
-              precise: preciseQuality,
-            });
-            if (res.ok) {
-              const q = cobaltVideoQuality(videoQuality, preciseQuality);
-              result = infoFromCobalt(cleanUrl, res, {
+          if (rescue) {
+            tried.push(rescue);
+            const res = await resolveWithHttpEngine(
+              rescue as Exclude<EngineAttempt, "ondevice">,
+              cleanUrl,
+              engineCfg,
+              {
                 audioOnly: videoQuality === "audio",
-                requestedQuality: q === "max" ? "1080" : q,
-              });
+                mode: videoQuality,
+                precise: preciseQuality,
+              },
+            );
+            if (res.ok) {
+              result = res.info;
             } else {
               lastError = res.message;
             }
@@ -1660,15 +1719,11 @@ export default function DownloaderCard({
 
         setVideoInfo(result);
 
-        if (isPlaylist && result.success && result.is_playlist) {
-          // Fire-and-forget: start the whole-playlist download with the
-          // currently selected download mode (default: Data Saver). The
-          // progress screen (item X of N) takes over from here; the user
-          // can cancel like any download.
-          updateState("downloading");
-          downloadPlaylistRef.current();
-          return;
-        }
+        // A playlist STOPS here and shows the video list. It used to start
+        // downloading all N videos the moment the link was analyzed, which
+        // left no way to pick a quality first, to skip videos, or to grab a
+        // single item — the user has to be able to see the list and choose.
+        // PlaylistPanel then offers "Tümünü indir" plus a per-video button.
 
         // Audio mode downloads the best audio track directly; Best/Data
         // map onto the closest real format for the mode's height cap —
@@ -1679,7 +1734,11 @@ export default function DownloaderCard({
         setSelectedFormat(
           result.engine === "cobalt"
             ? COBALT_FORMAT_ID
-            : videoQuality === "audio"
+            : result.engine === "seal"
+              ? SEAL_FORMAT_ID
+              : result.engine === "server"
+                ? SERVER_FORMAT_ID
+                : videoQuality === "audio"
               ? "bestaudio"
               : preciseQuality !== "auto"
                 ? mp4FormatWithHeight(preciseQuality)
@@ -1997,6 +2056,104 @@ export default function DownloaderCard({
   }, [url, videoInfo, playlistQuality, updateState, refreshHistory, helpLang]);
 
   // Keep the auto-playlist ref pointing at the latest handler.
+  // ─── Single video out of a playlist ───────────────────────────────────
+  // The list is the feature: picking one video out of a playlist is a normal
+  // single download of that entry's own URL, at the quality chosen in the
+  // panel above. Kept as a separate handler (instead of re-analyzing the
+  // entry) so it reuses the running progress/queue machinery and lands in
+  // history exactly like any other download.
+  const handleDownloadPlaylistEntry = useCallback(
+    async (entry: PlaylistEntry) => {
+      const targetUrl = (entry.url || "").trim();
+      if (!targetUrl || !videoInfo?.is_playlist) return;
+
+      const preset =
+        PLAYLIST_PRESETS.find((p) => p.id === playlistQuality) ?? PLAYLIST_PRESETS[0];
+
+      updateState("downloading");
+      setErrorMsg("");
+      setDownloadProgress({ percent: 0, speed: "0", eta: "--:--", item: 1 });
+
+      try {
+        const workId = await startDownload({
+          url: targetUrl,
+          formatId: preset.spec,
+          onProgress: (progress) => {
+            if (progress.percent >= 100) updateState("complete");
+            setDownloadProgress((prev) => {
+              const next = {
+                percent: progress.percent,
+                speed: progress.speed || "0",
+                eta: progress.eta || "--:--",
+                item: 1,
+              };
+              // Skip ticks that would not change what is on screen.
+              if (
+                Math.round(next.percent) === Math.round(prev.percent) &&
+                next.speed === prev.speed &&
+                next.eta === prev.eta
+              ) {
+                return prev;
+              }
+              return next;
+            });
+          },
+          onComplete: (completed) => {
+            workIdRef.current = null;
+            updateState("complete");
+            void getDownloads().then((list) => {
+              if (list.length > 0) setSavedDownloads(list);
+            });
+            addDownloadRecord({
+              title: entry.title || videoInfo.title,
+              url: targetUrl,
+              kind: "video",
+              time: Date.now(),
+            });
+            refreshHistory();
+            postDownloadCleanup(completed.fileName).catch(() => {});
+          },
+          onError: (error) => {
+            workIdRef.current = null;
+            setErrorMsg(error);
+            setErrorPhase("download");
+            updateState("error");
+          },
+        });
+
+        if (!workId) {
+          setErrorMsg(
+            helpLang === "tr"
+              ? "Bu önizleme tarayıcıda çalışıyor — indirme motoru yalnızca Android APK ve Windows EXE uygulamalarında mevcut."
+              : "This preview runs in a browser with no download engine. Install the Android APK or Windows EXE.",
+          );
+          setErrorPhase("download");
+          updateState("error");
+          return;
+        }
+        workIdRef.current = workId;
+      } catch (err) {
+        workIdRef.current = null;
+        console.error("[DownloaderCard] handleDownloadPlaylistEntry error:", err);
+        setErrorMsg(err instanceof Error ? err.message : String(err));
+        setErrorPhase("download");
+        updateState("error");
+      }
+    },
+    [
+      videoInfo,
+      playlistQuality,
+      updateState,
+      setErrorMsg,
+      setErrorPhase,
+      setDownloadProgress,
+      setSavedDownloads,
+      addDownloadRecord,
+      refreshHistory,
+      helpLang,
+    ],
+  );
+
   downloadPlaylistRef.current = handleDownloadPlaylist;
 
   // ─── Paste ─────────────────────────────────────────────────────────
@@ -2631,6 +2788,7 @@ export default function DownloaderCard({
                     quality={playlistQuality}
                     onQuality={setPlaylistQuality}
                     onDownloadAll={handleDownloadPlaylist}
+                    onDownloadOne={handleDownloadPlaylistEntry}
                     lang={helpLang}
                   />
                 )}

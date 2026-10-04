@@ -214,6 +214,48 @@
   }
 }
 
+/* ── Settings switches ─────────────────────────────────────────────────────
+ * Driven by the "Ayarlar" tab (src/lib/app-settings.ts), which mirrors the
+ * two toggles onto <html data-anim="on|off"> and
+ * <html data-lowpower="on|off">. Doing it in CSS (instead of threading a prop
+ * through every component) means the switch applies to third-party markup too
+ * — shadcn/ui, the island, the landing page — with zero re-renders.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+/* "Animasyonları kapat": every CSS animation/transition stops. framer-motion
+   is handled separately in main.tsx via MotionConfig reducedMotion="always". */
+html[data-anim="off"] *,
+html[data-anim="off"] *::before,
+html[data-anim="off"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-delay: 0ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  transition-delay: 0ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* "Düşük donanım modu": flat, solid-color look. Blur, gradients and shadows
+   are the three effects that stall low-end Android WebViews, so all three go
+   away and the surfaces fall back to solid theme tokens. */
+html[data-lowpower="on"] *,
+html[data-lowpower="on"] *::before,
+html[data-lowpower="on"] *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+/* Gradient fills become a plain card surface instead of vanishing (many of
+   them carry no background-color of their own). */
+html[data-lowpower="on"] [class*="bg-gradient-to-"] {
+  background-image: none !important;
+  background-color: var(--card) !important;
+}
+/* Translucent blurred surfaces (the island, the sticky header) become solid. */
+html[data-lowpower="on"] [class*="backdrop-blur"] {
+  background-color: var(--card) !important;
+}
+
 /* ── Defaults ────────────────────────────────────────────────────────────── */
 button,
 [role="button"] {
