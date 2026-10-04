@@ -373,7 +373,13 @@ describe("the UI does not declare a download finished while it runs", () => {
   it("keys the watchdog off stalled progress instead of elapsed time", () => {
     expect(card).toContain("const STALLED_DOWNLOAD_MS = 45_000;");
     expect(card).toContain("Date.now() - lastProgressAtRef.current > STALLED_DOWNLOAD_MS");
-    // Every progress tick marks liveness, in both the single and playlist paths.
-    expect(card.split("lastProgressAtRef.current = Date.now();").length - 1).toBe(4);
+    // Every progress tick marks liveness: the single-video start, the
+    // playlist start, and both marks of the re-attach path (adopting a running
+    // download is itself a liveness event, as is each of its ticks).
+    expect(card.split("lastProgressAtRef.current = Date.now();").length - 1).toBe(6);
+    // …and the watchdog body exists exactly once, shared by all four paths,
+    // so they cannot drift apart.
+    expect(card.split("const startStallWatchdog = useCallback(").length - 1).toBe(1);
+    expect(card.split("const stopStallWatchdog = useCallback(").length - 1).toBe(1);
   });
 });

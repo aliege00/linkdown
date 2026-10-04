@@ -68,14 +68,27 @@ describe("island tab switch animates the page", () => {
     expect(dashboard).not.toContain("<MotionConfig");
   });
 
-  it("still renders both tabs inside the animated wrapper", () => {
-    const block = dashboard.slice(
+  it("animates the secondary tabs but never the download tab", () => {
+    // The download tab used to sit inside the keyed motion.div, so every tab
+    // switch unmounted DownloaderCard. The WorkManager job kept running, but
+    // the progress bar, the page state machine, the stall watchdog and the
+    // cancel handle all died with the component and the user came back to a
+    // blank form — "I switch tabs and the download stops". It now stays
+    // mounted outside the animated wrapper and is merely hidden.
+    const animated = dashboard.slice(
       dashboard.indexOf("<AnimatePresence"),
       dashboard.indexOf("</AnimatePresence>"),
     );
-    expect(block).toContain("DownloaderCard");
-    expect(block).toContain("SettingsTab");
-    expect(block).toContain("HistoryTab");
+    expect(animated).not.toContain("DownloaderCard");
+    expect(animated).toContain("SettingsTab");
+    expect(animated).toContain("HelpTab");
+    expect(animated).toContain('tab !== "download"');
+
+    const main = dashboard.slice(dashboard.indexOf("<main"), dashboard.indexOf("</main>"));
+    expect(main.indexOf("<DownloaderCard")).toBeLessThan(main.indexOf("<AnimatePresence"));
+    expect(main).toMatch(/<div hidden=\{tab !== "download"\}>/);
+    // History still belongs to the download section.
+    expect(main).toContain("<HistoryTab />");
   });
 });
 
