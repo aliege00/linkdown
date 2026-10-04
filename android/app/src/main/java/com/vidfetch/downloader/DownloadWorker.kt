@@ -25,6 +25,111 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /**
+ * Collapses yt-dlp's per-FILE progress into a single number that only ever
+ * moves forward.
+ *
+ * Why this class exists — the shipped bug was "the bar resets to zero in the
+ * middle of the download but the download keeps going". Two independent
+ * causes, both in the old one-liner
+ * `if (percent >= 0f) percent.toInt().coerceIn(0, 100) else 0`:
+ *
+ *  1. **Split downloads.** Every quality above ~360p resolves to a merged
+ *     format, `bestvideo+bestaudio`, so yt-dlp writes the VIDEO file, then
+ *     the AUDIO file, then muxes them with ffmpeg. Each file reports its own
+ *     0→100 %, so the UI watched the bar sprint to 100 % and snap back to 0 %
+ *     when the second file started.
+ *  2. **Unknown totals.** yt-dlp reports `percent = -1` whenever it cannot
+ *     compute one — during the ffmpeg merge, for "has already been
+ *     downloaded", and while resolving formats. The old code mapped -1 to 0,
+ *     so the bar was actively yanked back to the start mid-download.
+ *
+ * Rules enforced here:
+ *  1. A negative percentage means "no news", never "0 %".
+ *  2. The emitted number never decreases.
+ *  3. Each stream file gets an equal slice of the bar, so a two-file
+ *     download fills 0→50 then 50→100.
+ *  4. The bar stops at 99 until yt-dlp actually returns, so the trailing
+ *     ffmpeg merge never looks like the download finished early.
+ */
+internal class ProgressAggregator(private val planned: Int) {
+
+    private var totalFiles = planned.coerceAtLeast(1)
+    private var fileIndex = 0
+    private var lastPath: String? = null
+    private var emitted = 0
+
+    /** The percentage currently shown for the whole job. */
+    val percent: Int get() = emitted
+
+    /**
+     * Registers a `[download] Destination:` path. yt-dlp prints one per
+     * stream file, so a path we have not seen before means the previous file
+     * finished and the next slice of the bar starts.
+     */
+    fun onFile(path: String) {
+        if (path == lastPath) return
+        val isFirstFile = lastPath == null
+        lastPath = path
+        if (isFirstFile) return
+        fileIndex += 1
+        // More files than we predicted: widen the denominator so the bar can
+        // still reach the end instead of stopping short.
+        if (fileIndex + 1 > totalFiles) totalFiles = fileIndex + 1
+    }
+
+    /**
+     * Folds one yt-dlp tick into the job percentage.
+     *
+     * @param percent yt-dlp's per-file percentage; negative when unknown.
+     * @return the new job percentage — never lower than the previous one.
+     */
+    fun onProgress(percent: Float): Int {
+        if (percent < 0f) return emitted
+        val within = percent.toDouble().coerceIn(0.0, 100.0) / 100.0
+        val slice = ((fileIndex + within) / totalFiles * 100.0).toInt()
+        emitted = maxOf(emitted, slice.coerceIn(0, MAX_RUNNING))
+        return emitted
+    }
+
+    /**
+     * Starts a fresh 0→100 bar. Used per playlist entry: the UI offsets the
+     * per-item percentage by the item number, so each item must report its
+     * own local progress.
+     */
+    fun reset() {
+        fileIndex = 0
+        lastPath = null
+        totalFiles = planned
+        emitted = 0
+    }
+
+    /** yt-dlp returned successfully: the job (merge included) is really done. */
+    fun complete(): Int {
+        emitted = 100
+        return emitted
+    }
+
+    companion object {
+        /** Hold here while running so the merge never reads as "finished". */
+        const val MAX_RUNNING = 99
+
+        /**
+         * How many files yt-dlp will write for a `-f` value.
+         *
+         * Only the FIRST alternative matters — yt-dlp tries alternatives left
+         * to right and uses the first that resolves. `137+bestaudio` means two
+         * files plus a merge; `18`, `best`, or a concrete id means one. The
+         * value is only a head start: [onFile] corrects it the moment yt-dlp
+         * reveals a file we did not expect.
+         */
+        fun streamCountFor(formatId: String): Int {
+            val first = formatId.substringBefore('/')
+            return maxOf(1, first.split('+').size)
+        }
+    }
+}
+
+/**
  * WorkManager CoroutineWorker that downloads videos using yt-dlp
  * in a persistent foreground service.
  *
@@ -171,13 +276,18 @@ class DownloadWorker(
             var currentItem = 0
             var totalItems = 0
             var outputFilePath: String? = null
+            // Head start for the slice math: a `-f` value with "+" means the
+            // job writes more than one file (video, then audio) and merges
+            // them afterwards. See ProgressAggregator for the full rationale.
+            val progress = ProgressAggregator(ProgressAggregator.streamCountFor(formatId))
 
             val progressCb: (Float, Long, String?) -> Unit = { percent, etaSeconds, line ->
-                val pct = if (percent >= 0f) percent.toInt().coerceIn(0, 100) else 0
                 val speed = SPEED_PATTERN.find(line ?: "")?.groupValues?.getOrNull(1) ?: "0 B/s"
                 val eta = formatEta(etaSeconds)
 
-                // Capture the exact output filename yt-dlp reports.
+                // Capture the exact output filename yt-dlp reports, and tell
+                // the aggregator that a new stream file has started so the
+                // bar moves on to the next slice instead of restarting.
                 if (line != null) {
                     val dest = OUTPUT_FILENAME_PATTERN.find(line)
                         ?.groupValues?.getOrNull(1)?.trim()
@@ -186,15 +296,23 @@ class DownloadWorker(
                     val path = dest ?: already
                     if (!path.isNullOrEmpty()) {
                         outputFilePath = path
+                        progress.onFile(path)
                     }
                 }
 
                 // Track the playlist item counter, e.g. "Downloading item 3 of 10"
                 val im = ITEM_PATTERN.find(line ?: "")
                 if (im != null) {
-                    currentItem = im.groupValues[1].toIntOrNull() ?: 0
+                    val item = im.groupValues[1].toIntOrNull() ?: 0
                     totalItems = im.groupValues[2].toIntOrNull() ?: 0
+                    // Every playlist entry gets its own 0→100 bar; the UI
+                    // offsets it with the item number, so item 2 must start
+                    // at 0 again rather than inheriting item 1's total.
+                    if (item != currentItem) progress.reset()
+                    currentItem = item
                 }
+
+                val pct = progress.onProgress(percent)
 
                 // Update WorkManager progress (observed by the UI bridge)
                 val builder = Data.Builder()
@@ -236,6 +354,18 @@ class DownloadWorker(
             runDownloadWithClients(
                 request, url, formatId, isPlaylist, outputTemplate, processId, progressCb,
             )
+
+            // yt-dlp returned: the ffmpeg merge is done too, so the job is
+            // genuinely complete and the bar can finally read 100 %.
+            progressScope.launch {
+                setProgress(
+                    Data.Builder()
+                        .putInt(KEY_PROGRESS, progress.complete())
+                        .putString(KEY_SPEED, "0 B/s")
+                        .putString(KEY_ETA, "00:00")
+                        .build(),
+                )
+            }
 
             // ── Step 5: Find the downloaded output ────────────────
             // Use the exact filename captured from yt-dlp output (Step 4).

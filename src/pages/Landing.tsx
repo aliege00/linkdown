@@ -5,7 +5,6 @@ import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  ArrowRight,
   ChevronDown,
   Crown,
   Download,
@@ -37,9 +36,6 @@ const BUILD_TAG =
     ? window.__VIDFETCH_BUILD__ ?? null
     : null;
 
-/** The hosted web version — where the "Web" button in the app hands off to. */
-const SITE_URL = "https://vidfetch.app";
-
 // ─── Component ────────────────────────────────────────────────────────
 
 export default function Landing() {
@@ -58,14 +54,19 @@ export default function Landing() {
   // dead-end error after the user presses Analyze.
   const nativeEngine = isNativeAvailable();
 
-  // Top-right CTA is context-aware:
-  //   • in the packaged app the button reads "Web" and hands the user back
-  //     to the browser version (vidfetch.app) — inside the APK that button
-  //     used to say "Uygulama" and just navigated to /dashboard, i.e. to
-  //     the page they were already on.
-  //   • in the browser it keeps saying "Uygulama" and opens the dashboard.
-  const openWebVersion = () => {
-    window.open(SITE_URL, "_blank", "noopener,noreferrer");
+  // The top-right CTA is a LABEL, not a link: whichever way you read it,
+  // pressing it takes you to the first screen of the app you are already
+  // in — /dashboard, where the downloader lives.
+  //
+  //   • in the packaged app it reads "Web" (you are being reminded that
+  //     this IS the app, not the site) and returns you to /dashboard;
+  //   • in the browser it reads "Uygulama" and opens /dashboard there.
+  //
+  // It deliberately does NOT open vidfetch.app in a new tab: that just
+  // bounced users out of the app they were using, and inside an APK a
+  // browser tab is a dead end they cannot navigate back from.
+  const openApp = () => {
+    navigate("/dashboard");
   };
 
   // ─── FAQ data ──────────────────────────────────────────────────────
@@ -133,7 +134,7 @@ export default function Landing() {
             </button>
             <Button
               size="sm"
-              onClick={() => (nativeEngine ? openWebVersion() : navigate("/dashboard"))}
+              onClick={openApp}
             >
               {nativeEngine ? "Web" : "Uygulama"}
             </Button>
@@ -144,7 +145,7 @@ export default function Landing() {
               size="sm"
               variant="ghost"
               className="sm:hidden"
-              onClick={() => (nativeEngine ? openWebVersion() : navigate("/dashboard"))}
+              onClick={openApp}
             >
               {nativeEngine ? "Web" : "Uygulama"}
             </Button>

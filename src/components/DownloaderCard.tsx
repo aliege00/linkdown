@@ -178,6 +178,14 @@ function looksLikePlaylist(raw: string): boolean {
   return /[?&]list=[^&\s]+/.test(raw) || /\/playlist([/?]|$)/.test(raw);
 }
 
+/**
+ * How long the progress bar may sit frozen before the stall watchdog assumes
+ * the completion event was lost. Generous: a real download can pause for a
+ * while on a slow or congested connection, and stepping in early is what made
+ * the card announce "done" mid-transfer.
+ */
+const STALLED_DOWNLOAD_MS = 45_000;
+
 /** Quality presets for playlist downloads — enforced MP4 output. */
 const PLAYLIST_PRESETS = [
   { id: "best", label: "Best", desc: "Best MP4 available", spec: MP4_FORMAT_SELECTOR },
@@ -1499,13 +1507,15 @@ export default function DownloaderCard({
 
   // Safety-net timeout refs — cleaned up on unmount and before each new
   // download to prevent stale state updates and timer leaks.
-  const safetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const safetyTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const completeResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Timestamp of the last progress tick; drives the stall watchdog. */
+  const lastProgressAtRef = useRef(0);
 
   // Clear any lingering safety-net timers when the component unmounts.
   useEffect(() => {
     return () => {
-      if (safetyTimerRef.current !== null) clearTimeout(safetyTimerRef.current);
+      if (safetyTimerRef.current !== null) clearInterval(safetyTimerRef.current);
       if (completeResetTimerRef.current !== null) clearTimeout(completeResetTimerRef.current);
     };
   }, []);
@@ -1787,6 +1797,7 @@ export default function DownloaderCard({
     // a bogus "auto-corrected" error before the engine ever started.
 
     updateState("downloading");
+    lastProgressAtRef.current = Date.now();
     setErrorMsg("");
     setDownloadProgress({ percent: 0, speed: "0", eta: "--:--" });
     // Throttle window for progress re-renders (see onProgress below).
@@ -1827,6 +1838,9 @@ export default function DownloaderCard({
       url: directUrl || cleanUrl,
       formatId: formatSpec,
       onProgress: (progress) => {
+        // Liveness marker for the stall watchdog below — every tick counts,
+        // even the ones the visual throttle drops.
+        lastProgressAtRef.current = Date.now();
         // Auto-complete when we hit 100%
         if (progress.percent >= 100) {
           updateState("complete");
@@ -1892,18 +1906,31 @@ export default function DownloaderCard({
     // it before the check would overwrite the null with a stale value.
     workIdRef.current = workId;
 
-    // Safety net ONLY: the native foreground service reliably emits
+    // Safety net ONLY. The native foreground service reliably emits
     // downloadComplete/downloadError, and progress events keep the
-    // progress screen alive until 100%. This long fallback exists purely
+    // progress screen alive until 100%. This fallback exists purely
     // so the UI can never get stuck on "downloading" if an event is lost
-    // (e.g. an old build without the complete event). It must NOT fire
-    // while the download is still running — a real video download takes
-    // far longer than a few seconds.
-    if (safetyTimerRef.current !== null) clearTimeout(safetyTimerRef.current);
+    // (e.g. an old build without the complete event).
+    //
+    // It watches for STALLED progress, not elapsed time. The old version
+    // was a flat 120 s timer, which is well inside a normal download: a
+    // 200 MB video on a phone connection runs for many minutes, so the
+    // card flipped to "complete" and then back to "loaded" while the file
+    // was still arriving — exactly the "everything reset but it is still
+    // downloading" report. Only step in when the bar has been frozen for
+    // a long time AND no completion event arrived.
+    if (safetyTimerRef.current !== null) clearInterval(safetyTimerRef.current);
     if (completeResetTimerRef.current !== null) clearTimeout(completeResetTimerRef.current);
-    safetyTimerRef.current = setTimeout(() => {
-      if (stateRef.current === "downloading") updateState("complete");
-    }, 120000);
+    safetyTimerRef.current = setInterval(() => {
+      if (stateRef.current !== "downloading") {
+        if (safetyTimerRef.current !== null) clearInterval(safetyTimerRef.current);
+        return;
+      }
+      if (Date.now() - lastProgressAtRef.current > STALLED_DOWNLOAD_MS) {
+        if (safetyTimerRef.current !== null) clearInterval(safetyTimerRef.current);
+        updateState("complete");
+      }
+    }, 5000);
 
     // Reset "complete" state after a short delay so the success animation
     // is visible but the user can quickly start a new download.
@@ -1940,6 +1967,7 @@ export default function DownloaderCard({
     const modeSpec = preset.spec;
 
     updateState("downloading");
+    lastProgressAtRef.current = Date.now();
     setErrorMsg("");
     setPlaylistSummary(null);
     setDownloadProgress({
@@ -1957,6 +1985,8 @@ export default function DownloaderCard({
       formatId: modeSpec,
       isPlaylist: true,
       onProgress: (progress) => {
+        // Liveness marker for the stall watchdog below.
+        lastProgressAtRef.current = Date.now();
         // The last item reaching 100% means the whole playlist finished.
         if (
           progress.item &&
@@ -2029,15 +2059,22 @@ export default function DownloaderCard({
     }
     workIdRef.current = workId;
 
-    // Safety net ONLY — same reasoning as single-video downloads. The
-    // real completion is driven by progress events (last item at 100%)
-    // and the downloadComplete event; this long fallback just prevents a
-    // permanently stuck "downloading" screen if an event is ever lost.
-    if (safetyTimerRef.current !== null) clearTimeout(safetyTimerRef.current);
+    // Safety net ONLY — same stall-watchdog reasoning as single-video
+    // downloads. A flat 10-minute timer was wrong here too: a long playlist
+    // is still progressing long after that, and announcing "complete"
+    // mid-transfer is the bug this whole change is about.
+    if (safetyTimerRef.current !== null) clearInterval(safetyTimerRef.current);
     if (completeResetTimerRef.current !== null) clearTimeout(completeResetTimerRef.current);
-    safetyTimerRef.current = setTimeout(() => {
-      if (stateRef.current === "downloading") updateState("complete");
-    }, 10 * 60 * 1000);
+    safetyTimerRef.current = setInterval(() => {
+      if (stateRef.current !== "downloading") {
+        if (safetyTimerRef.current !== null) clearInterval(safetyTimerRef.current);
+        return;
+      }
+      if (Date.now() - lastProgressAtRef.current > STALLED_DOWNLOAD_MS) {
+        if (safetyTimerRef.current !== null) clearInterval(safetyTimerRef.current);
+        updateState("complete");
+      }
+    }, 5000);
     completeResetTimerRef.current = setTimeout(() => {
       if (stateRef.current === "complete") updateState("loaded");
     }, 10000);
