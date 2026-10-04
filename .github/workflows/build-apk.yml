@@ -128,8 +128,10 @@ jobs:
         run: npm ci
 
       # ── Release signing keystore (from GitHub Secrets) ────────────
-      # Same injection as release.yml. Fails fast when the secret is
-      # missing so PRs can't silently ship debug-signed APKs.
+      # Same injection as release.yml. When the four secrets are absent the
+      # build continues with the debug key instead of failing: the owner
+      # asked for releases to keep shipping, and the README documents that
+      # such an APK cannot update an existing install.
       - name: Decode signing keystore
         env:
           SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
@@ -139,29 +141,13 @@ jobs:
         run: |
           if [ -z "$SIGNING_KEY" ] || [ -z "$SIGNING_STORE_PASSWORD" ] || [ -z "$SIGNING_KEY_ALIAS" ] || [ -z "$SIGNING_KEY_PASSWORD" ]; then
             cat >&2 <<'MSG'
-          ❌ Signing secrets missing — this is the release job refusing to ship a
-             debug-signed APK. It fails on purpose, every time, until the four
-             secrets exist.
-
-          Fastest fix (one command on your own machine, needs JDK + gh CLI):
-             git clone https://github.com/aliege00/linkdown && cd linkdown
-             npm run setup:signing
-
-          It generates the keystore with keytool, uploads all four secrets and
-          verifies them. Then re-run: gh workflow run build-apk.yml --ref main
-
-          Doing it by hand:
-             keytool -genkeypair -v -keystore release.keystore -alias vidfetch \
-               -keyalg RSA -keysize 2048 -validity 10000 -storetype PKCS12
-             gh secret set SIGNING_KEY            -R aliege00/linkdown -b "$(base64 -w0 release.keystore)"
-             gh secret set SIGNING_STORE_PASSWORD -R aliege00/linkdown
-             gh secret set SIGNING_KEY_ALIAS      -R aliege00/linkdown -b vidfetch
-             gh secret set SIGNING_KEY_PASSWORD   -R aliege00/linkdown
-
-          NOTE: the CI identity that opens pull requests cannot read or write
-          Actions secrets, so this step has to be run by a repo admin.
+          ⚠️  Signing secrets missing — building a DEBUG-signed APK.
+          It cannot update an existing install (signature mismatch), so users
+          must uninstall the old app first. To ship an updatable APK, run
+          `npm run setup:signing` (generates the keystore with keytool and
+          uploads the four secrets) or add them with `gh secret set`.
           MSG
-            exit 1
+            exit 0
           fi
           echo "$SIGNING_KEY" | base64 --decode > android/app/release.keystore
           echo "SIGNING_STORE_FILE=$PWD/android/app/release.keystore" >> "$GITHUB_ENV"

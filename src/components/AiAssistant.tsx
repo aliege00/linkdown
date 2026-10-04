@@ -8,7 +8,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Send, Bot, User, Loader2, Sparkles, AlertCircle } from "lucide-react";
-import { streamChat, isGeminiAvailable, type ChatMessage } from "@/lib/gemini";
+import { streamChat, isAiAvailable, type ChatMessage } from "@/lib/ai";
 import { FlatCard } from "@/components/FlatCard";
 
 const SUGGESTIONS_TR = [
@@ -77,8 +77,8 @@ export default function AiAssistant({ lang }: { lang: "tr" | "en" }) {
         if (msg.includes("API key")) {
           setError(
             lang === "tr"
-              ? "API anahtarı yapılandırılmamış. Lütfen Keys sekmesinden VITE_GOOGLE_API_KEY ekleyin."
-              : "API key not configured. Please add VITE_GOOGLE_API_KEY in the Keys tab.",
+              ? "API anahtarı girilmedi. Ayarlar → Yapay Zeka bölümünden Google AI Studio ya da Anthropic anahtarınızı ekleyin."
+              : "API key not configured. Add your Google AI Studio or Anthropic key in Settings → AI.",
           );
         } else {
           setError(
@@ -97,7 +97,7 @@ export default function AiAssistant({ lang }: { lang: "tr" | "en" }) {
   );
 
   // ── No API key ──
-  if (!isGeminiAvailable()) {
+  if (!isAiAvailable()) {
     return (
       <div className="rounded-2xl p-4 border border-border/20 bg-white/3 dark:bg-white/[0.01]">
         <div className="flex items-start gap-3">
@@ -110,8 +110,8 @@ export default function AiAssistant({ lang }: { lang: "tr" | "en" }) {
             </p>
             <p className="text-xs text-muted-foreground leading-relaxed mt-1">
               {lang === "tr"
-                ? "Gemini AI'ı kullanmak için Keys sekmesinden VITE_GOOGLE_API_KEY ekleyin."
-                : "Add VITE_GOOGLE_API_KEY in the Keys tab to use Gemini AI."}
+                ? "Yapay zekâyı kullanmak için Ayarlar → Yapay Zeka bölümüne API anahtarınızı ekleyin."
+                : "Add your API key in Settings → AI to use the assistant."}
             </p>
           </div>
         </div>
@@ -122,8 +122,11 @@ export default function AiAssistant({ lang }: { lang: "tr" | "en" }) {
   return (
     <FlatCard className="!p-0 overflow-hidden">
       {/* Chat messages area */}
+      {/* scroll-pt keeps the first message reachable after the sticky header,
+          and overscroll-contain stops a swipe here from chaining into the
+          page (which used to make the card feel stuck). */}
       <div
-        className="flex-1 overflow-y-auto px-4 pt-4 space-y-3 max-h-[360px]"
+        className="flex-1 max-h-[360px] space-y-3 overflow-y-auto overscroll-contain scroll-pt-24 px-4 pt-4"
         style={{ touchAction: "pan-y" as const }}
       >
         {messages.length === 0 && (

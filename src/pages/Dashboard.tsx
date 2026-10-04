@@ -4,22 +4,25 @@ import { Sparkles } from "lucide-react";
 import BottomTabBar, { type TabId } from "@/components/BottomTabBar";
 import DownloaderCard from "@/components/DownloaderCard";
 import HistoryTab from "@/components/tabs/HistoryTab";
+import HelpTab from "@/components/tabs/HelpTab";
 import SettingsTab from "@/components/tabs/SettingsTab";
 import { useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 
 export default function Dashboard() {
-  // Two tabs only, as the user asked:
-  //   1) İndirme  — paste → analyze → download (+ its own history)
-  //   2) Yardım   — help center + about + settings (engines, language…)
+  // Three tabs, matching the three items in the floating island:
+  //   1) İndirme — paste → analyze → download (+ its own history)
+  //   2) Yardım  — help center (bot checks, errors, tips, AI assistant)
+  //   3) Ayarlar — appearance/performance switches, AI keys, engines
   const [tab, setTab] = useState<TabId>("download");
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
 
   const NAV: { id: TabId; label: string }[] = [
     { id: "download", label: "İndirme" },
-    { id: "support", label: "Yardım & Hakkında" },
+    { id: "support", label: "Yardım" },
+    { id: "settings", label: "Ayarlar" },
   ];
 
   return (
@@ -27,8 +30,13 @@ export default function Dashboard() {
       {/* ── Top Bar (sticky, small, never blocks scroll) ── */}
       {/* paddingTop = safe-area inset: the camera notch / status bar must not
           overlap the logo row on notched devices. */}
+      {/* Solid, NOT backdrop-blur: on Android WebView a blurred sticky
+          header creates a compositing layer that swallows taps on whatever
+          sits right beneath it — which is why the AI panel (the first thing
+          under the header) could not be pressed. A solid fill costs nothing
+          and keeps every control below the header tappable. */}
       <header
-        className="sticky top-0 z-40 border-b border-border/70 bg-card/85 backdrop-blur-md"
+        className="sticky top-0 z-40 border-b border-border/70 bg-card"
         style={{ paddingTop: "env(safe-area-inset-top)" }}
       >
         <div className="mx-auto flex max-w-2xl items-center justify-between px-4 py-3.5">
@@ -49,7 +57,7 @@ export default function Dashboard() {
                 </span>
               ) : (
                 <p className="truncate text-[11px] text-muted-foreground">
-                  Yardım Merkezi &amp; Hakkında
+                  {tab === "settings" ? "Ayarlar" : "Yardım Merkezi"}
                 </p>
               )}
             </div>
@@ -115,8 +123,10 @@ export default function Dashboard() {
                     files were saved, same flow (analyze again with one tap). */}
                 <HistoryTab />
               </>
-            ) : (
+            ) : tab === "settings" ? (
               <SettingsTab />
+            ) : (
+              <HelpTab />
             )}
           </motion.div>
         </AnimatePresence>

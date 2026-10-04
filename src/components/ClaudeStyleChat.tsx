@@ -30,9 +30,9 @@ import {
 } from "lucide-react";
 import {
   streamChat,
-  isGeminiAvailable,
+  isAiAvailable,
   type ChatMessage,
-} from "@/lib/gemini";
+} from "@/lib/ai";
 import { renderMarkdown } from "@/lib/markdown";
 
 /* ── Types ────────────────────────────────────────────────────── */
@@ -193,7 +193,7 @@ export default function ClaudeStyleChat() {
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes("API key")) {
-          setError("API anahtarı yapılandırılmamış. Keys sekmesinden VITE_GOOGLE_API_KEY ekleyin.");
+          setError("API anahtarı girilmedi. Ayarlar → Yapay Zeka bölümüne anahtarınızı ekleyin.");
         } else {
           setError(`Hata: ${msg}`);
         }
@@ -220,7 +220,7 @@ export default function ClaudeStyleChat() {
   }, []);
 
   // ── No API key ──
-  if (!isGeminiAvailable()) {
+  if (!isAiAvailable()) {
     return (
       <div className="min-h-screen flex flex-col bg-[#1a1a2e] text-white">
         {/* Header */}
@@ -246,9 +246,8 @@ export default function ClaudeStyleChat() {
             </div>
             <h2 className="text-lg font-bold">API Anahtarı Gerekli</h2>
             <p className="text-sm text-white/50 leading-relaxed">
-              Gemini AI&apos;ı kullanmak için Keys sekmesinden{" "}
-              <code className="px-1.5 py-0.5 rounded bg-white/10 text-amber-400 text-xs">VITE_GOOGLE_API_KEY</code>{" "}
-              ekleyin.
+              Ayarlar → Yapay Zeka bölümüne Google AI Studio ya da Anthropic
+              anahtarınızı yapıştırın.
             </p>
             <a
               href="https://aistudio.google.com/apikey"

@@ -137,19 +137,26 @@ describe("help center lives in the Yardım tab", () => {
     expect(main).not.toContain("HelpPage");
   });
 
-  it("is rendered inline at the top of the Yardım (settings) tab", () => {
+  it("is rendered inline at the top of the Yardım tab", () => {
+    // It moved out of SettingsTab when that tab became real settings
+    // (Ayarlar): help lives in HelpTab.tsx, the tab is named Yardım.
+    const help = readFileSync(
+      resolve(__dirname, "../components/tabs/HelpTab.tsx"),
+      "utf-8",
+    );
+    expect(help).toContain('import HelpCenter from "@/components/HelpCenter"');
+    // Rendered BEFORE the app-info card: the tab people open for help must
+    // show help, not engine settings.
+    expect(help.indexOf("<HelpCenter />")).toBeGreaterThan(-1);
+    expect(help.indexOf("<HelpCenter />")).toBeLessThan(
+      help.indexOf("v2.6"),
+    );
+    // No dead "→ /help" navigation left behind, in either tab.
+    expect(help).not.toContain('navigate("/help")');
     const settings = readFileSync(
       resolve(__dirname, "../components/tabs/SettingsTab.tsx"),
       "utf-8",
     );
-    expect(settings).toContain('import HelpCenter from "@/components/HelpCenter"');
-    // Rendered BEFORE the app-info card: the tab people open for help must
-    // show help, not engine settings.
-    expect(settings.indexOf("<HelpCenter />")).toBeGreaterThan(-1);
-    expect(settings.indexOf("<HelpCenter />")).toBeLessThan(
-      settings.indexOf("v2.6"),
-    );
-    // No dead "→ /help" navigation left behind.
     expect(settings).not.toContain('navigate("/help")');
   });
 });

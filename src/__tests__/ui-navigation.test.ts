@@ -58,10 +58,11 @@ describe("island tab switch animates the page", () => {
   });
 
   it("is still inside the reduced-motion policy", () => {
-    // MotionConfig reducedMotion="user" makes framer-motion skip transforms
-    // for users who asked for less motion — the animation must not be
-    // re-enabled by opting out of it locally.
-    expect(main).toContain('<MotionConfig reducedMotion="user">');
+    // The policy moved behind the Ayarlar switch: "user" (respect the OS) by
+    // default, "always" (no motion at all) when the user turns animations
+    // off. Either way the tab animation must stay inside it.
+    expect(main).toContain("reducedMotion={settings.animations ?");
+    expect(main).toContain('"user" : "always"');
     // No local MotionConfig override that would opt back into "always".
     expect(dashboard).not.toContain("<MotionConfig");
   });
