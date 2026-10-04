@@ -420,7 +420,7 @@ export default function SettingsTab() {
       {/* ── About ── */}
       <FlatCard>
         <p className="text-center text-[10px] leading-relaxed text-muted-foreground">
-          VidFetch v2.6.4 — hesap gerekmez, sunucu gerekmez.
+          VidFetch v2.6.5 — hesap gerekmez, sunucu gerekmez.
         </p>
       </FlatCard>
     </div>
