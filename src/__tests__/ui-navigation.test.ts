@@ -5,9 +5,10 @@
  *   1. Switching island tabs must ANIMATE the page. The bottom pill glided
  *      between tabs while the content swapped instantly underneath it, which
  *      read as a glitch on a phone.
- *   2. Inside the packaged app the top-right landing button used to say
- *      "Uygulama" and navigate to /dashboard — the page you were already on.
- *      In the app it must read "Web" and hand off to the hosted site.
+ *   2. Inside the packaged app the top-right landing button reads "Web"; in
+ *      the browser it reads "Uygulama". Either way it is a label, not a link
+ *      out — pressing it returns to /dashboard, the first screen of the app
+ *      you are in. It must never open the hosted site in a new tab.
  *
  * These assertions read the sources, same pattern as theme.test.ts: the
  * behaviour is CSS/framer-motion and platform detection, neither of which a
@@ -88,13 +89,20 @@ describe("top-right CTA is context aware", () => {
     expect(occurrences).toBe(2);
   });
 
-  it("opens the hosted site when in the app instead of re-navigating", () => {
-    expect(landing).toContain('const SITE_URL = "https://vidfetch.app"');
-    expect(landing).toContain("window.open(SITE_URL, \"_blank\", \"noopener,noreferrer\")");
-    // The branch must be a real conditional, not a dead ternary.
-    expect(landing).toContain(
-      'onClick={() => (nativeEngine ? openWebVersion() : navigate("/dashboard"))}',
-    );
+  it("takes you to /dashboard from either label — never off to another site", () => {
+    // Regression guard: this button used to `window.open` vidfetch.app, which
+    // bounced users out of the APK into a browser tab they could not leave.
+    // Both labels belong to the same destination: the first screen of the
+    // app you are already in.
+    expect(landing).not.toContain("SITE_URL");
+    expect(landing).not.toContain("window.open");
+    expect(landing).not.toContain("openWebVersion");
+    expect(landing).toContain("const openApp = () => {");
+    expect(landing).toContain('navigate("/dashboard")');
+    // Both header buttons must use it, not one of them bypassing it.
+    const occurrences = landing.split("onClick={openApp}").length - 1;
+    expect(occurrences).toBe(2);
+    expect(landing).not.toContain('onClick={() => (nativeEngine ?');
   });
 
   it("keeps using the native engine check that drives the hero copy", () => {
