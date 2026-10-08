@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Sparkles,
   Cpu,
@@ -7,12 +7,17 @@ import {
   Link2,
   Server,
   Anchor,
+  Gauge,
+  Smartphone,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FlatCard } from "@/components/FlatCard";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { useAppSettings } from "@/hooks/use-app-settings";
+import { FRAGMENT_CHOICES } from "@/lib/app-settings";
+import { getInstalledEngines } from "@/lib/ytdlp-native";
+import { DOWNLOAD_MODES } from "@/lib/download-modes";
 import {
   loadEngineConfig,
   saveEngineConfig,
@@ -22,6 +27,7 @@ import {
   isServerConfigured,
   isSealConfigured,
   DEFAULT_SEAL_URL,
+  HANDOFF_APPS,
   type EngineMode,
 } from "@/lib/engines";
 
@@ -117,6 +123,22 @@ export default function SettingsTab() {
   const [serverTokenDraft, setServerTokenDraft] = useState(engineCfg.serverToken);
   const [sealDraft, setSealDraft] = useState(engineCfg.sealUrl);
 
+  // Which handoff apps are actually installed. Android only: in a browser
+  // the call returns an empty record, so every entry truthfully shows
+  // "kurulu değil" and stays unselectable.
+  const [installedEngines, setInstalledEngines] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    let cancelled = false;
+    getInstalledEngines()
+      .then((list) => {
+        if (!cancelled) setInstalledEngines(list);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const persistEngines = (patch: Partial<typeof engineCfg>) => {
     const next = { ...engineCfg, ...patch };
     setEngineCfg(next);
@@ -172,6 +194,96 @@ export default function SettingsTab() {
             description="Arayüz düz renkli ve sade olur: bulanıklık (blur), geçiş (gradient) ve gölge efektleri kapanır. Eski telefonlarda daha akıcı çalışır."
             checked={settings.lowPower}
             onChange={(next) => update({ lowPower: next })}
+          />
+        </div>
+      </FlatCard>
+
+      {/* ── İndirme ayarları ── */}
+      <FlatCard className="space-y-3">
+        <div className="flex items-center gap-2">
+          <Gauge className="h-4 w-4 text-[#6cb4ee]" />
+          <h3 className="text-sm font-semibold text-foreground">
+            İndirme ayarları
+          </h3>
+        </div>
+
+        {/* ── Speed (parallel fragments) ── */}
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">
+            <Gauge className="h-3.5 w-3.5 text-[#6cb4ee]" />
+            İndirme hızı
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            {FRAGMENT_CHOICES.map((value) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => update({ fragments: value })}
+                className={cn(
+                  "cursor-pointer rounded-lg border px-2 py-2 text-[11px] font-medium transition-colors",
+                  settings.fragments === value
+                    ? "border-[#6cb4ee]/50 bg-[#6cb4ee]/10 text-[#6cb4ee]"
+                    : "border-border bg-background text-muted-foreground hover:border-[#6cb4ee]/30",
+                )}
+              >
+                {value === 4
+                  ? "Ekonomik · 4"
+                  : value === 16
+                    ? "Hızlı · 16"
+                    : "Dengeli · 8"}
+              </button>
+            ))}
+          </div>
+          <p className="text-[10px] leading-relaxed text-[#6b6b70]">
+            Aynı anda indirilen parça sayısı — indirme hızını belirleyen tek
+            ayar. Hızlı (16) en yüksek verimi verir; zayıf bir ağda bağlantı
+            koparsa indirme kendiliğinden kaldığı yerden devam eder.
+          </p>
+        </div>
+
+        {/* ── Default download mode ── */}
+        <div className="space-y-1.5">
+          <div className="text-[11px] font-medium text-foreground">
+            Varsayılan indirme modu
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            {DOWNLOAD_MODES.map((mode) => (
+              <button
+                key={mode.id}
+                type="button"
+                onClick={() => update({ defaultMode: mode.id })}
+                className={cn(
+                  "cursor-pointer rounded-lg border px-2 py-2 text-[11px] font-medium transition-colors",
+                  settings.defaultMode === mode.id
+                    ? "border-[#6cb4ee]/50 bg-[#6cb4ee]/10 text-[#6cb4ee]"
+                    : "border-border bg-background text-muted-foreground hover:border-[#6cb4ee]/30",
+                )}
+              >
+                {mode.emoji} {mode.label}
+              </button>
+            ))}
+          </div>
+          <p className="text-[10px] leading-relaxed text-[#6b6b70]">
+            Yeni bağlantılarda hangi mod seçili gelsin. İndirme ekranındaki
+            mod çipleri her seferinde değiştirilebilir.
+          </p>
+        </div>
+
+        {/* ── Toggles ── */}
+        <div className="space-y-2">
+          <ToggleRow
+            icon={Link2}
+            title="Panodaki linki yakala"
+            description="Kopyalanan video linki algılanınca giriş alanına otomatik doldurulur — yalnızca bu cihazda, hiçbir yere gönderilmez."
+            checked={settings.clipboardMonitor}
+            onChange={(next) => update({ clipboardMonitor: next })}
+          />
+          <ToggleRow
+            icon={Cpu}
+            title="Otomatik temizlik"
+            description="İndirme bitince artık geçici dosyalar (.part, .tmp, .state) silinir; disk boş kalır."
+            checked={settings.autoCleanup}
+            onChange={(next) => update({ autoCleanup: next })}
           />
         </div>
       </FlatCard>
@@ -406,6 +518,62 @@ export default function SettingsTab() {
             <p className="text-[10px] leading-relaxed text-[#6b6b70]">
               Seal (yt-dlp tabanlı Android uygulaması) ile uyumlu sunucu.{" "}
               {isSealConfigured(engineCfg) ? "Hazır." : "Kurulu değil."}
+            </p>
+          </div>
+
+          {/* ── On-device apps (handoff) ── */}
+          <div className="space-y-1.5 border-t border-border/40 pt-3">
+            <div className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">
+              <Smartphone className="h-3.5 w-3.5 text-[#6cb4ee]" />
+              Cihaz içi uygulamayla indir
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => persistEngines({ handoff: "" })}
+                className={cn(
+                  "cursor-pointer rounded-lg border px-2 py-2 text-[11px] font-medium transition-colors",
+                  !engineCfg.handoff
+                    ? "border-[#6cb4ee]/50 bg-[#6cb4ee]/10 text-[#6cb4ee]"
+                    : "border-border bg-background text-muted-foreground hover:border-[#6cb4ee]/30",
+                )}
+              >
+                Kapalı
+                <span className="block text-[9px] font-normal opacity-70">
+                  uygulama içinde indir
+                </span>
+              </button>
+              {HANDOFF_APPS.map((app) => {
+                const installed = installedEngines[app.id] === true;
+                return (
+                  <button
+                    key={app.id}
+                    type="button"
+                    disabled={!installed}
+                    title={installed ? app.desc : `${app.label} kurulu değil`}
+                    onClick={() => persistEngines({ handoff: app.id })}
+                    className={cn(
+                      "rounded-lg border px-2 py-2 text-[11px] font-medium transition-colors",
+                      engineCfg.handoff === app.id
+                        ? "border-[#6cb4ee]/50 bg-[#6cb4ee]/10 text-[#6cb4ee]"
+                        : "border-border bg-background text-muted-foreground",
+                      installed
+                        ? "cursor-pointer hover:border-[#6cb4ee]/30"
+                        : "cursor-not-allowed opacity-40",
+                    )}
+                  >
+                    {app.label}
+                    <span className="block text-[9px] font-normal opacity-70">
+                      {installed ? "kurulu" : "kurulu değil"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[10px] leading-relaxed text-[#6b6b70]">
+              Seçili uygulama linki alır ve indirmeyi kendisi yapar; video
+              bilgisi yine cihazda analiz edilir. Yalnızca Android'de kurulu
+              olan uygulamalar seçilebilir.
             </p>
           </div>
 

@@ -23,6 +23,20 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29" />
 
+    <!-- ═══ Package visibility (Android 11+) ═══ -->
+    <!-- Lets the app detect — and hand URLs to — other on-device
+         downloaders (Seal / ytdlnis / NewPipe). Without these entries,
+         getInstalledEngines() would report none of them as installed. -->
+    <queries>
+        <package android:name="com.junkfood.seal" />
+        <package android:name="com.deniscerri.ytdl" />
+        <package android:name="org.schabi.newpipe" />
+        <intent>
+            <action android:name="android.intent.action.SEND" />
+            <data android:mimeType="text/plain" />
+        </intent>
+    </queries>
+
     <application
         android:name=".DownloadApp"
         android:allowBackup="true"

@@ -29,7 +29,9 @@ type PluginData = Record<string, any>;
 
 interface YtDlpPluginInterface {
   extractInfo(options: { url: string; isPlaylist?: boolean }): Promise<YtDlpResult>;
-  startDownload(options: { url: string; formatId: string; isPlaylist?: boolean }): Promise<{ workId: string }>;
+  startDownload(options: { url: string; formatId: string; isPlaylist?: boolean; fragments?: number }): Promise<{ workId: string }>;
+  getInstalledEngines(): Promise<Record<string, boolean>>;
+  openInEngine(options: { engine: string; url: string }): Promise<{ engine: string; url: string }>;
   cancelDownload(options: { workId: string }): Promise<void>;
   openFile(options: { uri: string }): Promise<{ success: boolean }>;
   getDownloads(): Promise<{ downloads: DownloadEntry[] }>;
@@ -228,7 +230,7 @@ export interface DesktopBridge {
   getVideoInfo(options: { url: string; isPlaylist?: boolean }): Promise<YtDlpResult>;
   /** Download-event WebSocket endpoint + session token (null = IPC-only mode). */
   getSocketInfo?(): Promise<{ url: string; token: string } | null>;
-  startDownload(options: { url: string; formatId: string; isPlaylist?: boolean }): Promise<{ success: boolean; workId?: string; error?: string }>;
+  startDownload(options: { url: string; formatId: string; isPlaylist?: boolean; fragments?: number }): Promise<{ success: boolean; workId?: string; error?: string }>;
   cancelDownload(options: { token: string }): Promise<{ success: boolean }>;
   openFile(options: { filePath: string }): Promise<{ success: boolean }>;
   getDownloads(): Promise<{ downloads: DownloadEntry[] }>;
@@ -451,6 +453,12 @@ export interface StartDownloadOptions {
   formatId?: string;
   /** true when downloading a whole playlist */
   isPlaylist?: boolean;
+  /**
+   * Parallel fragment downloads — the only real throughput lever
+   * (yt-dlp `--concurrent-fragments`). The native side clamps it; omit
+   * it to use the engine default.
+   */
+  fragments?: number;
   /** Optional callback for real-time progress updates */
   onProgress?: ProgressCallback;
   /** Optional callback fired when the native service finishes */
@@ -475,6 +483,7 @@ export async function startDownload(
     url,
     formatId = "best",
     isPlaylist = false,
+    fragments,
     onProgress,
     onComplete,
     onError,
@@ -551,7 +560,7 @@ export async function startDownload(
         offs.push(downloadSocket.on("vidfetch:error", emit));
         offs.push(Desktop.onError(emit));
       }
-      const res = await Desktop.startDownload({ url, formatId, isPlaylist });
+      const res = await Desktop.startDownload({ url, formatId, isPlaylist, fragments });
       if (!res.success) {
         offs.forEach((off) => off());
         onError?.(res.error ?? "Download failed");
@@ -607,12 +616,39 @@ export async function startDownload(
       handles.push(handle);
     }
 
-    const result = await getYtDlp().startDownload({ url, formatId, isPlaylist });
+    const result = await getYtDlp().startDownload({ url, formatId, isPlaylist, fragments });
     return result.workId ?? null;
   } catch (error) {
     console.error("[ytdlp-native] startDownload failed:", error);
     return null;
   }
+}
+
+/**
+ * Which known on-device download apps (Seal / ytdlnis / NewPipe) are
+ * installed on this device. Returns an empty record in a browser or on
+ * Desktop, where there is no Android package to hand a link to — the
+ * settings screen then shows every entry as "not installed".
+ */
+export async function getInstalledEngines(): Promise<Record<string, boolean>> {
+  if (!isNativeAvailable() || Desktop?.isDesktop) return {};
+  try {
+    return await getYtDlp().getInstalledEngines();
+  } catch (error) {
+    console.warn("[ytdlp-native] getInstalledEngines failed:", error);
+    return {};
+  }
+}
+
+/**
+ * Hand the URL to an on-device download app via ACTION_SEND — that app
+ * performs the download itself, so nothing is enqueued locally.
+ *
+ * Rejects when the app is missing or has no activity that accepts shared
+ * text, so the caller can surface an actionable message.
+ */
+export async function openInEngine(engine: string, url: string): Promise<void> {
+  await getYtDlp().openInEngine({ engine, url });
 }
 
 /**

@@ -24,6 +24,7 @@ import {
   lastResortEngine,
   isSealConfigured,
   isServerConfigured,
+  describeRouting,
 } from "@/lib/engines";
 
 const read = (p: string) => readFileSync(resolve(__dirname, "..", p), "utf-8");
@@ -52,16 +53,20 @@ function stubBrowser() {
 }
 
 describe("app settings", () => {
-  let dataset: Record<string, string>;
-
   beforeEach(() => {
-    ({ dataset } = stubBrowser());
+    stubBrowser();
   });
 
   it("defaults to animations on and low-power off", () => {
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
     expect(DEFAULT_SETTINGS.animations).toBe(true);
     expect(DEFAULT_SETTINGS.lowPower).toBe(false);
+    // Speed ships at the FAST profile (yt-dlp's own default is 1 fragment);
+    // the other new switches default to the helpful state.
+    expect(DEFAULT_SETTINGS.fragments).toBe(16);
+    expect(DEFAULT_SETTINGS.clipboardMonitor).toBe(true);
+    expect(DEFAULT_SETTINGS.defaultMode).toBe("data");
+    expect(DEFAULT_SETTINGS.autoCleanup).toBe(true);
   });
 
   it("round-trips every field through localStorage", () => {
@@ -70,13 +75,33 @@ describe("app settings", () => {
       lowPower: true,
       geminiKey: "AIza-test",
       anthropicKey: "sk-ant-test",
+      fragments: 16,
+      clipboardMonitor: false,
+      defaultMode: "audio",
+      autoCleanup: false,
     });
     expect(loadSettings()).toEqual({
       animations: false,
       lowPower: true,
       geminiKey: "AIza-test",
       anthropicKey: "sk-ant-test",
+      fragments: 16,
+      clipboardMonitor: false,
+      defaultMode: "audio",
+      autoCleanup: false,
     });
+  });
+
+  it("rejects an unknown speed, mode or toggle value instead of passing it on", () => {
+    // A hand-edited preference must never reach yt-dlp as a nonsense flag.
+    localStorage.setItem(
+      "vidfetch.settings.v1",
+      JSON.stringify({ fragments: 64, defaultMode: "hacked", clipboardMonitor: "yes" }),
+    );
+    const loaded = loadSettings();
+    expect(loaded.fragments).toBe(DEFAULT_SETTINGS.fragments);
+    expect(loaded.defaultMode).toBe("data");
+    expect(loaded.clipboardMonitor).toBe(true);
   });
 
   it("falls back to the defaults on corrupt storage instead of throwing", () => {
@@ -260,6 +285,98 @@ describe("engines", () => {
     expect(
       lastResortEngine("https://youtube.com/playlist?list=PL1", ["ondevice"], "auto"),
     ).toBeNull();
+  });
+});
+
+describe("on-device app handoff", () => {
+  beforeEach(() => {
+    stubBrowser();
+  });
+
+  it("round-trips the handoff choice and rejects unknown ids", () => {
+    saveEngineConfig({ ...DEFAULT_ENGINE_CONFIG, handoff: "seal" });
+    expect(loadEngineConfig().handoff).toBe("seal");
+    // A stale/unknown value collapses to "disabled" — never a ghost app.
+    localStorage.setItem("vidfetch.engines.v1", JSON.stringify({ handoff: "safari" }));
+    expect(loadEngineConfig().handoff).toBe("");
+    // Legacy configs without the field read as disabled.
+    localStorage.setItem("vidfetch.engines.v1", JSON.stringify({ mode: "auto" }));
+    expect(loadEngineConfig().handoff).toBe("");
+  });
+
+  it("keeps analysis on-device when a handoff app owns the download", () => {
+    expect(
+      planEngines("https://youtube.com/watch?v=1", {
+        isPlaylist: false,
+        mode: "auto",
+        native: true,
+        handoff: "seal",
+      }),
+    ).toEqual(["ondevice"]);
+    // Even an explicitly chosen HTTP engine stays out of the way — the other
+    // app fetches the URL itself.
+    expect(
+      planEngines("https://tiktok.com/@a/video/1", {
+        isPlaylist: false,
+        mode: "cobalt",
+        native: true,
+        handoff: "newpipe",
+      }),
+    ).toEqual(["ondevice"]);
+  });
+
+  it("describes the handoff in Ayarlar", () => {
+    const line = describeRouting({ ...DEFAULT_ENGINE_CONFIG, handoff: "ytdlnis" }, "tr");
+    expect(line).toContain("ytdlnis");
+    expect(line).toContain("cihazda");
+    // The default (no handoff) keeps the mode-based descriptions.
+    expect(describeRouting(DEFAULT_ENGINE_CONFIG, "tr")).not.toContain("gönderilir");
+  });
+});
+
+describe("handoff wiring in the card and the native bridge", () => {
+  const card = read("components/DownloaderCard.tsx");
+  const native = read("lib/ytdlp-native.ts");
+
+  it("hands off single, playlist and per-entry downloads", () => {
+    expect(card).toContain("const handoff = loadEngineConfig().handoff;");
+    const branches = (card.match(/openInEngine\(handoff,/g) ?? []).length;
+    expect(branches, "single + playlist + entry").toBe(3);
+    // The complete screen explains where the download went.
+    expect(card).toContain("setHandoffApp(handoff)");
+    expect(card).toContain("handoffLabel(handoffApp)");
+  });
+
+  it("exposes the two plugin calls and the fragments option", () => {
+    expect(native).toContain("getInstalledEngines(): Promise<Record<string, boolean>>");
+    expect(native).toContain("openInEngine(options: { engine: string; url: string })");
+    expect(native).toContain("fragments?: number");
+    // The card forwards the speed setting on every startDownload.
+    expect(card).toContain("fragments,");
+  });
+});
+
+describe("settings applied where downloads actually start", () => {
+  const card = read("components/DownloaderCard.tsx");
+  const tab = read("components/tabs/SettingsTab.tsx");
+
+  it("Ayarlar offers speed, default mode, both toggles and the app list", () => {
+    expect(tab).toContain("FRAGMENT_CHOICES");
+    expect(tab).toContain("update({ fragments: value })");
+    expect(tab).toContain("İndirme hızı");
+    expect(tab).toContain("update({ defaultMode: mode.id })");
+    expect(tab).toContain("update({ clipboardMonitor: next })");
+    expect(tab).toContain("update({ autoCleanup: next })");
+    expect(tab).toContain("HANDOFF_APPS");
+    expect(tab).toContain("persistEngines({ handoff:");
+    expect(tab).toContain("getInstalledEngines");
+  });
+
+  it("the download card consumes them", () => {
+    expect(card).toContain("enabled: settings.clipboardMonitor");
+    expect(card).toContain("() => settings.defaultMode");
+    expect(card).toContain("if (autoCleanup) postDownloadCleanup");
+    expect(card).toContain("const fragments = settings.fragments;");
   });
 });
 
