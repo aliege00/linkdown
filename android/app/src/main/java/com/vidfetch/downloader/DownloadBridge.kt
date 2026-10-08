@@ -576,10 +576,11 @@ class DownloadBridge : Plugin() {
         val isPlaylist = call.getBoolean("isPlaylist", false) ?: false
         // Parallel-fragment count from the app's speed setting. Out-of-range
         // values are clamped here too, so a hand-edited preference can never
-        // produce a request yt-dlp would choke on.
-        val fragments = call.getInt(
+        // produce a request yt-dlp would choke on. getInt() is @Nullable even
+        // with a default, so the elvis re-states the default explicitly.
+        val fragments = (call.getInt(
             "fragments", DownloadWorker.DEFAULT_CONCURRENT_FRAGMENTS
-        ).coerceIn(
+        ) ?: DownloadWorker.DEFAULT_CONCURRENT_FRAGMENTS).coerceIn(
             DownloadWorker.MIN_CONCURRENT_FRAGMENTS,
             DownloadWorker.MAX_CONCURRENT_FRAGMENTS,
         )
