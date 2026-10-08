@@ -28,13 +28,38 @@ export interface AppSettings {
   geminiKey: string;
   /** Anthropic console key (Claude). Empty = not configured. */
   anthropicKey: string;
+  /**
+   * Parallel fragment downloads — the download-speed lever
+   * (yt-dlp `--concurrent-fragments`). 4 = gentle on weak networks,
+   * 8 = balanced, 16 = fastest (default: 16 — stock yt-dlp runs 1,
+   * so DASH fetches go wide open; drop to 4/8 on a weak network, the
+   * stall watchdog resumes anything that freezes either way).
+   */
+  fragments: number;
+  /** Watch the clipboard for video links and pre-fill the URL. Default: on. */
+  clipboardMonitor: boolean;
+  /**
+   * Mode preselected for a new download: "data" = MP4 video (default),
+   * "best" = full quality, "audio" = MP3/M4A. The mode chips still
+   * override it per download.
+   */
+  defaultMode: "best" | "data" | "audio";
+  /** Remove the app's temp files after each successful download. Default: on. */
+  autoCleanup: boolean;
 }
+
+/** The speed choices offered in Ayarlar (labelled Ekonomik/Dengeli/Hızlı). */
+export const FRAGMENT_CHOICES = [4, 8, 16] as const;
 
 export const DEFAULT_SETTINGS: AppSettings = {
   animations: true,
   lowPower: false,
   geminiKey: "",
   anthropicKey: "",
+  fragments: 16,
+  clipboardMonitor: true,
+  defaultMode: "data",
+  autoCleanup: true,
 };
 
 const STORAGE_KEY = "vidfetch.settings.v1";
@@ -48,6 +73,21 @@ function coerce(raw: Partial<AppSettings> | null | undefined): AppSettings {
     lowPower: typeof raw.lowPower === "boolean" ? raw.lowPower : DEFAULT_SETTINGS.lowPower,
     geminiKey: typeof raw.geminiKey === "string" ? raw.geminiKey.trim() : "",
     anthropicKey: typeof raw.anthropicKey === "string" ? raw.anthropicKey.trim() : "",
+    // Anything outside the offered set falls back to the default — a
+    // hand-edited value can never reach yt-dlp as a nonsense flag.
+    fragments: FRAGMENT_CHOICES.includes(raw.fragments as (typeof FRAGMENT_CHOICES)[number])
+      ? (raw.fragments as number)
+      : DEFAULT_SETTINGS.fragments,
+    clipboardMonitor:
+      typeof raw.clipboardMonitor === "boolean"
+        ? raw.clipboardMonitor
+        : DEFAULT_SETTINGS.clipboardMonitor,
+    defaultMode:
+      raw.defaultMode === "audio" || raw.defaultMode === "best"
+        ? raw.defaultMode
+        : "data",
+    autoCleanup:
+      typeof raw.autoCleanup === "boolean" ? raw.autoCleanup : DEFAULT_SETTINGS.autoCleanup,
   };
 }
 

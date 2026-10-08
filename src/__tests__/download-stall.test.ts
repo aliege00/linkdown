@@ -372,7 +372,18 @@ describe("yt-dlp network options", () => {
   });
 
   it("uses the real parallelism lever for DASH/HLS fragments", () => {
-    expect(optionsBlock()).toContain('"--concurrent-fragments" to "8"');
+    // The count is a per-download setting now (Ayarlar → İndirme hızı), so
+    // it is composed by networkOptions() instead of living in the static
+    // list — and every request, retries included, goes through it.
+    expect(worker).toMatch(/fun networkOptions\(fragments: Int\)/);
+    expect(worker).toContain('"--concurrent-fragments" to fragments');
+    expect(worker).toContain("DEFAULT_CONCURRENT_FRAGMENTS = 16");
+    expect(worker).toContain("MAX_CONCURRENT_FRAGMENTS = 16");
+    expect(worker).toContain(
+      "for ((flag, value) in networkOptions(concurrentFragments))",
+    );
+    // The static list keeps the resilience flags (no parallelism in it).
+    expect(optionsBlock()).not.toContain("--concurrent-fragments");
   });
 
   it("turns a dead connection into a resume instead of a hang", () => {
@@ -395,7 +406,9 @@ describe("yt-dlp network options", () => {
       worker.indexOf("private fun newRequest("),
       worker.indexOf("private suspend fun runDownloadWithClients("),
     );
-    expect(newRequest).toContain("for ((flag, value) in NETWORK_OPTIONS)");
+    expect(newRequest).toContain(
+      "for ((flag, value) in networkOptions(concurrentFragments))",
+    );
     expect(newRequest).toContain('addOption("--cookies", cookieFile.absolutePath)');
     // …and nothing may reintroduce a hand-rolled option list.
     expect(newRequest).not.toContain('addOption("--concurrent-fragments"');
@@ -404,5 +417,84 @@ describe("yt-dlp network options", () => {
   it("still lets ffmpeg pick a playable container", () => {
     // Forcing MP4 on a VP9/AV1 source produces a file Android cannot decode.
     expect(addOptionCalls()).not.toContain("--merge-output-format");
+  });
+
+  it("plumbs the app's speed setting into the worker input data", () => {
+    const bridge = read("android/app/src/main/java/com/vidfetch/downloader/DownloadBridge.kt");
+    expect(bridge).toMatch(
+      /call\.getInt\(\s*"fragments",\s*DownloadWorker\.DEFAULT_CONCURRENT_FRAGMENTS\s*\)/,
+    );
+    expect(bridge).toContain(".putInt(DownloadWorker.KEY_CONCURRENT_FRAGMENTS, fragments)");
+    expect(worker).toContain('const val KEY_CONCURRENT_FRAGMENTS = "concurrentFragments"');
+    expect(worker).toMatch(/concurrentFragments = inputData\.getInt\(/);
+    // Out-of-range values are clamped before they reach yt-dlp.
+    expect(bridge).toMatch(/\.coerceIn\(\s*DownloadWorker\.MIN_CONCURRENT_FRAGMENTS/);
+  });
+});
+
+// ─── Output capture & validation ─────────────────────────────────────────
+
+describe("DownloadWorker output capture", () => {
+  it("captures the MERGED file path, not the temp parts yt-dlp deletes", () => {
+    // yt-dlp deletes the per-stream parts after merging: outputFilePath used
+    // to point at a file that no longer existed, so the fallback scan could
+    // settle on an OLDER download and "validate" the wrong file.
+    expect(worker).toContain("Merging formats into");
+    expect(worker).toMatch(/MERGED_PATTERN\s*=\s*Regex\(/);
+    // The merger line outranks Destination / has-already-been-downloaded.
+    expect(worker).toContain("val path = merged ?: dest ?: already");
+  });
+
+  it("validates a video job as video and an audio job as audio", () => {
+    // Regression: audio-only output (MP3/M4A) was checked for a VIDEO track,
+    // so every audio download failed validation, was retried 3× and died
+    // with "The downloaded file has no video track".
+    expect(worker).toContain("expectsVideo(formatId, downloaded.name)");
+    expect(worker).toContain(
+      "private fun validateDownloadedFile(file: File, expectsVideoTrack: Boolean)",
+    );
+    expect(worker).toContain("if (expectsVideoTrack) {");
+    // Audio selectors never name a video stream …
+    expect(worker).toMatch(
+      /f\.contains\("bestaudio"\) && !f\.contains\("bestvideo"\)/,
+    );
+    // …and an audio extension settles it even when the selector is "best".
+    expect(worker).toContain('"mp3", "m4a", "m4b", "aac", "opus", "ogg", "wav", "flac"');
+    // A video job still requires BOTH tracks (no muted files either).
+    expect(worker).toContain('if (hasAudio != "yes") {');
+  });
+});
+
+// ─── On-device engine handoff (Seal / ytdlnis / NewPipe) ───────────────────
+
+describe("on-device app handoff", () => {
+  const bridge = read("android/app/src/main/java/com/vidfetch/downloader/DownloadBridge.kt");
+  const manifest = read("android/app/src/main/AndroidManifest.xml");
+
+  it("exposes the two plugin methods the settings screen needs", () => {
+    expect(bridge).toContain("fun getInstalledEngines(call: PluginCall)");
+    expect(bridge).toContain("fun openInEngine(call: PluginCall)");
+    expect(bridge).toContain("Intent(Intent.ACTION_SEND)");
+    expect(bridge).toContain('type = "text/plain"');
+    expect(bridge).toContain("putExtra(Intent.EXTRA_TEXT, url)");
+  });
+
+  it("covers Seal, ytdlnis and NewPipe by package name", () => {
+    for (const pkg of ["com.junkfood.seal", "com.deniscerri.ytdl", "org.schabi.newpipe"]) {
+      expect(bridge).toContain(`"${pkg}"`);
+      expect(manifest).toContain(`android:name="${pkg}"`);
+    }
+  });
+
+  it("rejects instead of silently doing nothing when the app cannot take the link", () => {
+    expect(bridge).toContain('call.reject("The $id app is not installed or cannot receive links")');
+    // …and checks the intent actually resolves before starting it.
+    expect(bridge).toContain("queryIntentActivities(");
+  });
+
+  it("declares <queries> so Android 11+ can see those packages at all", () => {
+    // Without package visibility every installed app reads as "not installed".
+    expect(manifest).toContain("<queries>");
+    expect(manifest).toContain("android.intent.action.SEND");
   });
 });

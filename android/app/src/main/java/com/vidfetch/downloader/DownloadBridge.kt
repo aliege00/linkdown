@@ -574,6 +574,16 @@ class DownloadBridge : Plugin() {
         var formatId = call.getString("formatId") ?: "best"
         if (formatId.isEmpty()) formatId = "best"
         val isPlaylist = call.getBoolean("isPlaylist", false) ?: false
+        // Parallel-fragment count from the app's speed setting. Out-of-range
+        // values are clamped here too, so a hand-edited preference can never
+        // produce a request yt-dlp would choke on. getInt() is @Nullable even
+        // with a default, so the elvis re-states the default explicitly.
+        val fragments = (call.getInt(
+            "fragments", DownloadWorker.DEFAULT_CONCURRENT_FRAGMENTS
+        ) ?: DownloadWorker.DEFAULT_CONCURRENT_FRAGMENTS).coerceIn(
+            DownloadWorker.MIN_CONCURRENT_FRAGMENTS,
+            DownloadWorker.MAX_CONCURRENT_FRAGMENTS,
+        )
 
         if (url.isNullOrEmpty()) {
             call.reject("URL is required")
@@ -595,6 +605,7 @@ class DownloadBridge : Plugin() {
             .putString(DownloadWorker.KEY_URL, url)
             .putString(DownloadWorker.KEY_FORMAT_ID, formatId)
             .putBoolean(DownloadWorker.KEY_IS_PLAYLIST, isPlaylist)
+            .putInt(DownloadWorker.KEY_CONCURRENT_FRAGMENTS, fragments)
             .build()
 
         val workRequest = OneTimeWorkRequest.Builder(DownloadWorker::class.java)
@@ -956,6 +967,86 @@ class DownloadBridge : Plugin() {
         }
         liveData.observeForever(observer)
         activeObservers.add(liveData to observer)
+    }
+
+    // ── On-device download apps (handoff) ──────────────────────────
+    // Separate Android apps that take the URL and download it themselves.
+    // The link is handed over with ACTION_SEND; this app does no download
+    // of its own in that mode.
+
+    /** Known on-device downloaders: UI id → Android package name. */
+    private val HANDOFF_PACKAGES = linkedMapOf(
+        "seal" to "com.junkfood.seal",
+        "ytdlnis" to "com.deniscerri.ytdl",
+        "newpipe" to "org.schabi.newpipe",
+    )
+
+    /**
+     * Which of the known download apps are installed, so the settings
+     * screen shows real status instead of guessing. Needs the <queries>
+     * package entries in AndroidManifest — without them Android 11+
+     * hides every other package from us.
+     */
+    @PluginMethod
+    fun getInstalledEngines(call: PluginCall) {
+        val pm = context.packageManager
+        val result = JSObject()
+        for ((id, pkg) in HANDOFF_PACKAGES) {
+            result.put(id, try {
+                pm.getPackageInfo(pkg, 0)
+                true
+            } catch (_: Throwable) {
+                false
+            })
+        }
+        call.resolve(result)
+    }
+
+    /**
+     * Hands a URL to an on-device download app via ACTION_SEND — that app
+     * performs the download itself.
+     *
+     * Rejects (instead of silently doing nothing) when the app is missing
+     * or has no activity accepting shared text, so the UI can tell the
+     * user exactly what to install.
+     */
+    @PluginMethod
+    fun openInEngine(call: PluginCall) {
+        val id = call.getString("engine") ?: ""
+        val url = call.getString("url")
+        val pkg = HANDOFF_PACKAGES[id]
+        if (pkg == null) {
+            call.reject("Unknown engine: $id")
+            return
+        }
+        if (url.isNullOrEmpty()) {
+            call.reject("URL is required")
+            return
+        }
+
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, url)
+            setPackage(pkg)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val resolvable = context.packageManager.queryIntentActivities(
+            send, PackageManager.MATCH_DEFAULT_ONLY
+        )
+        if (resolvable.isEmpty()) {
+            call.reject("The $id app is not installed or cannot receive links")
+            return
+        }
+        try {
+            (activity ?: context).startActivity(send)
+            call.resolve(JSObject().apply {
+                put("engine", id)
+                put("url", url)
+            })
+        } catch (e: Throwable) {
+            Log.e(TAG, "openInEngine failed for $id", e)
+            call.reject("Could not open $id: ${e.message}")
+        }
     }
 
     // ── Helpers ────────────────────────────────────────────────────

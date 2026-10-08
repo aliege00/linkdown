@@ -221,6 +221,7 @@ class DownloadWorker(
         const val KEY_URL = "url"
         const val KEY_FORMAT_ID = "formatId"
         const val KEY_IS_PLAYLIST = "isPlaylist"
+        const val KEY_CONCURRENT_FRAGMENTS = "concurrentFragments"
         const val KEY_PROGRESS = "progress"
         const val KEY_SPEED = "speed"
         const val KEY_ETA = "eta"
@@ -275,13 +276,35 @@ class DownloadWorker(
          *    loses signal enough chances to finish.
          */
         val NETWORK_OPTIONS: List<Pair<String, String?>> = listOf(
-            "--concurrent-fragments" to "8",
             "--socket-timeout" to "30",
             "--retries" to "10",
             "--fragment-retries" to "10",
             "--file-access-retries" to "3",
             "--retry-sleep" to "linear=1::2",
         )
+
+        /**
+         * yt-dlp's own default is 1 — the app ships 16 so DASH/HLS fetches
+         * run wide open (Ayarlar → İndirme hızı can dial it down to 8 or 4
+         * on a weak network; the stall watchdog resumes a freeze either way).
+         */
+        const val DEFAULT_CONCURRENT_FRAGMENTS = 16
+
+        /** Bounds for the app's speed setting (Ekonomik / Dengeli / Hızlı). */
+        const val MIN_CONCURRENT_FRAGMENTS = 1
+        const val MAX_CONCURRENT_FRAGMENTS = 16
+
+        /**
+         * NETWORK_OPTIONS plus the parallel-fragment count. The count is a
+         * per-download setting, so it is composed here rather than baked
+         * into the list — that way every request this worker builds (first
+         * attempt AND player-client retries) carries the same value.
+         */
+        fun networkOptions(fragments: Int): List<Pair<String, String?>> =
+            NETWORK_OPTIONS +
+                ("--concurrent-fragments" to fragments
+                    .coerceIn(MIN_CONCURRENT_FRAGMENTS, MAX_CONCURRENT_FRAGMENTS)
+                    .toString())
 
         // Matches a speed token from the yt-dlp progress line, e.g. "12.5MiB/s"
         private val SPEED_PATTERN =
@@ -298,6 +321,14 @@ class DownloadWorker(
             Regex("\\[download\\]\\s+Destination:\\s+(.+?)\\s*$")
         private val ALREADY_DOWNLOADED_PATTERN =
             Regex("\\[download\\]\\s+(.+?)\\s+has already been downloaded")
+        //   [Merger] Merging formats into "/path/title.mp4"
+        // The merged file is the one that SURVIVES — yt-dlp deletes the
+        // per-stream parts it was built from. Capturing this line keeps
+        // outputFilePath pointed at the finished file instead of a deleted
+        // temp part, so the fallback scan can never settle on an OLDER
+        // download and validate the wrong file.
+        private val MERGED_PATTERN =
+            Regex("\\[merger\\]\\s+Merging formats into\\s+\"(.+?)\"", RegexOption.IGNORE_CASE)
 
         /**
          * Thrown when yt-dlp stops talking for longer than
@@ -336,11 +367,18 @@ class DownloadWorker(
     // don't spam the status bar (~4 updates/second max).
     private var lastNotificationUpdate = 0L
 
+    // Parallel-fragment count for this job (see KEY_CONCURRENT_FRAGMENTS).
+    private var concurrentFragments = DEFAULT_CONCURRENT_FRAGMENTS
+
     override suspend fun doWork(): Result {
         val url = inputData.getString(KEY_URL) ?: return Result.failure()
         val formatId = inputData.getString(KEY_FORMAT_ID)
             ?.takeIf { it.isNotBlank() } ?: "best"
         val isPlaylist = inputData.getBoolean(KEY_IS_PLAYLIST, false)
+        // Speed setting from the app; every request this worker builds uses it.
+        concurrentFragments = inputData.getInt(
+            KEY_CONCURRENT_FRAGMENTS, DEFAULT_CONCURRENT_FRAGMENTS
+        )
         val processId = "vidfetch_${System.currentTimeMillis()}"
         activeProcessId = processId
 
@@ -407,7 +445,11 @@ class DownloadWorker(
                         ?.groupValues?.getOrNull(1)?.trim()
                     val already = ALREADY_DOWNLOADED_PATTERN.find(line)
                         ?.groupValues?.getOrNull(1)?.trim()
-                    val path = dest ?: already
+                    // The merger line outranks both: it names the file that
+                    // exists after the temp parts are deleted.
+                    val merged = MERGED_PATTERN.find(line)
+                        ?.groupValues?.getOrNull(1)?.trim()
+                    val path = merged ?: dest ?: already
                     if (!path.isNullOrEmpty()) {
                         outputFilePath = path
                         progress.onFile(path)
@@ -564,7 +606,10 @@ class DownloadWorker(
             // so the user gets an actionable error instead of a .mp4 that
             // won't open.
             if (!isPlaylist && downloaded != null && downloaded.isFile) {
-                validateDownloadedFile(downloaded)
+                validateDownloadedFile(
+                    downloaded,
+                    expectsVideo(formatId, downloaded.name),
+                )
             }
 
             // ── Step 6: Save to public Downloads folder ────────────
@@ -706,7 +751,7 @@ class DownloadWorker(
         if (!isPlaylist) addOption("--no-playlist")
         addOption("--no-warnings")
         addOption("--no-cache-dir")
-        for ((flag, value) in NETWORK_OPTIONS) {
+        for ((flag, value) in networkOptions(concurrentFragments)) {
             if (value == null) addOption(flag) else addOption(flag, value)
         }
         addOption("-o", outputTemplate)
@@ -868,18 +913,50 @@ class DownloadWorker(
 
     // ── Post-download file validation ──────────────────────────
 
+    /** Audio-only output extensions — never validated as a video file. */
+    private val AUDIO_EXTENSIONS =
+        setOf("mp3", "m4a", "m4b", "aac", "opus", "ogg", "wav", "flac")
+
+    /**
+     * Whether the requested output is expected to carry a video track.
+     *
+     * Audio-only selectors (MP3_FORMAT_SELECTOR = "bestaudio[ext=m4a]/…")
+     * never name a video stream, and an audio extension is proof by itself
+     * — both signals are needed because a direct-URL download uses the
+     * selector "best", where only the resulting extension says what arrived.
+     */
+    private fun expectsVideo(formatId: String, fileName: String): Boolean {
+        val ext = fileName.substringAfterLast('.', "").lowercase()
+        if (ext in AUDIO_EXTENSIONS) return false
+        val f = formatId.lowercase()
+        if (f.contains("bestaudio") && !f.contains("bestvideo")) return false
+        return true
+    }
+
     /**
      * Validates a single downloaded file before saving it to public storage.
      * Throws an actionable exception when the file is:
      *   - 0 bytes (download silently failed)
      *   - Too small to be a valid video (< 1 KB)
      *   - Missing MP4/ISOBMFF ftyp box (corrupt or wrong container)
-     *   - An audio-only or video-only stream (ffmpeg merge failed)
+     *   - A video file missing its video or audio track (failed merge)
+     *   - An audio-only job whose output carries no audio track
      *
      * This prevents the user from ending up with a .mp4 file that
      * Android's video player cannot open.
+     *
+     * Audio-only jobs (MP3/M4A output) used to be rejected here with
+     * "no video track": every audio download failed validation, was
+     * retried three times, then died with an error about a video track
+     * the file was never supposed to have. [expectsVideo] carries the
+     * job's expectation so a legitimate .m4a passes while a broken one
+     * still fails.
+     *
+     * @param expectsVideoTrack true when the job asked for a VIDEO file;
+     *   false for audio-only output, where the absence of a video track
+     *   is the correct state, not a failure.
      */
-    private fun validateDownloadedFile(file: File) {
+    private fun validateDownloadedFile(file: File, expectsVideoTrack: Boolean) {
         val size = file.length()
 
         if (size == 0L) {
@@ -941,11 +1018,11 @@ class DownloadWorker(
 
         // ── Playability probe ──────────────────────────────────────
         // Even with correct magic bytes, the file can be unplayable:
-        //   - audio-only (ffmpeg merged audio but not video)
+        //   - audio-only where video was expected (ffmpeg merge failed)
+        //   - no audio track where audio-only was expected (corrupt output)
         //   - corrupt moov atom (download interrupted during merge)
-        //   - wrong codec not supported by Android's MediaCodec
-        // MediaMetadataRetriever is the fastest way to verify: if it
-        // cannot extract a video track, the file won't play.
+        // MediaMetadataRetriever is the fastest way to verify: it reports
+        // which tracks the file actually carries.
         try {
             val retriever = MediaMetadataRetriever()
             retriever.setDataSource(file.absolutePath)
@@ -960,21 +1037,30 @@ class DownloadWorker(
             )?.toLongOrNull() ?: 0L
             retriever.release()
 
-            if (hasVideo != "yes") {
+            if (expectsVideoTrack) {
+                if (hasVideo != "yes") {
+                    throw IllegalStateException(
+                        "The downloaded file has no video track — it may be audio-only. " +
+                        "Try selecting a format that includes video (e.g. 'best')."
+                    )
+                }
+                if (hasAudio != "yes") {
+                    throw IllegalStateException(
+                        "The downloaded file has no audio track — the video is muted. " +
+                        "Try a format that includes both audio and video (e.g. 'best')."
+                    )
+                }
+            } else if (hasVideo != "yes" && hasAudio == "no") {
+                // Audio-only job: a missing VIDEO track is fine, but a file
+                // with no audio track at all is broken output.
                 throw IllegalStateException(
-                    "The downloaded file has no video track — it may be audio-only. " +
-                    "Try selecting a format that includes video (e.g. 'best')."
-                )
-            }
-            if (hasAudio != "yes") {
-                throw IllegalStateException(
-                    "The downloaded file has no audio track — the video is muted. " +
-                    "Try a format that includes both audio and video (e.g. 'best')."
+                    "The downloaded file has no audio track — it may be corrupt. " +
+                    "Try the download again or pick a different quality."
                 )
             }
             if (durationMs <= 0) {
                 throw IllegalStateException(
-                    "The video file appears to have zero duration. " +
+                    "The downloaded file appears to have zero duration. " +
                     "The file may be corrupt — try a different quality."
                 )
             }

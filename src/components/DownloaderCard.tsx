@@ -24,6 +24,7 @@ import {
   ensureDownloadFolder,
   watchActiveDownload,
   isNativeAvailable,
+  openInEngine,
   formatDuration,
   formatSize,
   type YtDlpFormat,
@@ -36,6 +37,8 @@ import {
 } from "@/lib/ytdlp-native";
 import { saveToGallery, type GallerySaveResult } from "@/lib/gallery-save";
 import { useClipboardMonitor } from "@/hooks/use-clipboard-monitor";
+import { useAppSettings } from "@/hooks/use-app-settings";
+import { monotonicPercent } from "@/lib/progress";
 import { ClipboardNotification } from "@/components/ClipboardNotification";
 import WebDownloadCard from "./WebDownloadCard";
 import { explainError } from "@/lib/error-help";
@@ -73,7 +76,9 @@ import {
   planEngines,
   lastResortEngine,
   engineLabel,
+  handoffLabel,
   type EngineAttempt,
+  type HandoffEngine,
 } from "@/lib/engines";
 import {
   resolveWithCobalt,
@@ -1257,14 +1262,23 @@ export default function DownloaderCard({
    */
   showInlineHistory?: boolean;
 }) {
+  // App-wide settings: speed (parallel fragments), clipboard monitor,
+  // default download mode and post-download cleanup.
+  const { settings } = useAppSettings();
+  // The speed lever — passed to every startDownload this card makes.
+  const fragments = settings.fragments;
+  // Post-download temp cleanup (opt-out in Ayarlar).
+  const autoCleanup = settings.autoCleanup;
   const [url, setUrl] = useState(initialUrl ?? "");
   const [state, setState] = useState<PageState>("idle");
   const [errorMsg, setErrorMsg] = useState("");
   const [videoInfo, setVideoInfo] = useState<YtDlpInfo | null>(null);
   const [selectedFormat, setSelectedFormat] = useState<string>("");
-  // Download mode (Best / Data Saver / Audio). "data" is the default —
-  // the user explicitly asked for low-data downloads with small files.
-  const [videoQuality, setVideoQuality] = useState<DownloadModeId>("data");
+  // Download mode (Best / Data Saver / Audio). Starts at the user's
+  // "varsayılan mod" setting; the built-in default is "data" (low-data).
+  const [videoQuality, setVideoQuality] = useState<DownloadModeId>(
+    () => settings.defaultMode,
+  );
   // Precise video quality (Gelişmiş seçenekler): "auto" follows the mode
   // chip; otherwise an explicit height cap (1080/720/480).
   const [preciseQuality, setPreciseQuality] = useState<"auto" | 1080 | 720 | 480>("auto");
@@ -1288,10 +1302,13 @@ export default function DownloaderCard({
   const [lastCompleted, setLastCompleted] = useState<CompletedDownload | null>(null);
   const [gallerySaveState, setGallerySaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [gallerySaveResult, setGallerySaveResult] = useState<GallerySaveResult | null>(null);
+  // Set when the last download was handed to an on-device app (Seal / …)
+  // instead of running locally — the complete screen needs different copy.
+  const [handoffApp, setHandoffApp] = useState<HandoffEngine | null>(null);
 
   // ── Clipboard Monitor ──
   const { lastUrl: clipboardUrl, clearLastUrl } = useClipboardMonitor({
-    enabled: true,
+    enabled: settings.clipboardMonitor,
     interval: 2000,
     cooldown: 30_000,
     onUrlDetected: (url) => {
@@ -1452,6 +1469,7 @@ export default function DownloaderCard({
           url: clean,
           formatId: selector,
           isPlaylist: false,
+          fragments,
         });
       },
       {
@@ -1488,7 +1506,7 @@ export default function DownloaderCard({
     const list = await getDownloads().catch(() => []);
     if (list.length > 0) setSavedDownloads(list);
     refreshHistory();
-  }, [batchSelector, queueItems, queueRunning, queueSelected, refreshHistory]);
+  }, [batchSelector, queueItems, queueRunning, queueSelected, refreshHistory, fragments]);
 
   const cancelBatchQueue = useCallback(() => {
     queueAbortRef.current.aborted = true;
@@ -1625,7 +1643,14 @@ export default function DownloaderCard({
         onProgress: (progress) => {
           lastProgressAtRef.current = Date.now();
           setDownloadProgress((prev) => ({
-            percent: progress.percent,
+            // Monotonic: a stall-restart resumes the .part file and
+            // re-reports from 0 — the bar must never visibly drop.
+            percent: monotonicPercent(
+              prev.percent,
+              progress.percent,
+              prev.item ?? 0,
+              progress.item,
+            ),
             speed: progress.speed,
             eta: progress.eta,
             item: progress.item ?? prev.item,
@@ -1768,6 +1793,7 @@ export default function DownloaderCard({
         setVideoInfo(null);
         setSelectedFormat("");
         setPlaylistSummary(null);
+        setHandoffApp(null);
         // Sync the playlist preset with the selected mode chip so the
         // auto-download below and PlaylistPanel's quality row agree.
         setPlaylistQuality(
@@ -1862,6 +1888,25 @@ export default function DownloaderCard({
         // Gelişmiş seçenekler, which overrides the mode's cap.
         // A Cobalt result already carries ONE resolved stream, so its own
         // format id is preselected instead of a selector.
+        //
+        // A pinned exact quality (1080p/720p/480p) only survives analysis
+        // when the video REALLY has that rung: mp4FormatWithHeight(1080)
+        // silently falls back to 720p on a 720p-max video, which is exactly
+        // the "1080 shows up but is not supported" lie. When the engine
+        // reports a ladder WITHOUT the pinned height, drop the pin so the
+        // mode default applies and the real-quality chips tell the truth.
+        // When the engine reports NO ladder (a direct mp4), keep the pin —
+        // the selector chain still resolves through its fallbacks.
+        const realHeights = new Set(
+          buildQualityOptions(result.formats ?? [])
+            .map((o) => o.height)
+            .filter((h): h is number => h !== null),
+        );
+        const pinned =
+          preciseQuality === "auto" ||
+          (realHeights.size > 0 && !realHeights.has(preciseQuality))
+            ? null
+            : preciseQuality;
         setSelectedFormat(
           result.engine === "cobalt"
             ? COBALT_FORMAT_ID
@@ -1871,8 +1916,8 @@ export default function DownloaderCard({
                 ? SERVER_FORMAT_ID
                 : videoQuality === "audio"
               ? "bestaudio"
-              : preciseQuality !== "auto"
-                ? mp4FormatWithHeight(preciseQuality)
+              : pinned !== null
+                ? mp4FormatWithHeight(pinned)
                 : videoQuality === "data"
                   ? dataModeSelector(480)
                   : MP4_FORMAT_SELECTOR,
@@ -1907,7 +1952,32 @@ export default function DownloaderCard({
   const handleDownload = useCallback(async () => {
     try {
     const cleanUrl = normalizeVideoUrl(url);
-    if (!cleanUrl || !selectedFormat) return;
+    if (!cleanUrl) return;
+
+    // ── Handoff to an on-device app (Seal / ytdlnis / NewPipe) ────
+    // The configured app takes the URL and downloads it itself; nothing is
+    // enqueued locally, so the local progress machinery never starts.
+    const handoff = loadEngineConfig().handoff;
+    if (handoff) {
+      try {
+        await openInEngine(handoff, cleanUrl);
+        setHandoffApp(handoff);
+        setLastCompleted(null);
+        setErrorMsg("");
+        updateState("complete");
+      } catch (err) {
+        setErrorMsg(
+          err instanceof Error
+            ? err.message
+            : `${handoffLabel(handoff)} uygulamasına gönderilemedi`,
+        );
+        setErrorPhase("download");
+        updateState("error");
+      }
+      return;
+    }
+
+    if (!selectedFormat) return;
 
     // NOTE: deliberately NO formatExists pre-validation here. selectedFormat
     // is either a selector ("bestaudio", mp4FormatWithHeight(480), …) set by
@@ -1958,6 +2028,7 @@ export default function DownloaderCard({
     const workId = await startDownload({
       url: directUrl || cleanUrl,
       formatId: formatSpec,
+      fragments,
       onProgress: (progress) => {
         // Liveness marker for the stall watchdog below — every tick counts,
         // even the ones the visual throttle drops.
@@ -1977,7 +2048,9 @@ export default function DownloaderCard({
           }
           lastTick = now;
           return {
-            percent: progress.percent,
+            // Monotonic — see monotonicPercent(): a stall-restart resumes
+            // the .part file and re-reports from 0; the bar never drops.
+            percent: monotonicPercent(prev.percent, progress.percent),
             speed: progress.speed,
             eta: progress.eta,
           };
@@ -2000,8 +2073,10 @@ export default function DownloaderCard({
           time: Date.now(),
         });
         refreshHistory();
-        // Clean up any orphan temp files from this download
-        postDownloadCleanup(completed.fileName).catch(() => {});
+        // Clean up any orphan temp files from this download (opt-out in
+        // Ayarlar — the toggle exists because cleanup also deletes .part
+        // files a paused job could otherwise resume from).
+        if (autoCleanup) postDownloadCleanup(completed.fileName).catch(() => {});
       },
       onError: (error) => {
         workIdRef.current = null;
@@ -2055,13 +2130,35 @@ export default function DownloaderCard({
       setErrorPhase("download");
       updateState("error");
     }
-  }, [url, selectedFormat, videoInfo, updateState, refreshHistory, helpLang, startStallWatchdog]);
+  }, [url, selectedFormat, videoInfo, updateState, refreshHistory, helpLang, startStallWatchdog, fragments, autoCleanup]);
 
   // ─── Playlist download (all videos at once) ───────────────────────
   const handleDownloadPlaylist = useCallback(async () => {
     try {
     const cleanUrl = normalizeVideoUrl(url);
     if (!cleanUrl || !videoInfo?.is_playlist) return;
+
+    // Handoff apps accept playlist links too — the other app downloads the
+    // whole list itself.
+    const handoff = loadEngineConfig().handoff;
+    if (handoff) {
+      try {
+        await openInEngine(handoff, cleanUrl);
+        setHandoffApp(handoff);
+        setLastCompleted(null);
+        setErrorMsg("");
+        updateState("complete");
+      } catch (err) {
+        setErrorMsg(
+          err instanceof Error
+            ? err.message
+            : `${handoffLabel(handoff)} uygulamasına gönderilemedi`,
+        );
+        setErrorPhase("download");
+        updateState("error");
+      }
+      return;
+    }
 
     const total = videoInfo.count ?? videoInfo.entries?.length ?? 0;
     // Honor the quality row shown in PlaylistPanel (Best/1080p/720p/480p/
@@ -2089,6 +2186,7 @@ export default function DownloaderCard({
       url: cleanUrl,
       formatId: modeSpec,
       isPlaylist: true,
+      fragments,
       onProgress: (progress) => {
         // Liveness marker for the stall watchdog below.
         lastProgressAtRef.current = Date.now();
@@ -2115,7 +2213,13 @@ export default function DownloaderCard({
           }
           lastTick = now;
           return {
-            percent: progress.percent,
+            // Monotonic within one playlist item; a new item starts over.
+            percent: monotonicPercent(
+              prev.percent,
+              progress.percent,
+              prev.item ?? 0,
+              progress.item,
+            ),
             speed: progress.speed,
             eta: progress.eta,
             item: progress.item ?? prev.item,
@@ -2185,7 +2289,7 @@ export default function DownloaderCard({
       setErrorPhase("download");
       updateState("error");
     }
-  }, [url, videoInfo, playlistQuality, updateState, refreshHistory, helpLang, startStallWatchdog]);
+  }, [url, videoInfo, playlistQuality, updateState, refreshHistory, helpLang, startStallWatchdog, fragments]);
 
   // Keep the auto-playlist ref pointing at the latest handler.
   // ─── Single video out of a playlist ───────────────────────────────────
@@ -2199,6 +2303,27 @@ export default function DownloaderCard({
       const targetUrl = (entry.url || "").trim();
       if (!targetUrl || !videoInfo?.is_playlist) return;
 
+      // Same handoff rule as the full-playlist button.
+      const handoff = loadEngineConfig().handoff;
+      if (handoff) {
+        try {
+          await openInEngine(handoff, targetUrl);
+          setHandoffApp(handoff);
+          setLastCompleted(null);
+          setErrorMsg("");
+          updateState("complete");
+        } catch (err) {
+          setErrorMsg(
+            err instanceof Error
+              ? err.message
+              : `${handoffLabel(handoff)} uygulamasına gönderilemedi`,
+          );
+          setErrorPhase("download");
+          updateState("error");
+        }
+        return;
+      }
+
       const preset =
         PLAYLIST_PRESETS.find((p) => p.id === playlistQuality) ?? PLAYLIST_PRESETS[0];
 
@@ -2210,11 +2335,13 @@ export default function DownloaderCard({
         const workId = await startDownload({
           url: targetUrl,
           formatId: preset.spec,
+          fragments,
           onProgress: (progress) => {
             if (progress.percent >= 100) updateState("complete");
             setDownloadProgress((prev) => {
               const next = {
-                percent: progress.percent,
+                // Monotonic — a stall-restart must not snap the bar to 0.
+                percent: monotonicPercent(prev.percent, progress.percent, 1, 1),
                 speed: progress.speed || "0",
                 eta: progress.eta || "--:--",
                 item: 1,
@@ -2243,7 +2370,7 @@ export default function DownloaderCard({
               time: Date.now(),
             });
             refreshHistory();
-            postDownloadCleanup(completed.fileName).catch(() => {});
+            if (autoCleanup) postDownloadCleanup(completed.fileName).catch(() => {});
           },
           onError: (error) => {
             workIdRef.current = null;
@@ -2283,6 +2410,8 @@ export default function DownloaderCard({
       addDownloadRecord,
       refreshHistory,
       helpLang,
+      fragments,
+      autoCleanup,
     ],
   );
 
@@ -2315,6 +2444,7 @@ export default function DownloaderCard({
     setVideoInfo(null);
     setSelectedFormat("");
     setPlaylistSummary(null);
+    setHandoffApp(null);
     setUrl("");
     clearQueueList();
     inputRef.current?.focus();
@@ -2352,6 +2482,28 @@ export default function DownloaderCard({
     () => (videoInfo ? groupFormats(videoInfo.formats) : null),
     [videoInfo],
   );
+
+  // Real quality chips for the loaded single-video screen — built from the
+  // heights this video ACTUALLY has (yt-dlp's own format list), never a
+  // fixed 1080/720/480 row. A 720p-max clip shows no 1080p chip; a 1080p
+  // video always does.
+  const qualityOptions = useMemo(
+    () =>
+      videoInfo && !videoInfo.is_playlist
+        ? buildQualityOptions(videoInfo.formats ?? [], { includeAudio: false })
+        : [],
+    [videoInfo],
+  );
+
+  // A chip is active when the current selector targets its height — or the
+  // exact "Best" chain when no cap applies. Mode, pin and chip selections
+  // all encode [height<=N] (or the uncapped chain), so every path lights a
+  // chip instead of leaving the row looking dead.
+  const qualityChipActive = (opt: QualityOption): boolean => {
+    if (!selectedFormat) return false;
+    if (opt.height === null) return selectedFormat === MP4_FORMAT_SELECTOR;
+    return selectedFormat.includes(`height<=${opt.height}`);
+  };
 
   // Overall progress across a whole playlist: ((item-1) + item%) / total.
   const overallPercent =
@@ -2936,6 +3088,48 @@ export default function DownloaderCard({
 
                       {grouped && (
                         <div className="space-y-3">
+                          {/* Real quality chips — only heights this video
+                              actually has (1080 appears only when a 1080
+                              stream exists). */}
+                          {qualityOptions.length > 1 && (
+                            <div>
+                              <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-2 font-medium">
+                                {helpLang === "tr"
+                                  ? "İndirme kalitesi"
+                                  : "Download quality"}
+                              </p>
+                              <div className="flex flex-wrap gap-2">
+                                {qualityOptions.map((opt) => {
+                                  const active = qualityChipActive(opt);
+                                  return (
+                                    <button
+                                      key={opt.label}
+                                      type="button"
+                                      onClick={() => {
+                                        // Picking a video quality leaves
+                                        // audio-only mode behind — the size
+                                        // estimate must agree with what will
+                                        // actually download.
+                                        if (videoQuality === "audio") {
+                                          setVideoQuality("best");
+                                        }
+                                        handleSelectFormat(opt.selector);
+                                      }}
+                                      className={cn(
+                                        "px-3 py-1.5 rounded-full border text-xs font-semibold transition-all duration-150 cursor-pointer active:scale-[0.97]",
+                                        active
+                                          ? "border-primary/50 bg-primary/5 text-primary ring-1 ring-primary/20"
+                                          : "border-border/40 bg-background text-foreground hover:border-border/70 hover:bg-muted/50",
+                                      )}
+                                    >
+                                      {opt.label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
                           {/* Video + Audio formats */}
                           {grouped.video.length > 0 && (
                             <div>
@@ -3152,10 +3346,28 @@ export default function DownloaderCard({
                 </motion.div>
                 <div className="text-center mb-4">
                   <p className="font-semibold text-foreground text-lg">
-                    {playlistSummary ? "Playlist saved!" : "Ready!"}
+                    {handoffApp
+                      ? helpLang === "tr"
+                        ? "Link gönderildi!"
+                        : "Link sent!"
+                      : playlistSummary
+                        ? "Playlist saved!"
+                        : "Ready!"}
                   </p>
                   <p className="text-sm text-muted-foreground mt-1">
-                    {playlistSummary ? (
+                    {handoffApp ? (
+                      helpLang === "tr" ? (
+                        <>
+                          <strong>{handoffLabel(handoffApp)}</strong>
+                          {" uygulamasına gönderildi — indirme orada sürüyor."}
+                        </>
+                      ) : (
+                        <>
+                          Sent to the <strong>{handoffLabel(handoffApp)}</strong>
+                          {" app — the download continues there."}
+                        </>
+                      )
+                    ) : playlistSummary ? (
                       <>
                         {playlistSummary.saved} videos saved to{" "}
                         <strong>

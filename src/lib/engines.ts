@@ -35,8 +35,39 @@ export type EngineMode = "auto" | "ondevice" | "cobalt" | "server" | "seal";
 /** An engine the caller should try, in order. */
 export type EngineAttempt = "ondevice" | "cobalt" | "server" | "seal";
 
+/**
+ * On-device apps a URL can be handed to (ACTION_SEND) so THEY perform the
+ * download: Seal, ytdlnis and NewPipe are all yt-dlp-adjacent Android apps
+ * with their own download machinery. "" = handoff disabled (default).
+ */
+export type HandoffEngine = "seal" | "ytdlnis" | "newpipe";
+
+export interface HandoffApp {
+  id: HandoffEngine;
+  label: string;
+  /** One-liner shown under the app in Ayarlar. */
+  desc: string;
+}
+
+export const HANDOFF_APPS: HandoffApp[] = [
+  { id: "seal", label: "Seal", desc: "Hızlı, sade yt-dlp arayüzü" },
+  { id: "ytdlnis", label: "ytdlnis", desc: "Komut/indirme kuyruğu destekli yt-dlp istemcisi" },
+  { id: "newpipe", label: "NewPipe", desc: "Oynatıcı + indirici, hafif" },
+];
+
+/** Display name for a handoff app id (falls back to the raw id). */
+export function handoffLabel(id: HandoffEngine | "" | null | undefined): string {
+  return HANDOFF_APPS.find((a) => a.id === id)?.label ?? id ?? "";
+}
+
 export interface EngineConfig {
   mode: EngineMode;
+  /**
+   * When set, every download's URL is handed to this on-device app instead
+   * of downloading locally; analysis still runs on-device so the UI can
+   * show the video info first. "" = disabled.
+   */
+  handoff: HandoffEngine | "";
   /** Base URL of a Cobalt instance, e.g. https://my-instance.example */
   instance: string;
   /** Optional Authorization token (instance decides if it needs one). */
@@ -51,6 +82,7 @@ export interface EngineConfig {
 
 export const DEFAULT_ENGINE_CONFIG: EngineConfig = {
   mode: "auto",
+  handoff: "",
   instance: "",
   token: "",
   serverUrl: "",
@@ -100,8 +132,15 @@ export function loadEngineConfig(): EngineConfig {
       parsed.mode === "seal"
         ? parsed.mode
         : "auto";
+    // Unknown ids collapse to "" (disabled) — a stale value must never
+    // route downloads to an app that does not exist.
+    const handoff: HandoffEngine | "" =
+      parsed.handoff === "seal" || parsed.handoff === "ytdlnis" || parsed.handoff === "newpipe"
+        ? parsed.handoff
+        : "";
     return {
       mode,
+      handoff,
       instance: normalizeInstance(parsed.instance ?? ""),
       token: (parsed.token ?? "").trim(),
       serverUrl: normalizeInstance(parsed.serverUrl ?? ""),
@@ -120,6 +159,7 @@ export function saveEngineConfig(cfg: EngineConfig): void {
       STORAGE_KEY,
       JSON.stringify({
         mode: cfg.mode,
+        handoff: cfg.handoff ?? "",
         instance: normalizeInstance(cfg.instance),
         token: cfg.token.trim(),
         serverUrl: normalizeInstance(cfg.serverUrl),
@@ -166,6 +206,8 @@ export interface PlanOptions {
   /** True when the native engine exists (APK/EXE). In a browser there is
    *  nothing that can write the file to disk, so cobalt cannot help. */
   native: boolean;
+  /** On-device app that will take over the DOWNLOAD step (see EngineConfig). */
+  handoff?: HandoffEngine | "";
 }
 
 /**
@@ -176,6 +218,10 @@ export interface PlanOptions {
 export function planEngines(url: string, opts: PlanOptions): EngineAttempt[] {
   const { mode, isPlaylist, native } = opts;
   const configured = isCobaltConfigured();
+
+  // A handoff app owns the download step, so analysis stays local: no
+  // reason to call a remote resolver for a URL another app will fetch.
+  if (opts.handoff) return ["ondevice"];
 
   // No native engine (plain browser): nothing can download to disk, and the
   // on-device path also owns the optional server fallback + "no engine" copy.
@@ -252,6 +298,10 @@ export function engineLabel(engine: EngineAttempt, lang: "tr" | "en"): string {
 
 /** One-line explanation of the active routing, shown in Settings. */
 export function describeRouting(cfg: EngineConfig, lang: "tr" | "en"): string {
+  if (cfg.handoff)
+    return lang === "tr"
+      ? `İndirmeler ${handoffLabel(cfg.handoff)} uygulamasına gönderilir; analiz yine cihazda yapılır.`
+      : `Downloads are handed to the ${handoffLabel(cfg.handoff)} app; analysis still runs on-device.`;
   if (cfg.mode === "ondevice")
     return lang === "tr"
       ? "Tüm indirmeler cihazdaki motorla yapılır."
