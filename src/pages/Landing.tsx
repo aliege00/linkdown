@@ -54,17 +54,12 @@ export default function Landing() {
   // dead-end error after the user presses Analyze.
   const nativeEngine = isNativeAvailable();
 
-  // The top-right CTA is a LABEL, not a link: whichever way you read it,
-  // pressing it takes you to the first screen of the app you are already
-  // in — /dashboard, where the downloader lives.
-  //
-  //   • in the packaged app it reads "Web" (you are being reminded that
-  //     this IS the app, not the site) and returns you to /dashboard;
-  //   • in the browser it reads "Uygulama" and opens /dashboard there.
-  //
-  // It deliberately does NOT open vidfetch.app in a new tab: that just
+  // The top-right CTA always reads "Uygulama" and takes you to
+  // /dashboard — the first screen of the app. It is a LABEL, not a link
+  // out: it deliberately does NOT open vidfetch.app in a new tab (that
   // bounced users out of the app they were using, and inside an APK a
-  // browser tab is a dead end they cannot navigate back from.
+  // browser tab is a dead end they cannot navigate back from), and it
+  // never says "Web" or "Dashboard" — the destination is the app itself.
   const openApp = () => {
     navigate("/dashboard");
   };
@@ -136,7 +131,7 @@ export default function Landing() {
               size="sm"
               onClick={openApp}
             >
-              {nativeEngine ? "Web" : "Uygulama"}
+              Uygulama
             </Button>
           </nav>
           <div className="flex items-center gap-1">
@@ -147,7 +142,7 @@ export default function Landing() {
               className="sm:hidden"
               onClick={openApp}
             >
-              {nativeEngine ? "Web" : "Uygulama"}
+              Uygulama
             </Button>
           </div>
         </div>
@@ -701,7 +696,7 @@ export default function Landing() {
           {/* Bottom bar */}
           <div className="mt-10 pt-6 border-t border-border/30 flex flex-col sm:flex-row items-center justify-between gap-3">
             <p className="text-xs text-muted-foreground">
-              On-device video downloader. egebey.
+              On-device video downloader.
               {BUILD_TAG && (
                 <span className="ml-2 font-mono text-[10px] text-muted-foreground/50">
                   build {BUILD_TAG}

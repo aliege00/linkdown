@@ -979,6 +979,7 @@ class DownloadBridge : Plugin() {
         "seal" to "com.junkfood.seal",
         "ytdlnis" to "com.deniscerri.ytdl",
         "newpipe" to "org.schabi.newpipe",
+        "libretube" to "com.github.libretube",
     )
 
     /**
@@ -1030,15 +1031,27 @@ class DownloadBridge : Plugin() {
             setPackage(pkg)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        val resolvable = context.packageManager.queryIntentActivities(
-            send, PackageManager.MATCH_DEFAULT_ONLY
-        )
+        // MATCH_ALL instead of MATCH_DEFAULT_ONLY: some downloaders (e.g.
+        // LibreTube's DownloadActivity) declare their ACTION_SEND filter
+        // WITHOUT android.intent.category.DEFAULT, which MATCH_DEFAULT_ONLY
+        // hides — the app would look "not installed".
+        val pm = context.packageManager
+        val resolvable = pm.queryIntentActivities(send, PackageManager.MATCH_ALL)
         if (resolvable.isEmpty()) {
             call.reject("The $id app is not installed or cannot receive links")
             return
         }
         try {
-            (activity ?: context).startActivity(send)
+            // Launch the resolved activity EXPLICITLY: a filter without the
+            // DEFAULT category only matches intents that name its component.
+            val best = pm.resolveActivity(send, PackageManager.MATCH_ALL)
+                ?: resolvable.first()
+            val launch = Intent(send).apply {
+                component = android.content.ComponentName(
+                    best.activityInfo.packageName, best.activityInfo.name
+                )
+            }
+            (activity ?: context).startActivity(launch)
             call.resolve(JSObject().apply {
                 put("engine", id)
                 put("url", url)

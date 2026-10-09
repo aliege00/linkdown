@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Sparkles } from "lucide-react";
 import BottomTabBar, { type TabId } from "@/components/BottomTabBar";
@@ -9,15 +9,35 @@ import SettingsTab from "@/components/tabs/SettingsTab";
 import { useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { useAppSettings } from "@/hooks/use-app-settings";
+import { autoSettingsForDevice } from "@/lib/app-settings";
 
 export default function Dashboard() {
   // Three tabs, matching the three items in the floating island:
   //   1) İndirme — paste → analyze → download (+ its own history)
   //   2) Yardım  — help center (bot checks, errors, tips, AI assistant)
   //   3) Ayarlar — appearance/performance switches, AI keys, engines
-  const [tab, setTab] = useState<TabId>("download");
+const [tab, setTab] = useState<TabId>("download");
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
+  const { settings, update } = useAppSettings();
+
+  // Device-power tuning on entry: a weak phone starts with low-power + no
+  // motion, a strong phone has low-power switched off. Only runs on mount
+  // (entering the dashboard), and only patches values that actually differ,
+  // so a mid-range device keeps whatever the user chose in Ayarlar.
+  useEffect(() => {
+    const patch = autoSettingsForDevice(
+      navigator.hardwareConcurrency,
+      (navigator as Navigator & { deviceMemory?: number }).deviceMemory,
+    );
+    if (!patch) return;
+    const differs = (Object.keys(patch) as (keyof typeof patch)[]).some(
+      (k) => settings[k] !== patch[k],
+    );
+    if (differs) update(patch);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only: re-running on every settings change would fight manual toggles
+  }, []);
 
   const NAV: { id: TabId; label: string }[] = [
     { id: "download", label: "İndirme" },

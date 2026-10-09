@@ -5,10 +5,9 @@
  *   1. Switching island tabs must ANIMATE the page. The bottom pill glided
  *      between tabs while the content swapped instantly underneath it, which
  *      read as a glitch on a phone.
- *   2. Inside the packaged app the top-right landing button reads "Web"; in
- *      the browser it reads "Uygulama". Either way it is a label, not a link
- *      out — pressing it returns to /dashboard, the first screen of the app
- *      you are in. It must never open the hosted site in a new tab.
+ *   2. The top-right landing button always reads "Uygulama" — never "Web"
+ *      or "Dashboard" — and it is a label, not a link out: pressing it
+ *      returns to /dashboard, the first screen of the app you are in.
  *
  * These assertions read the sources, same pattern as theme.test.ts: the
  * behaviour is CSS/framer-motion and platform detection, neither of which a
@@ -93,12 +92,10 @@ describe("island tab switch animates the page", () => {
 });
 
 describe("top-right CTA is context aware", () => {
-  it('reads "Web" in the app and "Uygulama" in the browser', () => {
-    expect(landing).toContain(
-      '{nativeEngine ? "Web" : "Uygulama"}',
-    );
+  it('always reads "Uygulama", never "Web" or "Dashboard"', () => {
+    expect(landing).not.toContain('nativeEngine ? "Web"');
     // Exactly the two buttons in the header (desktop nav + mobile-only).
-    const occurrences = landing.split('{nativeEngine ? "Web" : "Uygulama"}').length - 1;
+    const occurrences = landing.split("\n              Uygulama\n").length - 1;
     expect(occurrences).toBe(2);
   });
 

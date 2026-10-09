@@ -112,6 +112,38 @@ export function saveSettings(settings: AppSettings): void {
 }
 
 /**
+ * Device-power → settings, applied when the dashboard opens.
+ *
+ * The idea: an old/low-end phone should not start every session with blur,
+ * gradients and motion on, and a strong phone should never sit in the
+ * battery-saving flat mode by accident.
+ *
+ *   weak   (≤4 cores OR  ≤4 GB RAM) → low-power ON, animations OFF
+ *   strong (≥8 cores AND ≥8 GB RAM) → low-power OFF (motion untouched)
+ *   anything in between            → no change (null): the user decides.
+ *
+ * Pure and exported so tests can pin the thresholds; the caller passes
+ * navigator.hardwareConcurrency / navigator.deviceMemory (both can be
+ * undefined — an unknown device is "mid", never forced).
+ */
+export function autoSettingsForDevice(
+  cores: number | undefined,
+  memoryGB: number | undefined,
+): Partial<AppSettings> | null {
+  const c = typeof cores === "number" && cores > 0 ? cores : undefined;
+  const m = typeof memoryGB === "number" && memoryGB > 0 ? memoryGB : undefined;
+  if (c === undefined && m === undefined) return null;
+
+  const weak = (c !== undefined && c <= 4) || (m !== undefined && m <= 4);
+  if (weak) return { lowPower: true, animations: false };
+
+  const strong = (c === undefined || c >= 8) && (m === undefined || m >= 8);
+  if (strong) return { lowPower: false };
+
+  return null;
+}
+
+/**
  * Mirror the settings onto <html> so index.css can switch the whole UI
  * without React re-rendering anything. Safe to call on every change.
  */

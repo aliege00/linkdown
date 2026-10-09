@@ -25,12 +25,14 @@
 
     <!-- ═══ Package visibility (Android 11+) ═══ -->
     <!-- Lets the app detect — and hand URLs to — other on-device
-         downloaders (Seal / ytdlnis / NewPipe). Without these entries,
-         getInstalledEngines() would report none of them as installed. -->
+         downloaders (Seal / ytdlnis / NewPipe / LibreTube). Without these
+         entries, getInstalledEngines() would report none of them as
+         installed. -->
     <queries>
         <package android:name="com.junkfood.seal" />
         <package android:name="com.deniscerri.ytdl" />
         <package android:name="org.schabi.newpipe" />
+        <package android:name="com.github.libretube" />
         <intent>
             <action android:name="android.intent.action.SEND" />
             <data android:mimeType="text/plain" />

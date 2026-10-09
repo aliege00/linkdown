@@ -465,7 +465,7 @@ describe("DownloadWorker output capture", () => {
   });
 });
 
-// ─── On-device engine handoff (Seal / ytdlnis / NewPipe) ───────────────────
+// ─── On-device engine handoff (Seal / ytdlnis / NewPipe / LibreTube) ─────
 
 describe("on-device app handoff", () => {
   const bridge = read("android/app/src/main/java/com/vidfetch/downloader/DownloadBridge.kt");
@@ -479,11 +479,21 @@ describe("on-device app handoff", () => {
     expect(bridge).toContain("putExtra(Intent.EXTRA_TEXT, url)");
   });
 
-  it("covers Seal, ytdlnis and NewPipe by package name", () => {
-    for (const pkg of ["com.junkfood.seal", "com.deniscerri.ytdl", "org.schabi.newpipe"]) {
+  it("covers Seal, ytdlnis, NewPipe and LibreTube by package name", () => {
+    for (const pkg of [
+      "com.junkfood.seal",
+      "com.deniscerri.ytdl",
+      "org.schabi.newpipe",
+      "com.github.libretube",
+    ]) {
       expect(bridge).toContain(`"${pkg}"`);
       expect(manifest).toContain(`android:name="${pkg}"`);
     }
+    // LibreTube's SEND filter has no DEFAULT category, so openInEngine
+    // resolves with MATCH_ALL and launches the activity EXPLICITLY — a
+    // MATCH_DEFAULT_ONLY lookup would always report it "not installed".
+    expect(bridge).toContain("PackageManager.MATCH_ALL");
+    expect(bridge).toContain("best.activityInfo.name");
   });
 
   it("rejects instead of silently doing nothing when the app cannot take the link", () => {

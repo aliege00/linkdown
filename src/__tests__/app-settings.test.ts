@@ -15,6 +15,7 @@ import {
   loadSettings,
   saveSettings,
   applySettings,
+  autoSettingsForDevice,
 } from "@/lib/app-settings";
 import {
   DEFAULT_ENGINE_CONFIG,
@@ -128,6 +129,39 @@ describe("app settings", () => {
     applySettings(DEFAULT_SETTINGS);
     expect(document.documentElement.dataset.anim).toBe("on");
     expect(document.documentElement.dataset.lowpower).toBe("off");
+  });
+});
+
+describe("device-power auto settings (dashboard entry)", () => {
+  it("puts a weak device into low-power with motion off", () => {
+    expect(autoSettingsForDevice(4, 8)).toEqual({ lowPower: true, animations: false });
+    expect(autoSettingsForDevice(8, 3)).toEqual({ lowPower: true, animations: false });
+  });
+
+  it("switches low-power OFF on a strong device without touching motion", () => {
+    expect(autoSettingsForDevice(8, 8)).toEqual({ lowPower: false });
+    expect(autoSettingsForDevice(12, 16)).toEqual({ lowPower: false });
+  });
+
+  it("leaves mid-range and unknown devices to the user", () => {
+    expect(autoSettingsForDevice(6, 6)).toBeNull();
+    // Unknown hardwareConcurrency/deviceMemory must never force a mode.
+    expect(autoSettingsForDevice(undefined, undefined)).toBeNull();
+    expect(autoSettingsForDevice(0, 0)).toBeNull();
+    // One known strong signal, one unknown → strong.
+    expect(autoSettingsForDevice(8, undefined)).toEqual({ lowPower: false });
+    // One known weak signal wins over an unknown.
+    expect(autoSettingsForDevice(undefined, 3)).toEqual({ lowPower: true, animations: false });
+  });
+
+  it("is applied on dashboard mount, not on every settings change", () => {
+    const dashboard = read("pages/Dashboard.tsx");
+    expect(dashboard).toContain("autoSettingsForDevice(");
+    expect(dashboard).toContain("navigator.hardwareConcurrency");
+    expect(dashboard).toContain("deviceMemory");
+    // Mount-only: the effect must not re-run on settings changes or it
+    // would fight every manual toggle in Ayarlar.
+    expect(dashboard).toMatch(/\}, \[\]\);/);
   });
 });
 
@@ -296,6 +330,9 @@ describe("on-device app handoff", () => {
   it("round-trips the handoff choice and rejects unknown ids", () => {
     saveEngineConfig({ ...DEFAULT_ENGINE_CONFIG, handoff: "seal" });
     expect(loadEngineConfig().handoff).toBe("seal");
+    // The fourth on-device engine round-trips too.
+    saveEngineConfig({ ...DEFAULT_ENGINE_CONFIG, handoff: "libretube" });
+    expect(loadEngineConfig().handoff).toBe("libretube");
     // A stale/unknown value collapses to "disabled" — never a ghost app.
     localStorage.setItem("vidfetch.engines.v1", JSON.stringify({ handoff: "safari" }));
     expect(loadEngineConfig().handoff).toBe("");

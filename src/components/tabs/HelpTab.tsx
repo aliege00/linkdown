@@ -28,7 +28,7 @@ export default function HelpTab() {
         <div className="grid grid-cols-3 gap-3 pt-2">
           {[
             { label: "Motor", value: "Cihaz içi" },
-            { label: "Platform", value: "1000+" },
+            { label: "Site", value: "1000+" },
             { label: "Ücret", value: "Ücretsiz" },
           ].map((s) => (
             <div
@@ -40,14 +40,6 @@ export default function HelpTab() {
             </div>
           ))}
         </div>
-      </FlatCard>
-
-      {/* ── Description ── */}
-      <FlatCard>
-        <p className="text-center text-xs leading-relaxed text-muted-foreground">
-          VidFetch, indirme motorunu doğrudan cihazınızda çalıştırır. Sunucu,
-          bulut veya hesap gerekmez. 1000+ site desteklenir.
-        </p>
       </FlatCard>
     </div>
   );

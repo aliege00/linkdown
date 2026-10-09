@@ -37,10 +37,11 @@ export type EngineAttempt = "ondevice" | "cobalt" | "server" | "seal";
 
 /**
  * On-device apps a URL can be handed to (ACTION_SEND) so THEY perform the
- * download: Seal, ytdlnis and NewPipe are all yt-dlp-adjacent Android apps
- * with their own download machinery. "" = handoff disabled (default).
+ * download: Seal, ytdlnis, NewPipe and LibreTube are all yt-dlp-adjacent
+ * Android apps with their own download machinery. "" = handoff disabled
+ * (default).
  */
-export type HandoffEngine = "seal" | "ytdlnis" | "newpipe";
+export type HandoffEngine = "seal" | "ytdlnis" | "newpipe" | "libretube";
 
 export interface HandoffApp {
   id: HandoffEngine;
@@ -53,6 +54,7 @@ export const HANDOFF_APPS: HandoffApp[] = [
   { id: "seal", label: "Seal", desc: "Hızlı, sade yt-dlp arayüzü" },
   { id: "ytdlnis", label: "ytdlnis", desc: "Komut/indirme kuyruğu destekli yt-dlp istemcisi" },
   { id: "newpipe", label: "NewPipe", desc: "Oynatıcı + indirici, hafif" },
+  { id: "libretube", label: "LibreTube", desc: "Yüksek çözünürlük, hızlı yerel indirici" },
 ];
 
 /** Display name for a handoff app id (falls back to the raw id). */
@@ -135,7 +137,10 @@ export function loadEngineConfig(): EngineConfig {
     // Unknown ids collapse to "" (disabled) — a stale value must never
     // route downloads to an app that does not exist.
     const handoff: HandoffEngine | "" =
-      parsed.handoff === "seal" || parsed.handoff === "ytdlnis" || parsed.handoff === "newpipe"
+      parsed.handoff === "seal" ||
+      parsed.handoff === "ytdlnis" ||
+      parsed.handoff === "newpipe" ||
+      parsed.handoff === "libretube"
         ? parsed.handoff
         : "";
     return {
