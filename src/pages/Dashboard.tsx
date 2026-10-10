@@ -73,7 +73,7 @@ const [tab, setTab] = useState<TabId>("download");
               <h1 className="truncate text-sm font-bold tracking-tight">VidFetch</h1>
               {tab === "download" ? (
                 <span className="mt-0.5 inline-flex items-center rounded-full border border-primary/25 bg-primary/10 px-1.5 py-px text-[10px] font-semibold text-primary">
-                  v2.6.7
+                  v2.6.8
                 </span>
               ) : (
                 <p className="truncate text-[11px] text-muted-foreground">
