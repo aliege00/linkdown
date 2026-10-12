@@ -17,6 +17,11 @@ contextBridge.exposeInMainWorld("vidfetch", {
   startDownload: (options) =>
     ipcRenderer.invoke("vidfetch:startDownload", options),
   cancelDownload: (options) => ipcRenderer.invoke("vidfetch:cancel", options),
+
+  // Engine maintenance (settings → İndirme motoru): version probe +
+  // in-app yt-dlp self-update (`yt-dlp -U` on the bundled binary).
+  getEngineInfo: () => ipcRenderer.invoke("vidfetch:getEngineInfo"),
+  updateEngine: () => ipcRenderer.invoke("vidfetch:updateEngine"),
   openFile: (options) => ipcRenderer.invoke("vidfetch:openFile", options),
   getDownloads: () => ipcRenderer.invoke("vidfetch:getDownloads"),
   getDownloadLocation: () => ipcRenderer.invoke("vidfetch:getLocation"),

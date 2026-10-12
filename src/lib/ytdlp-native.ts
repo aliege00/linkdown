@@ -32,6 +32,8 @@ interface YtDlpPluginInterface {
   startDownload(options: { url: string; formatId: string; isPlaylist?: boolean; fragments?: number }): Promise<{ workId: string }>;
   getInstalledEngines(): Promise<Record<string, boolean>>;
   openInEngine(options: { engine: string; url: string }): Promise<{ engine: string; url: string }>;
+  getEngineInfo(): Promise<EngineInfo>;
+  updateEngine(): Promise<EngineUpdateResult>;
   cancelDownload(options: { workId: string }): Promise<void>;
   openFile(options: { uri: string }): Promise<{ success: boolean }>;
   getDownloads(): Promise<{ downloads: DownloadEntry[] }>;
@@ -242,6 +244,8 @@ export interface DesktopBridge {
   pickCookieFile(): Promise<YouTubeSettings | null>;
   clearCookieFile(): Promise<YouTubeSettings>;
   setPoTokenProvider(url: string): Promise<YouTubeSettings>;
+  getEngineInfo?(): Promise<EngineInfo>;
+  updateEngine?(): Promise<EngineUpdateResult>;
   onProgress(cb: (data: PluginData) => void): () => void;
   onComplete(cb: (data: PluginData) => void): () => void;
   onError(cb: (data: PluginData) => void): () => void;
@@ -465,6 +469,38 @@ export interface StartDownloadOptions {
   onComplete?: (info: CompletedDownload) => void;
   /** Optional callback fired when the download fails/cancels */
   onError?: (error: string) => void;
+  /**
+   * True when `url` is already a RESOLVED direct media URL (Cobalt / server
+   * engines) and, in a build without an on-device engine, the browser itself
+   * should take the file. Ignored on Android / Windows, where the native
+   * engine downloads it.
+   */
+  directMedia?: boolean;
+  /** File name to suggest for a browser-managed download. */
+  fileName?: string;
+}
+
+/**
+ * Hand a URL to the browser's own download manager.
+ *
+ * This is the save path for builds with no on-device engine (the hosted
+ * site / preview): the resolver already produced a direct media URL, and the
+ * browser is the only thing here that can write a file. Cobalt tunnel
+ * responses carry `Content-Disposition: attachment`, so the click starts a
+ * real download named by the server — no page, no popup, no extra bytes in
+ * memory.
+ */
+export function triggerBrowserDownload(url: string, fileName?: string): void {
+  if (typeof document === "undefined" || !url) return;
+  const a = document.createElement("a");
+  a.href = url;
+  // Cross-origin URLs ignore the attribute, but same-origin servers honor it.
+  if (fileName) a.download = fileName;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 
 /**
@@ -487,9 +523,22 @@ export async function startDownload(
     onProgress,
     onComplete,
     onError,
+    directMedia,
+    fileName,
   } = options;
 
   if (!isNativeAvailable()) {
+    // An already-resolved media URL (Cobalt analysis in a browser build):
+    // hand it to the browser's download manager and report success so the UI
+    // shows the completion state. This is what makes the hosted dashboard
+    // download without any server of ours.
+    if (directMedia && /^https?:\/\//i.test(url)) {
+      const name = (fileName ?? "").trim();
+      triggerBrowserDownload(url, name);
+      onProgress?.({ percent: 100, speed: "0", eta: "--:--" });
+      onComplete?.({ uri: url, fileName: name });
+      return "web-download";
+    }
     // Web build with a self-hosted yt-dlp server configured → trigger the
     // download in the browser (single videos stream; playlists come back as
     // a ZIP) and report success so the UI can show the completion state.
@@ -637,6 +686,80 @@ export async function getInstalledEngines(): Promise<Record<string, boolean>> {
   } catch (error) {
     console.warn("[ytdlp-native] getInstalledEngines failed:", error);
     return {};
+  }
+}
+
+// ── Engine maintenance (yt-dlp update) ───────────────────────────────────
+
+/** Which yt-dlp build the embedded engine is actually running. */
+export interface EngineInfo {
+  /** False when the engine failed to initialize (detail says why). */
+  available: boolean;
+  /** The binary's own `--version` answer (falls back to the stored tag). */
+  version: string;
+  /** Release tag stored by the updater — "" before the first update. */
+  storedVersion?: string;
+  /** Why the engine is unavailable (empty string when it is fine). */
+  detail?: string;
+}
+
+/** Result of an in-app yt-dlp update. */
+export interface EngineUpdateResult {
+  success: boolean;
+  /** "DONE" when the binary was replaced, "ALREADY_UP_TO_DATE" when not. */
+  status?: "DONE" | "ALREADY_UP_TO_DATE";
+  /** The version after the update (best-effort). */
+  version?: string;
+  /** Failure reason (English — shown as-is next to the TR hint). */
+  error?: string;
+}
+
+/**
+ * Read the running engine's yt-dlp version, or null when there is no
+ * on-device engine (plain browser) or the probe failed.
+ *
+ * YouTube keeps changing, so the settings screen uses this to show how
+ * stale the embedded engine is — and to offer "Motoru güncelle".
+ */
+export async function getEngineInfo(): Promise<EngineInfo | null> {
+  if (!isNativeAvailable()) return null;
+  try {
+    if (Desktop?.isDesktop) {
+      if (!Desktop.getEngineInfo) return null;
+      return await Desktop.getEngineInfo();
+    }
+    return await getYtDlp().getEngineInfo();
+  } catch (error) {
+    console.warn("[ytdlp-native] getEngineInfo failed:", error);
+    return null;
+  }
+}
+
+/**
+ * Update the embedded yt-dlp in place (Android: the library's updater;
+ * Desktop: `yt-dlp -U` on the bundled binary). Never throws — failures
+ * come back as `{ success: false, error }` so the button can show them.
+ */
+export async function updateEngine(): Promise<EngineUpdateResult> {
+  if (!isNativeAvailable()) {
+    return {
+      success: false,
+      error: "No download engine in the browser — install the APK or EXE.",
+    };
+  }
+  try {
+    if (Desktop?.isDesktop) {
+      if (!Desktop.updateEngine) {
+        return { success: false, error: "This build cannot update the engine." };
+      }
+      return await Desktop.updateEngine();
+    }
+    return await getYtDlp().updateEngine();
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 

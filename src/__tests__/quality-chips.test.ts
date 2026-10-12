@@ -13,7 +13,11 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { buildQualityOptions, defaultQualityOption } from "@/lib/quality-options";
+import {
+  buildQualityOptions,
+  defaultQualityOption,
+  estimateSelectionBytes,
+} from "@/lib/quality-options";
 
 const card = readFileSync(
   resolve(__dirname, "../components/DownloaderCard.tsx"),
@@ -112,5 +116,117 @@ describe("DownloaderCard quality chips", () => {
     // audio size for a video download.
     expect(card).toContain('if (videoQuality === "audio")');
     expect(card).toContain('setVideoQuality("best")');
+  });
+});
+
+// ─── Size estimate from REAL streams ───────────────────────────────────────
+// Shipped bug: the button guessed MB/min from a flat table while the format
+// cards showed the engine's own file sizes — "1080p ≈ 180 MB" next to a card
+// reading "360 MB". Every number must now derive from the same stream list.
+
+describe("estimateSelectionBytes", () => {
+  const MB = 1024 * 1024;
+  const two = { ext: "mp4", vcodec: "avc1", acodec: "mp4a" };
+  const ladder = [
+    { ...two, resolution: "1920x1080", height: 1080, filesize: 360 * MB, tbr: 5000 },
+    { ...two, resolution: "1280x720", height: 720, filesize: 180 * MB, tbr: 2500 },
+    { ...two, resolution: "640x360", height: 360, filesize: 45 * MB, tbr: 625 },
+    { ext: "m4a", resolution: "audio only", vcodec: null, acodec: "mp4a", filesize: 5 * MB, tbr: 128 },
+  ];
+
+  it("returns the engine's exact size for the pinned height", () => {
+    const at1080 = estimateSelectionBytes(ladder, {
+      maxHeight: 1080,
+      durationSeconds: 600,
+    });
+    expect(at1080).toEqual({ bytes: 360 * MB, exact: true });
+    // The same height must give the same number everywhere (regression:
+    // 180 MB on one surface, 360 MB on the other).
+    const at720 = estimateSelectionBytes(ladder, {
+      maxHeight: 720,
+      durationSeconds: 600,
+    });
+    expect(at720).toEqual({ bytes: 180 * MB, exact: true });
+  });
+
+  it("picks the tallest stream at or under the cap, never above it", () => {
+    // No 480p exists → the chain falls through to 360p, not up to 720p.
+    const size = estimateSelectionBytes(ladder, {
+      maxHeight: 480,
+      durationSeconds: 600,
+    });
+    expect(size).toEqual({ bytes: 45 * MB, exact: true });
+  });
+
+  it("falls back to bitrate × duration when the engine omits filesize", () => {
+    const noSizes = ladder.map((f) => ({ ...f, filesize: null }));
+    const size = estimateSelectionBytes(noSizes, {
+      maxHeight: 720,
+      durationSeconds: 600,
+    });
+    // The 720p PROGRESSIVE stream's tbr already includes its audio track —
+    // only a video-only DASH stream needs the audio added on top (covered
+    // separately), so this is 2500 kbps × 600 s / 8.
+    expect(size).toEqual({ bytes: Math.round((2500 * 1000 * 600) / 8), exact: false });
+  });
+
+  it("sums a video-only DASH stream with the best audio track", () => {
+    const dash = [
+      { ext: "mp4", resolution: "1920x1080", vcodec: "avc1", acodec: "none", height: 1080, filesize: 300 * MB },
+      { ...two, resolution: "640x360", height: 360, filesize: 45 * MB },
+      { ext: "m4a", resolution: "audio only", vcodec: null, acodec: "mp4a", filesize: 5 * MB },
+    ];
+    const size = estimateSelectionBytes(dash, { durationSeconds: 600 });
+    expect(size).toEqual({ bytes: 305 * MB, exact: true });
+  });
+
+  it("uses the audio stream in audio mode, with the m4a-first rule", () => {
+    const mixed = [
+      { ext: "ogg", resolution: "audio only", vcodec: null, acodec: "opus", tbr: 160 },
+      { ext: "m4a", resolution: "audio only", vcodec: null, acodec: "mp4a", tbr: 128, filesize: 5 * MB },
+    ];
+    expect(estimateSelectionBytes(mixed, { audioOnly: true })).toEqual({
+      bytes: 5 * MB,
+      exact: true,
+    });
+    expect(estimateSelectionBytes([], { audioOnly: true })).toBeNull();
+    expect(estimateSelectionBytes(ladder, {})).toEqual({ bytes: 360 * MB, exact: true });
+  });
+
+  it("returns null instead of inventing a number from nothing", () => {
+    expect(estimateSelectionBytes([])).toBeNull();
+    // Formats without size, bitrate or duration → caller falls back to tables.
+    expect(
+      estimateSelectionBytes(
+        [{ ext: "mp4", resolution: "640x360", vcodec: "avc1", acodec: "mp4a" }],
+        { durationSeconds: null },
+      ),
+    ).toBeNull();
+  });
+});
+
+// ─── The card derives every visible number from that helper ─────────────────
+
+describe("DownloaderCard size estimate wiring", () => {
+  it("estimates the button and each chip from the real streams", () => {
+    expect(card).toContain("estimateSelectionBytes(");
+    // Priority: exact selected format → real-stream estimate → coarse table.
+    expect(card).toMatch(
+      /selectedFormatMeta\?\.filesize[\s\S]{0,1200}estimateSelectionBytes/,
+    );
+    expect(card).toContain("chipSizes.get(opt.height)");
+    // The cap comes from the pin or the mode — never from a fixed table.
+    expect(card).toContain("DOWNLOAD_MODES.find((m) => m.id === videoQuality)?.maxHeight");
+  });
+
+  it("streams per-row progress into the multi-link queue", () => {
+    // Regression: the batch worker never passed onProgress, so every row sat
+    // at 0% until it finished — the queue looked stopped mid-download.
+    expect(card).toMatch(
+      /downloadOnce\(\{[\s\S]{0,400}?onProgress: \(p\)/,
+    );
+    expect(card).toContain("row.id === item.id && row.status === \"downloading\"");
+    // …and the percent never moves backwards across a stall-restart.
+    expect(card).toContain("percent: Math.max(row.percent, incoming)");
   });
 });

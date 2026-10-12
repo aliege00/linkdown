@@ -31,6 +31,7 @@ import {
   type YtDlpInfo,
   type PlaylistEntry,
   type DownloadEntry,
+  type ActiveDownload,
   type CompletedDownload,
   type DownloadLocation,
   type YouTubeSettings,
@@ -54,6 +55,8 @@ import {
 import {
   buildQualityOptions,
   defaultQualityOption,
+  estimateSelectionBytes,
+  type QualityFormatLike,
   type QualityOption,
 } from "@/lib/quality-options";
 import { postDownloadCleanup } from "@/lib/auto-cleanup";
@@ -73,6 +76,7 @@ import {
 } from "@/lib/history";
 import {
   loadEngineConfig,
+  cobaltInstances,
   planEngines,
   lastResortEngine,
   engineLabel,
@@ -123,6 +127,7 @@ import {
   ShieldAlert,
   User,
   Video,
+  WifiOff,
   X,
   Youtube,
   Trash2,
@@ -183,6 +188,13 @@ function getQualityLabel(resolution: string): string {
  * runs in playlist mode and reports back a single video.
  */
 function looksLikePlaylist(raw: string): boolean {
+  // A watch link that ALSO carries a list parameter is still ONE video — the
+  // same rule yt-dlp applies by default (the video wins; a playlist is only
+  // opened from a /playlist-style URL). Treating every shared `&list=` link
+  // as a playlist swapped the video the user actually asked for with a whole
+  // list, and in a browser build — where playlists cannot be analyzed at
+  // all — it failed outright with "no engine".
+  if (/[?&]v=[^&\s]+/.test(raw)) return false;
   return /[?&]list=[^&\s]+/.test(raw) || /\/playlist([/?]|$)/.test(raw);
 }
 
@@ -527,6 +539,13 @@ const ErrorBox = memo(function ErrorBox({
   // The native troubleshooting panel only exists inside the APK/EXE builds.
   // (showSettings is optional — fall back to the environment check.)
   const canOpenSettings = showSettings ?? isNativeAvailable();
+  const [copied, setCopied] = useState<"idle" | "ok" | "fail">("idle");
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    };
+  }, []);
 
   const scrollToHelpGuide = () => {
     document.getElementById("youtube-help-guide")?.scrollIntoView({
@@ -535,8 +554,41 @@ const ErrorBox = memo(function ErrorBox({
     });
   };
 
+  /**
+   * Copy a complete error report to the clipboard so the user can paste it
+   * into a bug report — raw engine output plus enough context (build,
+   * platform, phase, category) to reproduce without asking follow-ups.
+   */
+  const copyErrorReport = async () => {
+    const lines = [
+      "VidFetch hata raporu / error report",
+      `Zaman / time: ${new Date().toISOString()}`,
+      `Sürüm / build: ${window.__VIDFETCH_BUILD__ || "bilinmiyor / unknown"}`,
+      `Platform: ${isNativeAvailable() ? "uygulama (APK/EXE)" : "tarayıcı / browser"}`,
+      `Cihaz / user agent: ${navigator.userAgent}`,
+      `Faz / phase: ${phase}`,
+      `Kategori / category: ${info.category}`,
+      `Başlık / title: ${info.title}`,
+      `Dil / lang: ${lang}`,
+      "",
+      "--- Ham hata / raw error ---",
+      message,
+    ];
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"));
+      setCopied("ok");
+    } catch {
+      setCopied("fail");
+    }
+    if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    copiedTimer.current = setTimeout(() => setCopied("idle"), 2500);
+  };
+
   return (
-    <div className="flex items-start gap-3 p-4 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200/50 dark:border-red-800/30">
+    <div
+      role="alert"
+      className="flex items-start gap-3 p-4 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200/50 dark:border-red-800/30"
+    >
       <AlertCircle className="h-5 w-5 text-red-500 mt-0.5 shrink-0" />
       <div className="text-left text-sm flex-1 min-w-0">
         <p className="text-[10px] uppercase tracking-wider text-red-500/70 font-medium">
@@ -603,6 +655,33 @@ const ErrorBox = memo(function ErrorBox({
             </p>
           </details>
         )}
+        {/* ── Error report copy: raw message + build/platform context in one
+            tap, so a user can report the failure without typing anything. */}
+        <button
+          type="button"
+          onClick={copyErrorReport}
+          className="mt-2.5 inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-red-300/50 bg-white/60 px-2.5 py-1.5 text-[11px] font-medium text-red-600 transition-colors hover:bg-red-100 dark:border-red-700/40 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/30"
+          aria-label={
+            lang === "tr" ? "Hata detayını panoya kopyala" : "Copy error details"
+          }
+        >
+          {copied === "ok" ? (
+            <Check className="h-3.5 w-3.5" />
+          ) : (
+            <Copy className="h-3.5 w-3.5" />
+          )}
+          {copied === "ok"
+            ? lang === "tr"
+              ? "Kopyalandı"
+              : "Copied"
+            : copied === "fail"
+              ? lang === "tr"
+                ? "Kopyalanamadı — teknik detayı elle seç"
+                : "Copy failed — select the detail manually"
+              : lang === "tr"
+                ? "Hata detayını kopyala"
+                : "Copy error details"}
+        </button>
       </div>
     </div>
   );
@@ -684,17 +763,33 @@ async function resolveWithHttpEngine(
   const requestedQuality = quality === "max" ? "1080" : quality;
 
   if (engine === "cobalt") {
-    const res = await resolveWithCobalt({
-      instance: cfg.instance,
-      token: cfg.token || undefined,
-      url: pageUrl,
-      audioOnly: opts.audioOnly,
-      mode: opts.mode,
-      precise: opts.precise,
-    });
-    return res.ok
-      ? { ok: true, info: infoFromCobalt(pageUrl, res, { audioOnly: opts.audioOnly, requestedQuality }) }
-      : { ok: false, message: res.message };
+    // The user's own instance goes first, then the built-in fallbacks (see
+    // DEFAULT_COBALT_INSTANCES): in a browser build this is the ONLY
+    // resolver, so one dead community instance must not end the road. The
+    // private API token is only ever sent to the address the user configured
+    // themselves — never to a built-in third-party instance.
+    let lastMessage = "No reachable Cobalt instance.";
+    for (const instance of cobaltInstances(cfg)) {
+      const res = await resolveWithCobalt({
+        instance,
+        token: instance === cfg.instance ? cfg.token || undefined : undefined,
+        url: pageUrl,
+        audioOnly: opts.audioOnly,
+        mode: opts.mode,
+        precise: opts.precise,
+      });
+      if (res.ok) {
+        return {
+          ok: true,
+          info: infoFromCobalt(pageUrl, res, {
+            audioOnly: opts.audioOnly,
+            requestedQuality,
+          }),
+        };
+      }
+      lastMessage = res.message;
+    }
+    return { ok: false, message: lastMessage };
   }
 
   const serverOpts = { audioOnly: opts.audioOnly, requestedQuality };
@@ -1307,7 +1402,12 @@ export default function DownloaderCard({
   const [handoffApp, setHandoffApp] = useState<HandoffEngine | null>(null);
 
   // ── Clipboard Monitor ──
-  const { lastUrl: clipboardUrl, clearLastUrl } = useClipboardMonitor({
+  const {
+    lastUrl: clipboardUrl,
+    clearLastUrl,
+    checkNow: checkClipboardNow,
+    permissionDenied: clipboardDenied,
+  } = useClipboardMonitor({
     enabled: settings.clipboardMonitor,
     interval: 2000,
     cooldown: 30_000,
@@ -1316,6 +1416,26 @@ export default function DownloaderCard({
       setUrl(url.url);
     },
   });
+  // Session-level hide for the clipboard-permission hint (the X), so a
+  // user who chose "Block" is not nagged on every render.
+  const [clipboardHintHidden, setClipboardHintHidden] = useState(false);
+
+  // ── Offline state — empty/error screen for "internet yok" ────
+  // Analysis and downloads need the network; settings and history do not.
+  // Saying so up front beats a generic failure after the user hits Analyze.
+  const [isOffline, setIsOffline] = useState(
+    typeof navigator !== "undefined" && navigator.onLine === false,
+  );
+  useEffect(() => {
+    const goOffline = () => setIsOffline(true);
+    const goOnline = () => setIsOffline(false);
+    window.addEventListener("offline", goOffline);
+    window.addEventListener("online", goOnline);
+    return () => {
+      window.removeEventListener("offline", goOffline);
+      window.removeEventListener("online", goOnline);
+    };
+  }, []);
 
   const [downloadLocation, setDownloadLocation] = useState<DownloadLocation | null>(null);
   const [pickingFolder, setPickingFolder] = useState(false);
@@ -1470,6 +1590,24 @@ export default function DownloaderCard({
           formatId: selector,
           isPlaylist: false,
           fragments,
+          // Live per-row progress: without this the multi-link panel sat at
+          // 0% for the whole download and looked frozen/stopped. Never moves
+          // backwards (a restarted engine tick reports 0 again).
+          onProgress: (p) => {
+            const incoming = Math.min(100, Math.max(0, p.percent ?? 0));
+            setQueueItems((prev) =>
+              prev.map((row) =>
+                row.id === item.id && row.status === "downloading"
+                  ? {
+                      ...row,
+                      percent: Math.max(row.percent, incoming),
+                      speed: p.speed || row.speed,
+                      eta: p.eta || row.eta,
+                    }
+                  : row,
+              ),
+            );
+          },
         });
       },
       {
@@ -1564,14 +1702,24 @@ export default function DownloaderCard({
 
   /**
    * Arms the stall watchdog: if the bar has been frozen for
-   * [STALLED_DOWNLOAD_MS] while the page still claims to be downloading, stop
-   * claiming to be downloading.
+   * [STALLED_DOWNLOAD_MS] while the page still claims to be downloading, ask
+   * the ENGINE what actually happened instead of guessing.
    *
    * This watches FROZEN PROGRESS, not elapsed time. A flat 120 s timer used to
    * live here, which is well inside a normal download: a 200 MB video on a
    * phone connection runs for many minutes, so the card flipped to "complete"
    * and then back to "loaded" while the file was still arriving. Only step in
    * when the bar has been silent AND no completion event arrived.
+   *
+   * Frozen, though, does NOT mean finished. A stall-restart (the native
+   * watchdog kills a wedged yt-dlp and WorkManager resumes the `.part` file)
+   * and an ffmpeg merge are both silent for a long while while the job is
+   * perfectly alive — and the old body declared "complete" right through
+   * them, which is exactly the "the download suddenly stopped" report. The
+   * watchdog now reconciles with getActiveDownload(): a live job keeps the
+   * progress screen, a failed job surfaces its real error with a retry, and
+   * only an engine that reports nothing left gets the old last-resort
+   * "complete" (the Windows EXE cannot be asked at all).
    *
    * Shared by the normal start path and by the re-attach path, so a download
    * adopted on mount is guarded exactly like one this card started.
@@ -1585,15 +1733,47 @@ export default function DownloaderCard({
 
   const startStallWatchdog = useCallback(() => {
     if (safetyTimerRef.current !== null) clearInterval(safetyTimerRef.current);
+    // One engine query at a time — the reconcile below is async and the
+    // interval keeps firing while the bar is frozen.
+    let checking = false;
     safetyTimerRef.current = setInterval(() => {
       if (stateRef.current !== "downloading") {
         stopStallWatchdog();
         return;
       }
-      if (Date.now() - lastProgressAtRef.current > STALLED_DOWNLOAD_MS) {
+      if (!(Date.now() - lastProgressAtRef.current > STALLED_DOWNLOAD_MS)) return;
+      if (checking) return;
+      checking = true;
+      void (async () => {
+        let snapshot: ActiveDownload | null = null;
+        try {
+          snapshot = await getActiveDownload();
+        } catch {
+          snapshot = null;
+        }
+        checking = false;
+        // The page may have moved on while we were asking (completion event,
+        // cancel, a new download).
+        if (stateRef.current !== "downloading") return;
+        if (snapshot?.active) {
+          // The job is alive (stall-restart in flight / merging) — give it
+          // another window and keep watching instead of lying to the user.
+          lastProgressAtRef.current = Date.now();
+          return;
+        }
         stopStallWatchdog();
+        if (snapshot?.error) {
+          // The engine gave up (e.g. it stalled one time too many): show the
+          // real failure, with a retry, instead of a fake success.
+          setErrorMsg(snapshot.error);
+          setErrorPhase("download");
+          updateState("error");
+          return;
+        }
+        // No job left — or the engine cannot be asked (Windows EXE): the
+        // completion event was very likely lost, so declare it done.
         updateState("complete");
-      }
+      })();
     }, 5000);
   }, [updateState, stopStallWatchdog]);
 
@@ -1658,6 +1838,7 @@ export default function DownloaderCard({
             fileName: progress.fileName ?? prev.fileName,
           }));
           if (progress.percent >= 100) updateState("complete");
+          else if (stateRef.current === "complete") updateState("downloading");
         },
         onComplete: async (completed) => {
           workIdRef.current = null;
@@ -1794,6 +1975,11 @@ export default function DownloaderCard({
         setSelectedFormat("");
         setPlaylistSummary(null);
         setHandoffApp(null);
+        // A single-link analysis must never hide behind a stale multi-link
+        // queue: while the queue panel is open it is the ONLY screen, so a
+        // history "download again" tap (or the clipboard card's İndir) looked
+        // like nothing happened.
+        clearQueueList();
         // Sync the playlist preset with the selected mode chip so the
         // auto-download below and PlaylistPanel's quality row agree.
         setPlaylistQuality(
@@ -1938,7 +2124,7 @@ export default function DownloaderCard({
         updateState("error");
       }
     },
-    [updateState, videoQuality, preciseQuality, helpLang, nativeAvailable],
+    [updateState, videoQuality, preciseQuality, helpLang, nativeAvailable, clearQueueList],
   );
 
   const handleAnalyze = useCallback(() => runAnalyze(url), [url, runAnalyze]);
@@ -2028,6 +2214,12 @@ export default function DownloaderCard({
     const workId = await startDownload({
       url: directUrl || cleanUrl,
       formatId: formatSpec,
+      // A cobalt/server resolution hands us the REAL media URL. On Android /
+      // Windows the native engine still downloads it; in a browser build it
+      // is what makes downloading possible at all — the page hands the URL
+      // to the browser's own download manager.
+      directMedia: !!directUrl && !nativeAvailable,
+      fileName: videoInfo?.title,
       fragments,
       onProgress: (progress) => {
         // Liveness marker for the stall watchdog below — every tick counts,
@@ -2036,6 +2228,11 @@ export default function DownloaderCard({
         // Auto-complete when we hit 100%
         if (progress.percent >= 100) {
           updateState("complete");
+        } else if (stateRef.current === "complete") {
+          // Progress is flowing again after the watchdog's last-resort
+          // "complete" — the job is objectively still running, so bring the
+          // progress screen back instead of sitting on a false success.
+          updateState("downloading");
         }
         // Throttled progress: skip ticks that don't move the visible
         // percentage and cap updates to ~5/sec. Each progress event
@@ -2130,7 +2327,7 @@ export default function DownloaderCard({
       setErrorPhase("download");
       updateState("error");
     }
-  }, [url, selectedFormat, videoInfo, updateState, refreshHistory, helpLang, startStallWatchdog, fragments, autoCleanup]);
+  }, [url, selectedFormat, videoInfo, updateState, refreshHistory, helpLang, startStallWatchdog, fragments, autoCleanup, nativeAvailable]);
 
   // ─── Playlist download (all videos at once) ───────────────────────
   const handleDownloadPlaylist = useCallback(async () => {
@@ -2198,6 +2395,9 @@ export default function DownloaderCard({
           progress.percent >= 100
         ) {
           updateState("complete");
+        } else if (stateRef.current === "complete") {
+          // Same restore as the single-video path: ticks mean the job lives.
+          updateState("downloading");
         }
         // Throttled progress — same reasoning as handleDownload.
         setDownloadProgress((prev) => {
@@ -2338,6 +2538,7 @@ export default function DownloaderCard({
           fragments,
           onProgress: (progress) => {
             if (progress.percent >= 100) updateState("complete");
+            else if (stateRef.current === "complete") updateState("downloading");
             setDownloadProgress((prev) => {
               const next = {
                 // Monotonic — a stall-restart must not snap the bar to 0.
@@ -2539,7 +2740,29 @@ export default function DownloaderCard({
     if (selectedFormatMeta?.filesize) {
       return { totalBytes: selectedFormatMeta.filesize, sizeExact: true };
     }
-    const duration = videoInfo?.duration;
+    const duration = videoInfo?.duration ?? null;
+    // Derive from the video's REAL streams — the same format cards the user
+    // can see — whenever the engine reported enough data. The old flat
+    // MB-per-minute tables guessed "~180 MB" for a 1080p chip while the
+    // format card next to it read "360 MB", which looked broken.
+    if (grouped) {
+      const capHeight =
+        preciseQuality !== "auto"
+          ? preciseQuality
+          : (DOWNLOAD_MODES.find((m) => m.id === videoQuality)?.maxHeight ??
+            null);
+      const real = estimateSelectionBytes(
+        [...grouped.video, ...grouped.audioOnly] as QualityFormatLike[],
+        {
+          audioOnly: videoQuality === "audio",
+          maxHeight: capHeight,
+          durationSeconds: duration,
+        },
+      );
+      if (real && real.bytes > 0) {
+        return { totalBytes: real.bytes, sizeExact: real.exact };
+      }
+    }
     if (!duration || duration <= 0) {
       return { totalBytes: null, sizeExact: false };
     }
@@ -2553,7 +2776,28 @@ export default function DownloaderCard({
       totalBytes: Math.round((duration / 60) * mbPerMinute) * 1024 * 1024,
       sizeExact: false,
     };
-  }, [selectedFormatMeta, videoInfo, videoQuality, preciseQuality]);
+  }, [selectedFormatMeta, videoInfo, grouped, videoQuality, preciseQuality]);
+
+  // Per-chip size estimates for the quality row, from the SAME real-stream
+  // helper as the download button — a chip and the button can never show
+  // different numbers for the same pick.
+  const chipSizes = useMemo(() => {
+    const map = new Map<number, string>();
+    if (!grouped || !videoInfo?.duration) return map;
+    const pool = [...grouped.video, ...grouped.audioOnly] as QualityFormatLike[];
+    for (const opt of qualityOptions) {
+      if (opt.height === null) continue;
+      const size = estimateSelectionBytes(pool, {
+        maxHeight: opt.height,
+        durationSeconds: videoInfo.duration,
+      });
+      if (size && size.bytes > 0) {
+        const mb = Math.round(size.bytes / (1024 * 1024));
+        map.set(opt.height, size.exact ? `${mb} MB` : `~${mb} MB`);
+      }
+    }
+    return map;
+  }, [grouped, videoInfo, qualityOptions]);
 
   // Live "downloaded / total" during the download itself. The native bridge
   // reports percent/speed/eta but not byte counts, so the downloaded amount is
@@ -2583,14 +2827,91 @@ export default function DownloaderCard({
             <CheckCircle2 className="h-5 w-5 text-emerald-500 mt-0.5 shrink-0" />
             <div className="text-left text-sm">
               <p className="font-medium text-emerald-800 dark:text-emerald-300">
-                No server. No API key. Unlimited.
+                {nativeAvailable
+                  ? "No server. No API key. Unlimited."
+                  : helpLang === "tr"
+                    ? "Tarayıcıda da indirme çalışır"
+                    : "Downloads work in the browser too"}
               </p>
               <p className="text-emerald-600 dark:text-emerald-400/80 mt-0.5">
-                The download engine runs entirely on your device — the Android app
-                and the Windows app both have it built in.
+                {nativeAvailable
+                  ? "The download engine runs entirely on your device — the Android app and the Windows app both have it built in."
+                  : helpLang === "tr"
+                    ? "Bağlantı Cobalt motoruyla çözülür ve dosyayı tarayıcın kaydeder. APK / EXE sürümünde indirme tamamen cihazında, kalite seçimiyle yapar."
+                    : "The link is resolved through the Cobalt engine and your browser saves the file. In the APK / EXE the download runs entirely on your device, with quality picks."}
               </p>
             </div>
           </div>
+
+          {/* ── Empty state: offline (internet yok) ──
+              role=status + aria-live so screen readers announce the state
+              change without stealing focus mid-typing. */}
+          {isOffline && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="flex items-start gap-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/25 border border-amber-300/50 dark:border-amber-700/40"
+            >
+              <WifiOff className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+              <div className="text-left text-sm">
+                <p className="font-medium text-amber-800 dark:text-amber-300">
+                  {helpLang === "tr"
+                    ? "İnternet bağlantısı yok"
+                    : "No internet connection"}
+                </p>
+                <p className="text-amber-700 dark:text-amber-400/80 mt-0.5 text-xs leading-relaxed">
+                  {helpLang === "tr"
+                    ? "Analiz ve indirme bağlantı geri gelene kadar beklemeli. Ayarlar, geçmiş ve indirilen dosyalar çevrimdışı da çalışır."
+                    : "Analysis and downloads must wait until the connection is back. Settings, history and saved files all work offline."}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* ── Empty state: clipboard permission denied ──
+              The monitor fails silently every 2 s without this, which reads
+              to the user as "the feature is broken". The button re-requests
+              read access from a real user gesture, which is the only moment
+              a browser will prompt. */}
+          {settings.clipboardMonitor &&
+            clipboardDenied &&
+            !clipboardHintHidden && (
+              <div className="flex items-start gap-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/25 border border-amber-300/50 dark:border-amber-700/40">
+                <ClipboardPaste className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                <div className="min-w-0 flex-1 text-left text-sm">
+                  <p className="font-medium text-amber-800 dark:text-amber-300">
+                    {helpLang === "tr"
+                      ? "Pano izni verilmedi"
+                      : "Clipboard permission denied"}
+                  </p>
+                  <p className="text-amber-700 dark:text-amber-400/80 mt-0.5 text-xs leading-relaxed">
+                    {helpLang === "tr"
+                      ? "Kopyalanan video linkleri otomatik yakalanamıyor. İzin ver'e basıp tarayıcı isteğini onaylayın; linki elle yapıştırabilirsiniz."
+                      : "Copied video links can't be detected automatically. Tap Grant permission and accept the browser prompt — or paste the link manually."}
+                  </p>
+                </div>
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 gap-1 text-[11px]"
+                    onClick={() => void checkClipboardNow()}
+                  >
+                    {helpLang === "tr" ? "İzin ver" : "Grant permission"}
+                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => setClipboardHintHidden(true)}
+                    className="rounded p-0.5 text-amber-600/70 hover:text-amber-700 transition-colors cursor-pointer"
+                    aria-label={
+                      helpLang === "tr" ? "Bu uyarıyı gizle" : "Hide this hint"
+                    }
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
 
           {/* URL Input */}
           <div className="flex items-center gap-2">
@@ -2617,6 +2938,10 @@ export default function DownloaderCard({
                     setVideoInfo(null);
                     setErrorMsg("");
                   }}
+                  aria-label={
+                    helpLang === "tr" ? "Bağlantıyı temizle" : "Clear URL"
+                  }
+                  title={helpLang === "tr" ? "Temizle" : "Clear"}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                 >
                   <X className="h-4 w-4" />
@@ -2712,7 +3037,6 @@ export default function DownloaderCard({
                               : "border-border/30 bg-background hover:border-border/60 hover:bg-muted/60",
                           )}
                         >
-                          <span className="text-lg leading-none">{m.emoji}</span>
                           <span
                             className={cn(
                               "text-xs font-bold",
@@ -2741,8 +3065,8 @@ export default function DownloaderCard({
                   {videoQuality === "audio" && (
                     <p className="mt-1 text-center text-[10px] text-muted-foreground/60">
                       {helpLang === "tr"
-                        ? "🎧 Ses modu: dosya .m4a olarak iner — her oynatıcıda açılır"
-                        : "🎧 Audio mode: saved as .m4a — plays everywhere"}
+                        ? "Ses modu: dosya .m4a olarak iner — her oynatıcıda açılır"
+                        : "Audio mode: saved as .m4a — plays everywhere"}
                     </p>
                   )}
                 </div>
@@ -3122,7 +3446,22 @@ export default function DownloaderCard({
                                           : "border-border/40 bg-background text-foreground hover:border-border/70 hover:bg-muted/50",
                                       )}
                                     >
-                                      {opt.label}
+                                      <span className="inline-flex items-baseline gap-1.5">
+                                        {opt.label}
+                                        {opt.height !== null &&
+                                          chipSizes.get(opt.height) && (
+                                            <span
+                                              className={cn(
+                                                "text-[10px] font-medium",
+                                                active
+                                                  ? "text-primary/70"
+                                                  : "text-muted-foreground/60",
+                                              )}
+                                            >
+                                              {chipSizes.get(opt.height)}
+                                            </span>
+                                          )}
+                                      </span>
                                     </button>
                                   );
                                 })}
@@ -3377,6 +3716,12 @@ export default function DownloaderCard({
                             : ""}
                         </strong>
                       </>
+                    ) : !nativeAvailable ? (
+                      <>
+                        {helpLang === "tr"
+                          ? "Tarayıcının indirme panelinden indirmeyi takip edebilirsin."
+                          : "Track the download in your browser's downloads panel."}
+                      </>
                     ) : (
                       <>
                         Video saved to <strong>Download/VidFetch</strong>
@@ -3388,7 +3733,19 @@ export default function DownloaderCard({
                   {lastCompleted?.uri && (
                     <Button
                       onClick={() => {
-                        if (lastCompleted?.uri) openFile(lastCompleted.uri);
+                        if (!lastCompleted?.uri) return;
+                        // Outside the native apps openFile is a no-op (the
+                        // file lives wherever the browser saved it), so
+                        // reopen the served URL instead of a dead button.
+                        if (nativeAvailable) {
+                          openFile(lastCompleted.uri);
+                        } else {
+                          window.open(
+                            lastCompleted.uri,
+                            "_blank",
+                            "noopener,noreferrer",
+                          );
+                        }
                       }}
                       variant="default"
                       className="flex-1 gap-2 active:scale-[0.97]"
@@ -3479,9 +3836,13 @@ export default function DownloaderCard({
       {/* Clipboard Monitor Notification */}
       <ClipboardNotification
         url={clipboardUrl}
-        onDownload={(url) => {
-          setUrl(url);
+        onDownload={(detected) => {
           clearLastUrl();
+          // Filling the input was not enough: whenever the card sat on any
+          // other screen (loaded / downloading / complete / …) nothing
+          // visibly happened, so the notification's İndir looked broken.
+          // The button promises a download — start the analysis.
+          void runAnalyze(detected);
         }}
         onDismiss={clearLastUrl}
       />

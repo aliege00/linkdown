@@ -32,8 +32,8 @@ const RELEASES_URL = "https://github.com/aliege00/linkdown/releases";
 
 const T = {
   tr: {
-    title: "İndirme, uygulamada çalışır",
-    body: "Tarayıcıda indirme motoru yoktur; motor Android ve Windows uygulamalarının içine gömülüdür. Uygulamayı alın, bağlantıyı oraya yapıştırın.",
+    title: "Bu link tarayıcıda çözülemedi",
+    body: "Tarayıcı desteği Cobalt motoruna bağlıdır ve her sitede çalışmayabilir. Android ve Windows uygulamalarında indirme motoru tamamen cihazınızdadır — uygulamayı alıp bağlantıyı oraya yapıştırın.",
     apk: "Android APK indir",
     exe: "Windows EXE indir",
     qrTitle: "Telefona taşı",
@@ -51,8 +51,8 @@ const T = {
     allReleases: "Tüm sürümler",
   },
   en: {
-    title: "Downloading works in the app",
-    body: "There is no download engine in the browser; it is embedded in the Android and Windows apps. Get the app, then paste the link there.",
+    title: "This link could not be resolved in the browser",
+    body: "Browser support relies on the Cobalt engine and does not work on every site. In the Android and Windows apps the engine runs entirely on your device — get the app and paste the link there.",
     apk: "Download Android APK",
     exe: "Download Windows EXE",
     qrTitle: "Move to your phone",

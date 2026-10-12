@@ -121,6 +121,42 @@ export function isCobaltConfigured(cfg: EngineConfig = loadEngineConfig()): bool
   return normalizeInstance(cfg.instance).length > 0;
 }
 
+/**
+ * Built-in Cobalt v10 instances, used ONLY as a fallback when the user has
+ * not configured one of their own.
+ *
+ * Why they exist: a plain browser (the hosted site / the Freebuff preview)
+ * has no on-device yt-dlp engine, so without a resolver the dashboard simply
+ * cannot download anything — every link dead-ends at "no engine here". These
+ * entries make the browser build work out of the box; a user-supplied
+ * instance always takes priority, and native builds (APK/EXE) never use them
+ * because the on-device engine is always preferred there.
+ *
+ * Every entry must be a public Cobalt v10 API that answers with
+ * `Access-Control-Allow-Origin: *` (browser builds call it straight from the
+ * page) and whose tunnel responses carry `Content-Disposition: attachment`
+ * (so the browser saves the file instead of playing it).
+ */
+export const DEFAULT_COBALT_INSTANCES = ["https://co.otomir23.me"];
+
+/**
+ * The Cobalt instances to try, IN ORDER: the user's own instance first (when
+ * set), then the built-in fallbacks. Deduplicated and normalized, so a typo
+ * or a stale duplicate can never be dialed twice.
+ */
+export function cobaltInstances(
+  cfg: EngineConfig = loadEngineConfig(),
+): string[] {
+  const out: string[] = [];
+  for (const candidate of [
+    normalizeInstance(cfg.instance),
+    ...DEFAULT_COBALT_INSTANCES,
+  ]) {
+    if (candidate && !out.includes(candidate)) out.push(candidate);
+  }
+  return out;
+}
+
 /** Load the saved engine config (never throws; storage may be unavailable). */
 export function loadEngineConfig(): EngineConfig {
   try {
@@ -228,9 +264,26 @@ export function planEngines(url: string, opts: PlanOptions): EngineAttempt[] {
   // reason to call a remote resolver for a URL another app will fetch.
   if (opts.handoff) return ["ondevice"];
 
-  // No native engine (plain browser): nothing can download to disk, and the
-  // on-device path also owns the optional server fallback + "no engine" copy.
-  if (!native) return ["ondevice"];
+  // No native engine (plain browser): there is no local yt-dlp, so the only
+  // resolver that can answer is Cobalt — the page then hands the resolved
+  // file to the browser's own download manager (see startDownload's
+  // directMedia path). "ondevice" stays last in the plan because it owns the
+  // optional self-hosted yt-dlp server fallback plus the honest "no engine
+  // here" copy. Explicit "ondevice" mode still means what the user asked.
+  if (!native) {
+    if (mode === "ondevice") return ["ondevice"];
+    // Cobalt has no playlists — leave those to the on-device path.
+    if (isPlaylist) return ["ondevice"];
+    // A configured self-hosted yt-dlp API / Seal server also works in the
+    // browser (the page saves the resolved URL itself), so an explicit choice
+    // is honored first; cobalt stays in the plan as the fallback that needs
+    // no setup at all, and "ondevice" keeps the honest "no engine here" copy.
+    const plan: EngineAttempt[] = [];
+    if (mode === "server" && isServerConfigured()) plan.push("server");
+    if (mode === "seal" && isSealConfigured()) plan.push("seal");
+    plan.push("cobalt", "ondevice");
+    return plan;
+  }
 
   if (mode === "ondevice") return ["ondevice"];
 

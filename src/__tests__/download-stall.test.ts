@@ -508,3 +508,54 @@ describe("on-device app handoff", () => {
     expect(manifest).toContain("android.intent.action.SEND");
   });
 });
+
+// ─── Desktop (Windows EXE) engine parity ─────────────────────────────────
+// The phone and the desktop must fail the same way: resume, don't wedge.
+
+describe("Electron download args", () => {
+  const main = read("electron/main.cjs");
+
+  /** Only the executed args array — comments explaining absent flags are fine. */
+  function downloadArgsBlock(): string {
+    // Anchor on the download's own flags: main.cjs has other `const args = [`
+    // blocks (info probe) that must not be inspected here.
+    const anchor = main.indexOf('"--newline"');
+    expect(anchor, "download args not found in electron/main.cjs").toBeGreaterThan(-1);
+    const start = main.lastIndexOf("const args = [", anchor);
+    expect(start, "args block not found in electron/main.cjs").toBeGreaterThan(-1);
+    const end = main.indexOf("];", start);
+    // Strip line comments: the block documents flags it deliberately omits,
+    // and only EXECUTED content may be asserted (same rule as the Kotlin).
+    return main.slice(start, end).replace(/\/\/.*$/gm, "");
+  }
+
+  it("drops --http-chunk-size here too — the same stall suspect as Android", () => {
+    expect(downloadArgsBlock()).not.toContain("--http-chunk-size");
+  });
+
+  it("carries the same resume-on-dead-connection flags as the phone", () => {
+    const block = downloadArgsBlock();
+    expect(block).toContain('"--socket-timeout", "30"');
+    expect(block).toContain('"--retries", "10"');
+    expect(block).toContain('"--fragment-retries", "10"');
+    expect(block).toContain('"--file-access-retries", "3"');
+    expect(block).toContain('"--retry-sleep", "linear=1::2"');
+  });
+
+  it("plumbs the renderer's speed setting instead of a hard-coded 4", () => {
+    expect(downloadArgsBlock()).toContain(
+      '"--concurrent-fragments", String(fragments)',
+    );
+    expect(main).toContain(
+      '"vidfetch:startDownload", async (_event, { url, formatId, isPlaylist, fragments })',
+    );
+    // Out-of-range / NaN values are clamped to the same 1–16 bounds Android
+    // uses, so an old renderer can never send garbage into yt-dlp.
+    expect(main).toMatch(/Math\.min\(16, Math\.max\(1, n\)\)/);
+    // …and the renderer actually sends the setting.
+    const native = read("src/lib/ytdlp-native.ts");
+    expect(native).toContain(
+      "Desktop.startDownload({ url, formatId, isPlaylist, fragments })",
+    );
+  });
+});

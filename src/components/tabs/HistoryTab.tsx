@@ -99,6 +99,8 @@ export default function HistoryTab() {
                   size="icon"
                   className="size-8 text-muted-foreground transition-colors hover:text-[#6cb4ee]"
                   onClick={() => copyLink(record)}
+                  aria-label={`Bağlantıyı kopyala: ${record.title}`}
+                  title="Bağlantıyı kopyala"
                 >
                   <Copy className="size-4" />
                 </Button>

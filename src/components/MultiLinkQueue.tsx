@@ -14,7 +14,7 @@
 
 import { useMemo } from "react";
 import { motion } from "framer-motion";
-import { AlertCircle, CheckCircle2, Download, ListChecks, Loader2, Square, Trash2 } from "lucide-react";
+import { AlertCircle, Check, CheckCircle2, Download, ListChecks, Loader2, Square, Trash2, X } from "lucide-react";
 
 import type { QueueItem, QueueSummary } from "@/lib/download-queue";
 import type { QualityOption } from "@/lib/quality-options";
@@ -164,16 +164,23 @@ export default function MultiLinkQueue({
                 )}
               </div>
 
-              <span className={cn("shrink-0 text-[11px] tabular-nums", STATUS_STYLES[item.status])}>
-                {item.status === "downloading"
-                  ? `${Math.round(item.percent)}%`
-                  : item.status === "completed"
-                    ? "✓"
-                    : item.status === "failed"
-                      ? "✕"
-                      : item.status === "cancelled"
-                        ? "—"
-                        : ""}
+              <span
+                className={cn(
+                  "shrink-0 flex items-center justify-end",
+                  STATUS_STYLES[item.status],
+                )}
+              >
+                {item.status === "downloading" ? (
+                  <span className="text-[11px] tabular-nums">
+                    {Math.round(item.percent)}%
+                  </span>
+                ) : item.status === "completed" ? (
+                  <Check className="h-3.5 w-3.5" />
+                ) : item.status === "failed" ? (
+                  <X className="h-3.5 w-3.5" />
+                ) : item.status === "cancelled" ? (
+                  <span className="text-[11px]">—</span>
+                ) : null}
               </span>
             </li>
           );

@@ -38,7 +38,6 @@ describe("DOWNLOAD_MODES", () => {
       expect(mode.labelEn.length).toBeGreaterThan(0);
       expect(mode.descTr.length).toBeGreaterThan(0);
       expect(mode.descEn.length).toBeGreaterThan(0);
-      expect(mode.emoji.length).toBeGreaterThan(0);
     }
   });
 });

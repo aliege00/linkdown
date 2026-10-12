@@ -1064,6 +1064,97 @@ class DownloadBridge : Plugin() {
 
     // ── Helpers ────────────────────────────────────────────────────
 
+    // ── Engine updates (yt-dlp) ─────────────────────────────────────
+
+    /**
+     * Reports which yt-dlp build the embedded engine is actually running.
+     *
+     * The library's versionName() is the release tag its updater stored —
+     * null until the FIRST in-app update — so we also run `yt-dlp --version`
+     * against the real binary and prefer that answer. YouTube changes fast;
+     * the settings screen needs the true version to tell the user how stale
+     * their engine is.
+     *
+     * YoutubeDL.init is called here as well: it is idempotent and
+     * synchronized, so when the startup init (running on a background thread
+     * from DownloadApp.onCreate) is still unpacking assets, this call simply
+     * waits for it instead of failing the assertInit() inside execute().
+     */
+    @PluginMethod
+    fun getEngineInfo(call: PluginCall) {
+        val engineErr = ensureEngine()
+        if (engineErr != null) {
+            call.resolve(JSObject().apply {
+                put("available", false)
+                put("version", "")
+                put("detail", engineErr)
+            })
+            return
+        }
+        Thread {
+            try {
+                YoutubeDL.init(context)
+                val stored = runCatching { YoutubeDL.versionName(context) }
+                    .getOrNull() ?: ""
+                val binary = runCatching {
+                    // No URL: --version is handled while parsing options and
+                    // exits before yt-dlp ever looks at the (empty) URL list.
+                    val request = YoutubeDLRequest(emptyList<String>())
+                        .apply { addOption("--version") }
+                    YoutubeDL.execute(request).out.trim()
+                }.getOrDefault("")
+                call.resolve(JSObject().apply {
+                    put("available", true)
+                    put("version", binary.ifBlank { stored })
+                    put("storedVersion", stored)
+                    put("detail", "")
+                })
+            } catch (e: Throwable) {
+                Log.e(TAG, "getEngineInfo failed", e)
+                call.reject(e.message ?: "Failed to read engine version")
+            }
+        }.start()
+    }
+
+    /**
+     * Updates the embedded yt-dlp to the latest STABLE release, in place.
+     *
+     * This is the fix for "YouTube changed and downloads broke": the APK
+     * ships whatever yt-dlp was current at build time, and only a new build
+     * (or this update) can pick up the extractor fixes. The library
+     * downloads the release from the yt-dlp GitHub releases API and swaps
+     * the binary — blocking network + file IO, hence the worker thread.
+     *
+     * @return { success, status: "DONE" | "ALREADY_UP_TO_DATE", version }
+     */
+    @PluginMethod
+    fun updateEngine(call: PluginCall) {
+        val engineErr = ensureEngine()
+        if (engineErr != null) {
+            call.reject(engineErr)
+            return
+        }
+        Thread {
+            try {
+                // Wait out a still-running startup init (see getEngineInfo).
+                YoutubeDL.init(context)
+                val status = YoutubeDL.updateYoutubeDL(
+                    context, YoutubeDL.UpdateChannel.STABLE
+                )
+                val stored = runCatching { YoutubeDL.versionName(context) }
+                    .getOrNull() ?: ""
+                call.resolve(JSObject().apply {
+                    put("success", true)
+                    put("status", status?.name ?: "DONE")
+                    put("version", stored)
+                })
+            } catch (e: Throwable) {
+                Log.e(TAG, "updateEngine failed", e)
+                call.reject(e.message ?: "Engine update failed")
+            }
+        }.start()
+    }
+
     /**
      * Ensures the yt-dlp engine is initialized before an analyze/download.
      *

@@ -3,9 +3,11 @@ import {
   planEngines,
   lastResortEngine,
   cobaltPreferred,
+  cobaltInstances,
   normalizeInstance,
   isCobaltConfigured,
   DEFAULT_ENGINE_CONFIG,
+  DEFAULT_COBALT_INSTANCES,
   type EngineConfig,
 } from "@/lib/engines";
 import {
@@ -76,11 +78,57 @@ describe("cobaltPreferred", () => {
   });
 });
 
+describe("cobaltInstances", () => {
+  it("puts the user's instance first and appends the built-in fallbacks", () => {
+    expect(cobaltInstances(withInstance())).toEqual([
+      "https://cobalt.example",
+      ...DEFAULT_COBALT_INSTANCES,
+    ]);
+  });
+
+  it("falls back to the built-in list when nothing is configured", () => {
+    expect(cobaltInstances(DEFAULT_ENGINE_CONFIG)).toEqual(
+      DEFAULT_COBALT_INSTANCES,
+    );
+    // Never empty: the browser build's only resolver is this list.
+    expect(cobaltInstances().length).toBeGreaterThan(0);
+  });
+
+  it("deduplicates a user instance that repeats a built-in one", () => {
+    expect(
+      cobaltInstances(withInstance({ instance: DEFAULT_COBALT_INSTANCES[0] })),
+    ).toEqual(DEFAULT_COBALT_INSTANCES);
+  });
+});
+
 describe("planEngines", () => {
-  it("stays on-device in a browser (nothing can write to disk)", () => {
+  it("uses cobalt in a browser, with on-device kept as the honest fallback", () => {
+    // A plain browser has no local engine: the resolver must be cobalt, and
+    // "ondevice" stays last because it owns the optional self-hosted server
+    // fallback and the "no engine here" copy.
+    expect(
+      planEngines("https://youtube.com/watch?v=1", {
+        isPlaylist: false,
+        mode: "auto",
+        native: false,
+      }),
+    ).toEqual(["cobalt", "ondevice"]);
+  });
+
+  it("honors an explicit on-device choice in a browser too", () => {
     expect(
       planEngines("https://tiktok.com/x", {
         isPlaylist: false,
+        mode: "ondevice",
+        native: false,
+      }),
+    ).toEqual(["ondevice"]);
+  });
+
+  it("keeps browser playlists on the on-device path (cobalt has none)", () => {
+    expect(
+      planEngines("https://youtube.com/playlist?list=x", {
+        isPlaylist: true,
         mode: "auto",
         native: false,
       }),

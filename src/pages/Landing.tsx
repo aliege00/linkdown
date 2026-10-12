@@ -232,11 +232,12 @@ export default function Landing() {
                 </span>
               ) : (
                 <span>
-                  Tarayıcıda indirme motoru yok — Android APK / Windows EXE
-                  sürümünü indir.
+                  Tarayıcıda indirme Cobalt ile çalışır — Android APK /
+                  Windows EXE sürümü ek kalite seçenekleri sunar.
                   {" "}
                   <span className="text-muted-foreground/70">
-                    There is no engine in the browser; get the app.
+                    Browser downloads run through Cobalt; the app adds quality
+                    picks and playlists.
                   </span>
                 </span>
               )}

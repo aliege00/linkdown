@@ -144,3 +144,157 @@ describe("explainError — scenario matrix", () => {
     expect(e.title).toBe("YouTube bot check");
   });
 });
+
+describe("sanitizeRawError — additional edge cases", () => {
+  it("strips stacked extractor + postprocessor tags", () => {
+    expect(sanitizeRawError("ERROR: [youtube] [ffmpeg] Merge failed")).toBe(
+      "Merge failed"
+    );
+  });
+
+  it("keeps only the first meaningful line of a multi-line dump", () => {
+    const out = sanitizeRawError(
+      "ERROR: [generic] first line\nTraceback (most recent call last):\n  File \"x.py\", line 1",
+    );
+    expect(out).toBe("first line");
+    expect(out).not.toContain("Traceback");
+  });
+
+  it("drops yt-dlp option deprecation warnings (warning: … deprecated)", () => {
+    const out = sanitizeRawError(
+      "Warning: The option --force-ipv4 is deprecated\nERROR: [generic] keep me",
+    );
+    expect(out).toBe("keep me");
+  });
+
+  it("leaves a plain message without tags untouched", () => {
+    expect(sanitizeRawError("Network is unreachable")).toBe(
+      "Network is unreachable"
+    );
+  });
+});
+
+describe("explainError — remaining categories", () => {
+  it("classifies a missing engine (browser preview) as no-engine", () => {
+    const e = explainError(
+      "No download engine available in this preview. Install the Android APK or Windows EXE — no server needed.",
+      "en",
+    );
+    expect(e.category).toBe("no-engine");
+    expect(e.steps.join(" ")).toMatch(/APK/i);
+  });
+
+  it("classifies a suspiciously small file as corrupt-file", () => {
+    const e = explainError(
+      "The downloaded file is suspiciously small (812 bytes).",
+      "en",
+    );
+    expect(e.category).toBe("corrupt-file");
+  });
+
+  it("classifies a broken stream merge as merge-failed (not ffmpeg)", () => {
+    const e = explainError(
+      "The download finished but video and audio streams couldn't be merged properly.",
+      "en",
+    );
+    expect(e.category).toBe("merge-failed");
+  });
+
+  it("classifies an HTML page saved instead of a video as blocked", () => {
+    const e = explainError(
+      "The downloaded file is not a video — it looks like a web page or error response.",
+      "en",
+    );
+    expect(e.category).toBe("blocked");
+  });
+
+  it("keeps ffmpeg ahead of merge-failed when both words appear", () => {
+    expect(
+      explainError("ffmpeg postprocessing failed while merging", "en").category,
+    ).toBe("ffmpeg");
+  });
+
+  it("keeps bot-check ahead of network for HTTP 403", () => {
+    expect(
+      explainError("HTTP Error 403: Forbidden", "en").category,
+    ).toBe("bot-check");
+  });
+
+  it("exposes the sanitized raw error as `technical`", () => {
+    const raw = "ERROR: [youtube] dQw4: Video unavailable\nTraceback…";
+    const e = explainError(raw, "tr");
+    expect(e.technical).toBe(sanitizeRawError(raw));
+    expect(e.technical).toBe("Video unavailable");
+  });
+});
+
+describe("explainError — every category ships usable copy", () => {
+  // One raw message per ErrorCategory; if a category's copy is ever
+  // removed (or a matcher drifts and stops firing), this fails loudly.
+  const MATRIX: Array<[string, string]> = [
+    ["No download engine available in this preview", "no-engine"],
+    ["Sign in to confirm you're not a bot", "bot-check"],
+    ["Unsupported URL: https://x.example", "invalid-url"],
+    ["This video is not available in your country", "geo"],
+    ["This video is private", "private"],
+    ["age-restricted content", "age"],
+    ["getaddrinfo failed", "network"],
+    ["members-only content", "paid"],
+    ["login required to view", "login"],
+    ["ffmpeg postprocessing error", "ffmpeg"],
+    [
+      "the download finished but video and audio streams couldn't be merged properly",
+      "merge-failed",
+    ],
+    ["the downloaded file is suspiciously small (812 bytes)", "corrupt-file"],
+    [
+      "the downloaded file is not a video — it looks like a web page or error response",
+      "blocked",
+    ],
+    ["no entries in playlist", "playlist"],
+    ["kaboom xyzzy", "generic"],
+  ];
+
+  it("covers all 15 categories", () => {
+    expect(MATRIX.map(([, cat]) => cat).sort()).toEqual(
+      [
+        "age",
+        "blocked",
+        "bot-check",
+        "corrupt-file",
+        "ffmpeg",
+        "generic",
+        "geo",
+        "invalid-url",
+        "login",
+        "merge-failed",
+        "network",
+        "no-engine",
+        "paid",
+        "playlist",
+        "private",
+      ].sort(),
+    );
+  });
+
+  for (const [raw, category] of MATRIX) {
+    for (const lang of ["tr", "en"] as const) {
+      it(`${category} → non-empty ${lang} copy with steps`, () => {
+        const e = explainError(raw, lang);
+        expect(e.category).toBe(category);
+        expect(e.title.length).toBeGreaterThan(0);
+        expect(e.message.length).toBeGreaterThan(0);
+        expect(e.steps.length).toBeGreaterThan(0);
+        expect(e.steps.every((s) => s.trim().length > 0)).toBe(true);
+      });
+    }
+  }
+
+  it("Turkish and English copy are actually different languages", () => {
+    const tr = explainError("getaddrinfo failed", "tr");
+    const en = explainError("getaddrinfo failed", "en");
+    expect(tr.title).toBe("İnternet bağlantısı sorunu");
+    expect(en.title).toBe("Internet connection problem");
+    expect(tr.title).not.toBe(en.title);
+  });
+});

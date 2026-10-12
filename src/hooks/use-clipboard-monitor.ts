@@ -76,6 +76,16 @@ export interface UseClipboardMonitorResult {
   checkNow: () => Promise<void>;
   /** Clear the last detected URL. */
   clearLastUrl: () => void;
+  /**
+   * Web only: true when reading the clipboard was denied by the browser
+   * (NotAllowedError) or the async Clipboard API is unavailable (insecure
+   * origin). Native and desktop read the clipboard through their own
+   * bridges, so this stays false there.
+   *
+   * Without this, a denied permission fails silently every 2 s and the user
+   * just sees "clipboard detection never works" with no explanation.
+   */
+  permissionDenied: boolean;
 }
 
 // ── Hook ────────────────────────────────────────────────────────────────────
@@ -92,6 +102,7 @@ export function useClipboardMonitor(
 
   const [lastUrl, setLastUrl] = useState<ClipboardUrl | null>(null);
   const [isMonitoring, setIsMonitoring] = useState(false);
+  const [permissionDenied, setPermissionDenied] = useState(false);
   const lastSeenRef = useRef<Map<string, number>>(new Map());
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -111,10 +122,23 @@ export function useClipboardMonitor(
 
       // Web (Clipboard API — requires permission)
       if (navigator.clipboard?.readText) {
-        return await navigator.clipboard.readText();
+        const text = await navigator.clipboard.readText();
+        setPermissionDenied(false); // granted (again)
+        return text;
       }
-    } catch {
-      // Permission denied, API unavailable, etc.
+
+      // Web without the async Clipboard API (e.g. insecure origin): the
+      // feature cannot work at all — report it like a denial so the UI can
+      // say why instead of failing silently.
+      setPermissionDenied(true);
+    } catch (error) {
+      // Permission denied (NotAllowedError/SecurityError), API unavailable,
+      // etc. Only a denial is surfaced: transient read failures must not
+      // nag the user with a false "permission denied" message.
+      const name = (error as { name?: string } | null)?.name;
+      if (name === "NotAllowedError" || name === "SecurityError") {
+        setPermissionDenied(true);
+      }
     }
     return null;
   }, []);
@@ -201,5 +225,5 @@ export function useClipboardMonitor(
     return () => clearInterval(cleanup);
   }, [cooldown]);
 
-  return { lastUrl, isMonitoring, checkNow, clearLastUrl };
+  return { lastUrl, isMonitoring, checkNow, clearLastUrl, permissionDenied };
 }

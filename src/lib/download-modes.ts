@@ -22,8 +22,6 @@ export interface DownloadMode {
   maxHeight?: number;
   /** Recommended default? (Data Saver — matches the "az veri" ask.) */
   recommended?: boolean;
-  /** Emoji shown on the chip for instant recognition. */
-  emoji: string;
 }
 
 export const DOWNLOAD_MODES: DownloadMode[] = [
@@ -33,7 +31,6 @@ export const DOWNLOAD_MODES: DownloadMode[] = [
     labelEn: "Best",
     descTr: "En iyi kalite — daha çok internet kullanır",
     descEn: "Best quality — uses more data",
-    emoji: "✨",
   },
   {
     id: "data",
@@ -43,7 +40,6 @@ export const DOWNLOAD_MODES: DownloadMode[] = [
     descEn: "Low data — small file, plays offline",
     maxHeight: 480,
     recommended: true,
-    emoji: "📱",
   },
   {
     id: "audio",
@@ -51,7 +47,6 @@ export const DOWNLOAD_MODES: DownloadMode[] = [
     labelEn: "Audio only",
     descTr: "En az internet — müzik/podcast için",
     descEn: "Least data — for music/podcasts",
-    emoji: "🎧",
   },
 ];
 

@@ -323,7 +323,7 @@ function sanitizeName(name) {
   return String(name || "video").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").slice(0, 180);
 }
 
-async function startDownload(url, formatId, isPlaylist) {
+async function startDownload(url, formatId, isPlaylist, fragments) {
   if (!fs.existsSync(YTDLP_EXE)) {
     return { success: false, error: "The download engine (yt-dlp) is missing from this EXE build." };
   }
@@ -341,14 +341,24 @@ async function startDownload(url, formatId, isPlaylist) {
     "--newline",
     "--progress",
     "--no-warnings",
-    // ── Download speed ──────────────────────────────────────────────
+    // ── Download speed + resilience (mirrors the Android worker) ────
     // The MP4 selector merges bestvideo+bestaudio, and YouTube serves DASH
-    // media in fragments — parallel fragment fetches plus large HTTP ranges
-    // raise throughput on fast connections significantly. yt-dlp degrades
-    // gracefully for servers that reject range requests, so these are safe
-    // defaults for every site.
-    "--concurrent-fragments", "4",
-    "--http-chunk-size", "10M",
+    // media in fragments — parallel fragment fetches are the one real
+    // throughput lever. The renderer's speed setting (default 16) is clamped
+    // to the same 1–16 bounds the phone uses.
+    "--concurrent-fragments", String(fragments),
+    // `--http-chunk-size` is deliberately NOT here: yt-dlp lists it as an
+    // experimental throttle bypass, and when a CDN mishandles the Range
+    // request the download waits on data that never arrives — the exact
+    // "stuck / frozen" report this build is fixing on Android.
+    //
+    // The timeout + retry flags turn a dead connection into a resume instead
+    // of an indefinite wait — same set the Android worker ships.
+    "--socket-timeout", "30",
+    "--retries", "10",
+    "--fragment-retries", "10",
+    "--file-access-retries", "3",
+    "--retry-sleep", "linear=1::2",
     ...youtubeMitigationArgs(),
   ];
   let outputTemplate;
@@ -523,8 +533,83 @@ ipcMain.handle("vidfetch:getInfo", async (_event, { url, isPlaylist }) => {
   }
 });
 
-ipcMain.handle("vidfetch:startDownload", async (_event, { url, formatId, isPlaylist }) => {
-  return startDownload(url, formatId, !!isPlaylist);
+ipcMain.handle("vidfetch:startDownload", async (_event, { url, formatId, isPlaylist, fragments }) => {
+  // Same 1–16 bounds as the Android worker; invalid/missing values fall
+  // back to the app default so an old renderer can never pass NaN.
+  const n = Number.parseInt(String(fragments), 10);
+  const safeFragments = Number.isFinite(n) ? Math.min(16, Math.max(1, n)) : 16;
+  return startDownload(url, formatId, !!isPlaylist, safeFragments);
+});
+
+// ── Engine version / in-app yt-dlp update ────────────────────────
+// The EXE ships a pinned yt-dlp.exe inside native-tools/. YouTube's
+// extractors change weekly, so the settings screen must be able to report
+// the running version and refresh the binary without shipping a new app
+// release. yt-dlp.exe supports self-update via `-U` (it replaces itself in
+// place, which is exactly what the Android side does via the library).
+
+ipcMain.handle("vidfetch:getEngineInfo", async () => {
+  try {
+    if (!fs.existsSync(YTDLP_EXE)) {
+      return {
+        available: false,
+        version: "",
+        detail: "The download engine (yt-dlp) is missing from this EXE build.",
+      };
+    }
+    const version = (await collectJson(["--version"])).trim();
+    return { available: true, version, storedVersion: version, detail: "" };
+  } catch (e) {
+    return {
+      available: false,
+      version: "",
+      detail: e.message || String(e),
+    };
+  }
+});
+
+ipcMain.handle("vidfetch:updateEngine", async () => {
+  /** Spawn yt-dlp with raw args, resolving combined stdout+stderr. */
+  const run = (args) =>
+    new Promise((resolve, reject) => {
+      const child = spawn(YTDLP_EXE, args, { windowsHide: true });
+      let out = "";
+      child.stdout.on("data", (d) => {
+        if (out.length < 256 * 1024) out += d.toString();
+      });
+      child.stderr.on("data", (d) => {
+        if (out.length < 256 * 1024) out += d.toString();
+      });
+      child.on("error", reject);
+      child.on("close", (code) => {
+        if (code === 0) resolve(out);
+        else reject(new Error(out.trim() || `yt-dlp exited with code ${code}`));
+      });
+    });
+
+  try {
+    if (!fs.existsSync(YTDLP_EXE)) {
+      return {
+        success: false,
+        error: "The download engine (yt-dlp) is missing from this EXE build.",
+      };
+    }
+    const out = await run(["-U"]);
+    const upToDate = /up to date/i.test(out);
+    let version = "";
+    try {
+      version = (await collectJson(["--version"])).trim();
+    } catch {
+      // The post-update version probe is best-effort; -U already succeeded.
+    }
+    return {
+      success: true,
+      status: upToDate ? "ALREADY_UP_TO_DATE" : "DONE",
+      version,
+    };
+  } catch (e) {
+    return { success: false, error: e.message || String(e) };
+  }
 });
 
 ipcMain.handle("vidfetch:cancel", (_event, { token }) => {

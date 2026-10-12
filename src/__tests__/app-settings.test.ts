@@ -299,9 +299,11 @@ describe("engines", () => {
     saveEngineConfig({ ...DEFAULT_ENGINE_CONFIG, serverUrl: "https://ytdlp.example.com" });
     expect(planEngines("https://youtube.com/watch?v=1", { isPlaylist: false, mode: "server", native: true }))
       .toEqual(["server", "ondevice"]);
-    // A browser has no engine that can write to disk.
+    // In a browser the configured server is still honored — the page saves
+    // the resolved URL itself — with cobalt (no setup needed) as the fallback
+    // and on-device last for its "no engine here" copy.
     expect(planEngines("https://youtube.com/watch?v=1", { isPlaylist: false, mode: "server", native: false }))
-      .toEqual(["ondevice"]);
+      .toEqual(["server", "cobalt", "ondevice"]);
   });
 
   it("never rescues a link into an unconfigured engine", () => {

@@ -18,6 +18,8 @@ export interface QualityFormatLike {
   acodec?: string | null;
   height?: number | null;
   filesize?: number | null;
+  /** Total bitrate in kbps, when the engine reports it. */
+  tbr?: number | null;
 }
 
 export interface QualityOption {
@@ -100,4 +102,109 @@ export function buildQualityOptions(
  */
 export function defaultQualityOption(options: QualityOption[]): QualityOption {
   return options.find((o) => o.height !== null) ?? options[0];
+}
+
+// ─── Size estimation from REAL streams ───────────────────────────────────
+
+export interface SelectionSize {
+  bytes: number;
+  /** true → every byte count came from the engine (show without "≈"). */
+  exact: boolean;
+}
+
+/** Audio-only stream? (vcodec missing/"none" with a real audio codec). */
+function isAudioFormat(f: QualityFormatLike): boolean {
+  const v = (f.vcodec || "").toLowerCase();
+  if (v && v !== "none") return false;
+  const res = (f.resolution || "").toLowerCase();
+  if (res.includes("audio")) return true;
+  return !!(f.acodec && f.acodec !== "none");
+}
+
+/** Exact bytes when the engine reported a filesize, else bitrate × duration. */
+function bytesFor(
+  f: QualityFormatLike,
+  durationSeconds: number | null,
+): SelectionSize | null {
+  if (typeof f.filesize === "number" && f.filesize > 0) {
+    return { bytes: f.filesize, exact: true };
+  }
+  const kbps = typeof f.tbr === "number" && f.tbr > 0 ? f.tbr : null;
+  if (kbps && durationSeconds) {
+    return { bytes: Math.round((kbps * 1000 * durationSeconds) / 8), exact: false };
+  }
+  return null;
+}
+
+/** Best audio stream for an estimate — mirrors the m4a-first selector chain. */
+function bestAudio(formats: QualityFormatLike[]): QualityFormatLike | null {
+  const audio = formats.filter(isAudioFormat);
+  return (
+    audio.find((f) => f.ext === "m4a") ??
+    audio.find((f) => f.ext === "mp4") ??
+    audio[0] ??
+    null
+  );
+}
+
+/**
+ * Estimate what the CURRENT selection will download, derived from the video's
+ * REAL format list instead of a fixed MB-per-minute table.
+ *
+ * This is what keeps the numbers on screen honest: the format cards show the
+ * engine's own file sizes, and this function picks the SAME streams those
+ * cards offer — the tallest at or under `maxHeight` (or the audio track in
+ * audio mode) — so the quality chips and the download button can never
+ * disagree with a card by a factor of two.
+ *
+ * Returns null when nothing usable is known (no formats, or no size/bitrate
+ * data and no duration), letting the caller fall back to its coarse table.
+ */
+export function estimateSelectionBytes(
+  formats: QualityFormatLike[],
+  opts: {
+    /** User picked audio-only mode. */
+    audioOnly?: boolean;
+    /** Pinned height cap (the 1080p/720p/480p chips, or a mode's maxHeight). */
+    maxHeight?: number | null;
+    /** Needed only when a stream has no filesize but does have a bitrate. */
+    durationSeconds?: number | null;
+  } = {},
+): SelectionSize | null {
+  const list = (formats ?? []).filter(Boolean);
+  if (list.length === 0) return null;
+  const duration =
+    opts.durationSeconds && opts.durationSeconds > 0 ? opts.durationSeconds : null;
+
+  if (opts.audioOnly) {
+    const pick = bestAudio(list);
+    return pick ? bytesFor(pick, duration) : null;
+  }
+
+  const cap = opts.maxHeight && opts.maxHeight > 0 ? opts.maxHeight : null;
+  const video = list.filter((f) => heightOf(f) !== null && !isAudioFormat(f));
+  // Mirror the selector chain: prefer streams at or under the cap; when none
+  // exists, estimate from the tallest available (that is what the chain
+  // falls through to).
+  const atOrBelow = cap ? video.filter((f) => (heightOf(f) ?? 0) <= cap) : video;
+  const pool = atOrBelow.length > 0 ? atOrBelow : video;
+  if (pool.length === 0) return null;
+
+  let best = pool[0];
+  for (const f of pool) {
+    if ((heightOf(f) ?? 0) > (heightOf(best) ?? 0)) best = f;
+  }
+
+  const size = bytesFor(best, duration);
+  const combined = !!best.acodec && best.acodec !== "none";
+  if (combined || !size) return size;
+
+  // Video-only DASH stream: the real file also needs the best audio track.
+  const audio = bestAudio(list);
+  const audioSize = audio ? bytesFor(audio, duration) : null;
+  if (!audioSize) return size;
+  return {
+    bytes: size.bytes + audioSize.bytes,
+    exact: size.exact && audioSize.exact,
+  };
 }

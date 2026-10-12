@@ -375,11 +375,33 @@ describe("the UI does not declare a download finished while it runs", () => {
     expect(card).toContain("Date.now() - lastProgressAtRef.current > STALLED_DOWNLOAD_MS");
     // Every progress tick marks liveness: the single-video start, the
     // playlist start, and both marks of the re-attach path (adopting a running
-    // download is itself a liveness event, as is each of its ticks).
-    expect(card.split("lastProgressAtRef.current = Date.now();").length - 1).toBe(6);
+    // download is itself a liveness event, as is each of its ticks) — plus
+    // the watchdog's own refresh while the engine reports the job alive.
+    expect(card.split("lastProgressAtRef.current = Date.now();").length - 1).toBe(7);
     // …and the watchdog body exists exactly once, shared by all four paths,
     // so they cannot drift apart.
     expect(card.split("const startStallWatchdog = useCallback(").length - 1).toBe(1);
     expect(card.split("const stopStallWatchdog = useCallback(").length - 1).toBe(1);
+  });
+
+  it("reconciles a frozen bar with the engine instead of declaring victory", () => {
+    // A stalled download is NOT a finished download: the native side may be
+    // restarting yt-dlp (resume) or merging with ffmpeg, both silent. The
+    // watchdog must ask the job state first and only fall back to "complete"
+    // when nothing is left running — this is the fix for "the download
+    // suddenly stops mid-way".
+    expect(card).toContain("snapshot = await getActiveDownload();");
+    expect(card).toContain("if (snapshot?.active) {");
+    expect(card).toContain("if (snapshot?.error) {");
+    expect(card).toContain('updateState("error");');
+    // Progress ticks that arrive after the last-resort "complete" bring the
+    // progress screen back — the UI may never sit on a false success while
+    // bytes are still moving.
+    expect(card).toContain(
+      "else if (stateRef.current === \"complete\") updateState(\"downloading\");",
+    );
+    expect(card).toContain(
+      "else if (stateRef.current === \"complete\") {",
+    );
   });
 });
